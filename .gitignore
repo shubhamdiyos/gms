@@ -1,0 +1,28 @@
+# IntelliJ IDEA
+.idea/
+*.iml
+out/
+*.ipr
+*.iws
+
+# Logs
+*.log
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build outputs
+target/
+build/
+
+# Dependency folders
+.gradle/
+node_modules/
+
+# Environment / Secrets
+*.env
+*.key
+*.pem
+
+/memory-bank/
