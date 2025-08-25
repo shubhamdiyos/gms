@@ -14,4 +14,7 @@ public interface EmployeeService {
     ResponseEntity<EmployeeResponse> update(EmployeeRequest request, Integer updaterEmpId, Integer schoolId);
     ResponseEntity<?> toggleEmployee(Integer id, Boolean isActive, Integer updaterEmpId, Integer schoolId);
     Employee createEmployeeFromRequest(EmployeeRequest request, Employee employee, Integer creatorEmpId, Integer schoolId);
+    
+    // Service-to-service communication method
+    java.util.Optional<Employee> findById(Integer id);
 }

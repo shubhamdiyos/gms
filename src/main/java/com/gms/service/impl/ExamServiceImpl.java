@@ -9,11 +9,7 @@ import com.gms.model.request.ExamSubjectRequest;
 import com.gms.model.response.ExamResponse;
 import com.gms.model.response.ExamSubjectResponse;
 import com.gms.repository.ExamRepository;
-import com.gms.repository.SchoolRepository;
-import com.gms.repository.SubjectRepository;
-import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
-import com.gms.service.ExamService;
+import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -25,29 +21,29 @@ import java.util.stream.Collectors;
 public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implements ExamService {
 
     private final ExamRepository examRepository;
-    private final SchoolRepository schoolRepository;
-    private final SubjectRepository subjectRepository;
-    private final UserRepository userRepository;
+    private final SchoolService schoolService;
+    private final SubjectService subjectService;
+    private final UserService userService;
 
     public ExamServiceImpl(ExamRepository examRepository,
-                          SchoolRepository schoolRepository,
-                          SubjectRepository subjectRepository,
-                          UserRepository userRepository) {
+                          SchoolService schoolService,
+                          SubjectService subjectService,
+                          UserService userService) {
         super(examRepository);
         this.examRepository = examRepository;
-        this.schoolRepository = schoolRepository;
-        this.subjectRepository = subjectRepository;
-        this.userRepository = userRepository;
+        this.schoolService = schoolService;
+        this.subjectService = subjectService;
+        this.userService = userService;
     }
 
     @Override
     public ResponseEntity<ExamResponse> createExam(ExamRequest examRequest, Integer schoolId, Integer empId) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolService.findById(schoolId)
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create exam
@@ -70,7 +66,7 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
             for (ExamSubjectRequest subjectRequest : examRequest.getExamSubjects()) {
                 ExamSubject examSubject = new ExamSubject();
                 examSubject.setExam(exam);
-                examSubject.setSubject(subjectRepository.findById(subjectRequest.getSubjectId())
+                examSubject.setSubject(subjectService.findById(subjectRequest.getSubjectId())
                         .orElseThrow(() -> new EntityNotFoundException("Subject not found")));
                 examSubject.setMaxMarks(subjectRequest.getMaxMarks());
                 examSubject.setPassingMarks(subjectRequest.getPassingMarks());
@@ -101,7 +97,7 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update exam
@@ -135,7 +131,7 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
         exam.setStatus("0");
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         exam.setUpdatedBy(updater);
 

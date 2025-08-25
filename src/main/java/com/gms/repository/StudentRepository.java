@@ -11,4 +11,5 @@ public interface StudentRepository extends JpaRepository<Student, Integer> {
     List<Student> findAllBySchool_Id(Integer schoolId);
     List<Student> findAllBySchool_IdAndStatusNot(Integer schoolId, String status);
     boolean existsBySchool_IdAndStudentId(Integer schoolId, String studentId);
+    List<Student> findByClassroom_IdInAndStatusNot(List<Integer> classroomIds, String status);
 }

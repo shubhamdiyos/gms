@@ -6,10 +6,7 @@ import com.gms.model.entity.User;
 import com.gms.model.request.FeeRequest;
 import com.gms.model.response.FeeResponse;
 import com.gms.repository.FeeRepository;
-import com.gms.repository.SchoolRepository;
-import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
-import com.gms.service.FeeService;
+import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -21,26 +18,26 @@ import java.util.List;
 public class FeeServiceImpl extends AbstractCRUDService<Fee, Integer> implements FeeService {
 
     private final FeeRepository feeRepository;
-    private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final SchoolService schoolService;
+    private final UserService userService;
 
     public FeeServiceImpl(FeeRepository feeRepository,
-                         SchoolRepository schoolRepository,
-                         UserRepository userRepository) {
+                         SchoolService schoolService,
+                         UserService userService) {
         super(feeRepository);
         this.feeRepository = feeRepository;
-        this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.schoolService = schoolService;
+        this.userService = userService;
     }
 
     @Override
     public ResponseEntity<FeeResponse> createFee(FeeRequest request, Integer schoolId, Integer empId) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolService.findById(schoolId)
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create fee
@@ -75,7 +72,7 @@ public class FeeServiceImpl extends AbstractCRUDService<Fee, Integer> implements
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update fee
@@ -106,7 +103,7 @@ public class FeeServiceImpl extends AbstractCRUDService<Fee, Integer> implements
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to ARCHIVED

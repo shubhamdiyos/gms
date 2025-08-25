@@ -6,10 +6,8 @@ import com.gms.model.entity.User;
 import com.gms.model.request.EmployeeRequest;
 import com.gms.model.response.EmployeeResponse;
 import com.gms.repository.EmployeeRepository;
-import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
-import com.gms.service.EmployeeService;
+import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpStatus;
@@ -22,16 +20,16 @@ import org.springframework.transaction.annotation.Transactional;
 public class EmployeeServiceImpl extends AbstractCRUDService<Employee, Integer> implements EmployeeService {
 
     private final EmployeeRepository employeeRepository;
-    private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final SchoolService schoolService;
+    private final UserService userService;
 
     public EmployeeServiceImpl(EmployeeRepository employeeRepository,
-                               SchoolRepository schoolRepository,
-                               UserRepository userRepository) {
+                               SchoolService schoolService,
+                               UserService userService) {
         super(employeeRepository);
         this.employeeRepository = employeeRepository;
-        this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.schoolService = schoolService;
+        this.userService = userService;
     }
 
     @Override
@@ -62,9 +60,9 @@ public class EmployeeServiceImpl extends AbstractCRUDService<Employee, Integer> 
         if (employeeRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Employee email already in use");
         }
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolService.findById(schoolId)
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
-        User creatorUser = userRepository.findByEmployee_Id(creatorEmpId)
+        User creatorUser = userService.findByEmployee_Id(creatorEmpId)
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
         if (creatorUser.getSchool() == null || !creatorUser.getSchool().getId().equals(schoolId)) {
             throw new IllegalArgumentException("Creator does not belong to the target school");
@@ -94,6 +92,12 @@ public class EmployeeServiceImpl extends AbstractCRUDService<Employee, Integer> 
             throw new IllegalArgumentException("Employee does not belong to current school");
         }
         return e;
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public java.util.Optional<Employee> findById(Integer id) {
+        return employeeRepository.findById(id);
     }
 
     @Override

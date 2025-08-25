@@ -7,11 +7,7 @@ import com.gms.model.entity.User;
 import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
 import com.gms.repository.FeePaymentRepository;
-import com.gms.repository.StudentFeeRepository;
-import com.gms.repository.SchoolRepository;
-import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
-import com.gms.service.FeePaymentService;
+import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -24,37 +20,33 @@ import java.util.List;
 public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integer> implements FeePaymentService {
 
     private final FeePaymentRepository feePaymentRepository;
-    private final StudentFeeRepository studentFeeRepository;
-    private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final StudentFeeService studentFeeService;
+    private final SchoolService schoolService;
+    private final UserService userService;
 
     public FeePaymentServiceImpl(FeePaymentRepository feePaymentRepository,
-                                StudentFeeRepository studentFeeRepository,
-                                SchoolRepository schoolRepository,
-                                UserRepository userRepository) {
+                                StudentFeeService studentFeeService,
+                                SchoolService schoolService,
+                                UserService userService) {
         super(feePaymentRepository);
         this.feePaymentRepository = feePaymentRepository;
-        this.studentFeeRepository = studentFeeRepository;
-        this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.studentFeeService = studentFeeService;
+        this.schoolService = schoolService;
+        this.userService = userService;
     }
 
     @Override
     public ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request, Integer schoolId, Integer empId) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolService.findById(schoolId)
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Validate student fee exists and belongs to school
-        StudentFee studentFee = studentFeeRepository.findById(request.getStudentFeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
-        if (!studentFee.getStudent().getSchoolId().equals(schoolId)) {
-            throw new IllegalArgumentException("Student fee does not belong to the specified school");
-        }
+        StudentFee studentFee = studentFeeService.findById(request.getStudentFeeId(), schoolId);
 
         // Create fee payment
         FeePayment feePayment = new FeePayment();
@@ -91,7 +83,7 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update fee payment
@@ -123,7 +115,7 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
@@ -189,7 +181,7 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
             studentFee.setStatus("PARTIAL");
         }
         
-        studentFeeRepository.save(studentFee);
+        studentFeeService.save(studentFee);
     }
 
     private FeePaymentResponse mapToResponse(FeePayment feePayment) {

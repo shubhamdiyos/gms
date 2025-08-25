@@ -13,4 +13,6 @@ public interface ParentRepository extends JpaRepository<Parent, Integer> {
     List<Parent> findByStudentsId(Integer studentId);
     
     Optional<Parent> findByEmail(String email);
+    
+    boolean existsByEmail(String email);
 }
