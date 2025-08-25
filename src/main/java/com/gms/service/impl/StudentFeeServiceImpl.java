@@ -184,6 +184,25 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
     public BigDecimal getTotalOutstandingFeesBySchoolId(Integer schoolId) {
         return studentFeeRepository.getTotalOutstandingFeesBySchoolId(schoolId);
     }
+    
+    // Additional methods for service-to-service communication with multi-tenant support
+    @Override
+    public StudentFee findById(Integer id, Integer schoolId) {
+        StudentFee studentFee = studentFeeRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
+        
+        // Validate tenant isolation
+        if (!studentFee.getStudent().getSchoolId().equals(schoolId)) {
+            throw new IllegalArgumentException("Student fee does not belong to the specified school");
+        }
+        
+        return studentFee;
+    }
+    
+    @Override
+    public StudentFee save(StudentFee studentFee) {
+        return studentFeeRepository.save(studentFee);
+    }
 
     private StudentFeeResponse mapToResponse(StudentFee studentFee) {
         StudentFeeResponse response = new StudentFeeResponse();

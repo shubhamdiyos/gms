@@ -18,4 +18,7 @@ public interface SectionService {
     ResponseEntity<List<Section>> getAllSections(Integer schoolId);
 
     ResponseEntity<Section> getSectionById(Integer id, Integer schoolId);
+    
+    // Service-to-service communication method
+    java.util.Optional<Section> findById(Integer id);
 }

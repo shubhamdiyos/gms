@@ -6,10 +6,8 @@ import com.gms.model.entity.User;
 import com.gms.model.request.AnnouncementRequest;
 import com.gms.model.response.AnnouncementResponse;
 import com.gms.repository.AnnouncementRepository;
-import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
-import com.gms.service.AnnouncementService;
+import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
@@ -21,26 +19,26 @@ import java.util.List;
 public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, Integer> implements AnnouncementService {
 
     private final AnnouncementRepository announcementRepository;
-    private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final SchoolService schoolService;
+    private final UserService userService;
 
     public AnnouncementServiceImpl(AnnouncementRepository announcementRepository,
-                                   SchoolRepository schoolRepository,
-                                   UserRepository userRepository) {
+                                   SchoolService schoolService,
+                                   UserService userService) {
         super(announcementRepository);
         this.announcementRepository = announcementRepository;
-        this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.schoolService = schoolService;
+        this.userService = userService;
     }
 
     @Override
     public ResponseEntity<AnnouncementResponse> createAnnouncement(AnnouncementRequest request, Integer schoolId, Integer empId) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolService.findById(schoolId)
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create announcement
@@ -78,7 +76,7 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update announcement
@@ -113,7 +111,7 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting isPublished to false
@@ -208,7 +206,7 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
         }
 
         // Validate publisher exists
-        User publisher = userRepository.findByEmployee_Id(empId)
+        User publisher = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Publisher user not found"));
 
         // Publish announcement
@@ -233,7 +231,7 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
         }
 
         // Validate unpublisher exists
-        User unpublisher = userRepository.findByEmployee_Id(empId)
+        User unpublisher = userService.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Unpublisher user not found"));
 
         // Unpublish announcement

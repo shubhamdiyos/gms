@@ -6,6 +6,7 @@ import com.gms.model.response.SchoolResponse;
 import org.springframework.http.ResponseEntity;
 
 import java.util.List;
+import java.util.Optional;
 
 public interface SchoolService {
     List<School> findBySchool(Integer schoolId);
@@ -14,4 +15,7 @@ public interface SchoolService {
     ResponseEntity<SchoolResponse> update(SchoolRequest request, Integer empId, Integer schoolId);
     ResponseEntity<?> toggleSchool(Integer id, Boolean isActive, Integer schoolId, Integer empId);
     School createSchoolFromRequest(SchoolRequest request, School school, Integer empId, Integer schoolId);
+    
+    // Base method for service-to-service communication (no tenant validation needed for schools)
+    Optional<School> findById(Integer id);
 }

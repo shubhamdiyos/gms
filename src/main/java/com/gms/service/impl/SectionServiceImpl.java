@@ -154,4 +154,9 @@ public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> im
 
         return ResponseEntity.ok(section);
     }
+
+    @Override
+    public java.util.Optional<Section> findById(Integer id) {
+        return sectionRepository.findById(id);
+    }
 }

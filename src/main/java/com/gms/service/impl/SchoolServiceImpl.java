@@ -27,6 +27,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
+import java.util.Optional;
 
 @Service
 public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> implements SchoolService {
@@ -248,5 +249,11 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
             if (counter > 1000) throw new RuntimeException("No available username found after 1000 attempts");
         }
         return candidate;
+    }
+    
+    // Base method for service-to-service communication
+    @Override
+    public Optional<School> findById(Integer id) {
+        return schoolRepository.findById(id);
     }
 }

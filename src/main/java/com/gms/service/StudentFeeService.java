@@ -7,6 +7,7 @@ import org.springframework.http.ResponseEntity;
 
 import java.math.BigDecimal;
 import java.util.List;
+import java.util.Optional;
 
 public interface StudentFeeService {
 
@@ -27,4 +28,9 @@ public interface StudentFeeService {
     BigDecimal getTotalCollectedFeesBySchoolId(Integer schoolId);
 
     BigDecimal getTotalOutstandingFeesBySchoolId(Integer schoolId);
+    
+    // Additional methods for service-to-service communication with multi-tenant support
+    StudentFee findById(Integer id, Integer schoolId);
+    
+    StudentFee save(StudentFee studentFee);
 }

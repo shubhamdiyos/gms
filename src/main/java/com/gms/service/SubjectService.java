@@ -16,4 +16,7 @@ public interface SubjectService {
     ResponseEntity<?> toggleSubject(Integer id, Boolean isActive, Integer schoolId, Integer empId);
     Subject createSubjectFromRequest(SubjectRequest request, Subject subject, Integer empId, Integer schoolId);
     List<SubjectResponse> findSubjectsForAuthenticatedTeacher();
+    
+    // Service-to-service communication method
+    java.util.Optional<Subject> findById(Integer id);
 }

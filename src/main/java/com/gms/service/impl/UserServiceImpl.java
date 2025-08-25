@@ -5,10 +5,8 @@ import com.gms.model.entity.User;
 import com.gms.exception.NotFoundException;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
-import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
-import com.gms.service.UserService;
+import com.gms.service.*;
 import com.gms.util.PasswordValidator;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
@@ -20,19 +18,20 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Optional;
 
 @Service
 @Transactional
 public class UserServiceImpl extends AbstractCRUDService<User, Integer> implements UserService {
 
     private final UserRepository userRepository;
-    private final SchoolRepository schoolRepository;
+    private final SchoolService schoolService;
     private final PasswordEncoder passwordEncoder;
 
-    public UserServiceImpl(UserRepository repository, UserRepository userRepository, SchoolRepository schoolRepository, PasswordEncoder passwordEncoder) {
-        super(repository);
+    public UserServiceImpl(UserRepository userRepository, SchoolService schoolService, PasswordEncoder passwordEncoder) {
+        super(userRepository);
         this.userRepository = userRepository;
-        this.schoolRepository = schoolRepository;
+        this.schoolService = schoolService;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -61,10 +60,10 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
         }
 
         // Find school and creator user
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolService.findById(schoolId)
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         
-        User creatorUser = userRepository.findByEmployee_Id(empId)
+        User creatorUser = this.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         org.springframework.beans.BeanUtils.copyProperties(request, user, "schoolId");
@@ -104,7 +103,7 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
-        User updaterUser = userRepository.findByEmployee_Id(empId)
+        User updaterUser = this.findByEmployee_Id(empId)
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         org.springframework.beans.BeanUtils.copyProperties(
@@ -144,6 +143,32 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
     @Override
     public List<User> findBySchool(Integer schoolId) {
         return userRepository.findBySchool_Id(schoolId);
+    }
+    
+    // Additional methods needed for service-to-service communication
+    @Override
+    public Optional<User> findByUsername(String username) {
+        return userRepository.findByUsername(username);
+    }
+    
+    @Override
+    public Optional<User> findByEmployee_Id(Integer employeeId) {
+        return userRepository.findByEmployee_Id(employeeId);
+    }
+    
+    @Override
+    public boolean existsByEmail(String email) {
+        return userRepository.existsByEmail(email);
+    }
+    
+    @Override
+    public boolean existsByUsername(String username) {
+        return userRepository.existsByUsername(username);
+    }
+    
+    @Override
+    public User save(User user) {
+        return userRepository.save(user);
     }
     
     private UserResponse mapToResponse(User user) {

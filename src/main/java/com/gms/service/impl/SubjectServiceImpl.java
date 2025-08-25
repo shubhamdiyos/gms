@@ -90,6 +90,12 @@ public class SubjectServiceImpl extends AbstractCRUDService<Subject, Integer> im
     }
 
     @Override
+    @Transactional(readOnly = true)
+    public java.util.Optional<Subject> findById(Integer id) {
+        return subjectRepository.findById(id);
+    }
+
+    @Override
     public ResponseEntity<SubjectResponse> update(SubjectRequest request, Integer empId, Integer schoolId) {
         // For Subject, we need to get the ID from the path parameter, not from request
         // This will be handled by the controller
@@ -161,7 +167,7 @@ public class SubjectServiceImpl extends AbstractCRUDService<Subject, Integer> im
             return Collections.emptyList();
         }
 
-        return teacherAssignmentRepository.findByTeacherId(teacher.getId()).stream()
+        return teacherAssignmentRepository.findByTeacher_Id(teacher.getId()).stream()
                 .map(assignment -> toResponse(assignment.getSubject()))
                 .distinct()
                 .collect(Collectors.toList());
