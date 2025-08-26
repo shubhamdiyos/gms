@@ -18,4 +18,7 @@ public interface SchoolService {
     
     // Base method for service-to-service communication (no tenant validation needed for schools)
     Optional<School> findById(Integer id);
+    
+    // Simple create method for bootstrap and other special cases
+    School create(School school);
 }

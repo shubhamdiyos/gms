@@ -28,6 +28,7 @@ import java.util.List;
 import java.util.Set;
 import java.util.HashSet;
 import java.util.Optional;
+import java.util.Collections;
 
 @Service
 public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> implements SchoolService {
@@ -156,17 +157,28 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
     @Override
     @Transactional(readOnly = true)
     public List<School> findBySchool(Integer schoolId) {
-        return schoolRepository.findByStatus("1");
+        // Fix: Only return the school that belongs to the requesting user's school
+        // Using repository method for better performance
+        return schoolRepository.findByIdAndStatusOne(schoolId)
+                .map(Collections::singletonList)
+                .orElse(Collections.emptyList());
     }
 
     @Override
     @Transactional(readOnly = true)
     public School getById(Integer id, Integer schoolId) {
-        School school = schoolRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("School not found"));
-        if (!school.getId().equals(schoolId) || !"1".equals(school.getStatus()) || !school.isEnabled()) {
-            throw new IllegalArgumentException("School not found or not active");
+        // Fix: Validate that the requested school ID matches the user's school ID
+        if (!id.equals(schoolId)) {
+            throw new IllegalArgumentException("Access denied: You can only access your own school");
         }
+        
+        School school = schoolRepository.findByIdAndStatusOne(id)
+                .orElseThrow(() -> new EntityNotFoundException("School not found or not active"));
+        
+        if (!school.isEnabled()) {
+            throw new IllegalArgumentException("School is not enabled");
+        }
+        
         return school;
     }
 
@@ -176,9 +188,19 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
             return ResponseEntity.badRequest().build();
         }
 
+        // Fix: Validate that the user can only update their own school
         School school = schoolRepository.findBySchoolCode(request.getSchoolCode())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
-        if (!school.getId().equals(schoolId) || !"1".equals(school.getStatus()) || !school.isEnabled()) {
+                
+        if (!school.getId().equals(schoolId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
+        }
+        
+        // Check if school is active using the new repository method
+        School activeSchool = schoolRepository.findByIdAndStatusOne(schoolId)
+                .orElse(null);
+        
+        if (activeSchool == null || !activeSchool.isEnabled()) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -198,12 +220,14 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
 
     @Override
     public ResponseEntity<?> toggleSchool(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
-        School school = schoolRepository.findById(id)
-                .orElseThrow(() -> new EntityNotFoundException("School not found"));
-
-        if (!school.getId().equals(schoolId)) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+        // Fix: Validate that the user can only toggle their own school
+        if (!id.equals(schoolId)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
         }
+        
+        // Check if school exists and is active using the new repository method
+        School school = schoolRepository.findByIdAndStatusOne(id)
+                .orElseThrow(() -> new EntityNotFoundException("School not found or not active"));
 
         school.setEnabled(isActive);
         school.setStatus(isActive ? "1" : "0");
@@ -255,5 +279,11 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
     @Override
     public Optional<School> findById(Integer id) {
         return schoolRepository.findById(id);
+    }
+    
+    // Simple create method for bootstrap and other special cases
+    @Override
+    public School create(School school) {
+        return repository.save(school);
     }
 }

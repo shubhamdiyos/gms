@@ -58,8 +58,21 @@ public class SchoolController extends AbstractCRUDController<School, Integer> {
         return ResponseEntity.ok(list);
     }
 
-    // Remove the conflicting get method since it's already provided by AbstractCRUDController
-    // The AbstractCRUDController already provides a getById method with the same mapping
+    @GetMapping("/{id}")
+    public ResponseEntity<School> getById(@PathVariable Integer id) {
+        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        try {
+            School school = schoolService.getById(id, schoolId);
+            return ResponseEntity.ok(school);
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.status(403).build();
+        } catch (Exception e) {
+            return ResponseEntity.notFound().build();
+        }
+    }
 
     @PatchMapping("/toggle")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
