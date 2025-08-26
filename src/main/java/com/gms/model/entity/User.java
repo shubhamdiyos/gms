@@ -35,7 +35,7 @@ public class User {
 
 
     @JsonIgnore
-    @Column(nullable = false)
+    @Column(nullable = false, length = 100)
     private String password;
 
     @Column(nullable = false)

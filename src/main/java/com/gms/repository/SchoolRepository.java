@@ -23,6 +23,11 @@ public interface SchoolRepository extends JpaRepository<School, Integer> {
     Optional<School> findBySchoolId(String schoolId);
     
     /**
+     * Find school by ID
+     */
+    Optional<School> findById(Integer id);
+    
+    /**
      * Find school by email
      */
     Optional<School> findByEmail(String email);
@@ -51,6 +56,18 @@ public interface SchoolRepository extends JpaRepository<School, Integer> {
      * Find schools by status
      */
     List<School> findByStatus(String status);
+    
+    /**
+     * Find school by ID and status
+     */
+    @Query("SELECT s FROM School s WHERE s.id = :id AND s.status = :status")
+    Optional<School> findByIdAndStatus(@Param("id") Integer id, @Param("status") String status);
+    
+    /**
+     * Find school by ID and status = "1"
+     */
+    @Query("SELECT s FROM School s WHERE s.id = :id AND s.status = '1'")
+    Optional<School> findByIdAndStatusOne(@Param("id") Integer id);
     
     /**
      * Find schools by board affiliation

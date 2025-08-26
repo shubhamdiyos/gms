@@ -31,21 +31,22 @@ public class SecurityConfig {
                     "/swagger-ui/**",
                     "/v3/api-docs/**",
                     "/api/v1/ping",
-                    "/api/v1/auth/**"
+                    "/api/v1/auth/**",
+                    "/api/v1/test/password"
                 ).permitAll()
                 // RBAC rules
-                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/schools").hasRole("SUPERADMIN")
-                .requestMatchers("/api/v1/employees/**").hasAnyRole("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/classes/**", "/api/v1/subjects/**", "/api/v1/students/**").hasAnyRole("ADMIN", "SUPERADMIN")
+                .requestMatchers(org.springframework.http.HttpMethod.POST, "/api/v1/schools").hasAuthority("SUPERADMIN")
+                .requestMatchers("/api/v1/employees/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
+                .requestMatchers("/api/v1/classes/**", "/api/v1/subjects/**", "/api/v1/students/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
                 // Teacher role endpoints
-                .requestMatchers("/api/v1/teachers/profile", "/api/v1/teachers/classes", "/api/v1/teachers/students").hasRole("TEACHER")
-                .requestMatchers("/api/v1/attendance/**", "/api/v1/timetables/**").hasAnyRole("TEACHER", "ADMIN", "SUPERADMIN")
+                .requestMatchers("/api/v1/teachers/profile", "/api/v1/teachers/classes", "/api/v1/teachers/students").hasAuthority("TEACHER")
+                .requestMatchers("/api/v1/attendance/**", "/api/v1/timetables/**").hasAnyAuthority("TEACHER", "ADMIN", "SUPERADMIN")
                 // Student role endpoints
-                .requestMatchers("/api/v1/students/profile", "/api/v1/students/classes", "/api/v1/students/subjects").hasRole("STUDENT")
-                .requestMatchers("/api/v1/attendance/student/**").hasAnyRole("STUDENT", "PARENT")
+                .requestMatchers("/api/v1/students/profile", "/api/v1/students/classes", "/api/v1/students/subjects").hasAuthority("STUDENT")
+                .requestMatchers("/api/v1/attendance/student/**").hasAnyAuthority("STUDENT", "PARENT")
                 // Parent role endpoints
-                .requestMatchers("/api/v1/parents/profile", "/api/v1/parents/children").hasRole("PARENT")
-                .requestMatchers("/api/v1/attendance/parent/**").hasRole("PARENT")
+                .requestMatchers("/api/v1/parents/profile", "/api/v1/parents/children").hasAuthority("PARENT")
+                .requestMatchers("/api/v1/attendance/parent/**").hasAuthority("PARENT")
                 // User profile endpoints
                 .requestMatchers("/api/v1/users/me", "/api/v1/users/me/**").authenticated()
                 .anyRequest().authenticated()
