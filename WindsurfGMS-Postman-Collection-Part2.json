@@ -1,0 +1,523 @@
+{
+	"info": {
+		"_postman_id": "windsurf-gms-collection-part2-2024",
+		"name": "WindsurfGMS API Testing Suite - Part 2",
+		"description": "🎯 Academic, Assessment, Financial & Communication APIs\n\n**This collection covers:**\n- Academic Management (Students, Classes, Subjects)\n- Assessment (Exams, Results, Grading)\n- Financial Management (Fees, Payments)\n- Communication (Announcements, Messages)\n- Attendance & Timetables\n\n**Prerequisites:** Import Part 1 first for authentication setup",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "🎓 Academic Management",
+			"item": [
+				{
+					"name": "📚 Subjects",
+					"item": [
+						{
+							"name": "List Subjects",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/subjects"
+							}
+						},
+						{
+							"name": "Create Subject",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('subject_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"subjectName\": \"Mathematics\",\n    \"subjectCode\": \"MATH101\",\n    \"credits\": 4,\n    \"isActive\": true\n}"
+								},
+								"url": "{{base_url}}/api/v1/subjects"
+							}
+						},
+						{
+							"name": "Get Subject by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/subjects/{{subject_id}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "🏫 Classrooms",
+					"item": [
+						{
+							"name": "List Classrooms",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/classes"
+							}
+						},
+						{
+							"name": "Create Classroom",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('classroom_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"className\": \"Grade 10-A\",\n    \"section\": \"A\",\n    \"capacity\": 40,\n    \"gradeLevel\": 10,\n    \"classTeacherId\": {{employee_id}},\n    \"isActive\": true\n}"
+								},
+								"url": "{{base_url}}/api/v1/classes"
+							}
+						},
+						{
+							"name": "Get Classroom by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/classes/{{classroom_id}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "👨‍🎓 Students",
+					"item": [
+						{
+							"name": "List Students",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/students"
+							}
+						},
+						{
+							"name": "Create Student",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('student_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"firstName\": \"Alice\",\n    \"lastName\": \"Student\",\n    \"email\": \"alice.student{{$randomInt}}@school.edu\",\n    \"phoneNumber\": \"9876543210\",\n    \"dateOfBirth\": \"2008-05-15\",\n    \"gender\": \"FEMALE\",\n    \"address\": \"123 Student Street, City\",\n    \"rollNumber\": \"2024{{$randomInt}}\",\n    \"admissionDate\": \"2024-04-01\",\n    \"classroomId\": {{classroom_id}},\n    \"isActive\": true\n}"
+								},
+								"url": "{{base_url}}/api/v1/students"
+							}
+						},
+						{
+							"name": "Get Student by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/students/{{student_id}}"
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "📝 Assessment Management",
+			"item": [
+				{
+					"name": "📋 Exams",
+					"item": [
+						{
+							"name": "List Exams",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/exams"
+							}
+						},
+						{
+							"name": "Create Exam",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('exam_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"examName\": \"Mid-Term Examination 2024\",\n    \"examType\": \"MID_TERM\",\n    \"startDate\": \"2024-09-15\",\n    \"endDate\": \"2024-09-25\",\n    \"description\": \"Mid-term examination for all subjects\",\n    \"status\": \"SCHEDULED\",\n    \"totalMarks\": 500,\n    \"passingMarks\": 200\n}"
+								},
+								"url": "{{base_url}}/api/v1/exams"
+							}
+						},
+						{
+							"name": "Get Exam by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/exams/{{exam_id}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "🎯 Results",
+					"item": [
+						{
+							"name": "List Results",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/results"
+							}
+						},
+						{
+							"name": "Create Result",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('result_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"studentId\": {{student_id}},\n    \"examId\": {{exam_id}},\n    \"subjectId\": {{subject_id}},\n    \"marksObtained\": 85.5,\n    \"maxMarks\": 100.0,\n    \"grade\": \"A\",\n    \"status\": \"PUBLISHED\",\n    \"remarks\": \"Excellent performance\"\n}"
+								},
+								"url": "{{base_url}}/api/v1/results"
+							}
+						},
+						{
+							"name": "Get Result by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/results/{{result_id}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "📊 Grading Schemes",
+					"item": [
+						{
+							"name": "List Grading Schemes",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/grading-schemes"
+							}
+						},
+						{
+							"name": "Create Grading Scheme",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('grading_scheme_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"schemeName\": \"Standard Grading Scheme\",\n    \"description\": \"Standard A-F grading system\",\n    \"minPercentage\": 0.0,\n    \"maxPercentage\": 100.0,\n    \"passingGrade\": \"D\",\n    \"isActive\": true\n}"
+								},
+								"url": "{{base_url}}/api/v1/grading-schemes"
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "💰 Financial Management",
+			"item": [
+				{
+					"name": "💵 Fees",
+					"item": [
+						{
+							"name": "List Fees",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/fees"
+							}
+						},
+						{
+							"name": "Create Fee",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('fee_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"feeName\": \"Tuition Fee\",\n    \"feeType\": \"TUITION\",\n    \"amount\": 5000.00,\n    \"description\": \"Monthly tuition fee\",\n    \"dueDate\": \"2024-09-05\",\n    \"isActive\": true\n}"
+								},
+								"url": "{{base_url}}/api/v1/fees"
+							}
+						},
+						{
+							"name": "Get Fee by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/fees/{{fee_id}}"
+							}
+						}
+					]
+				},
+				{
+					"name": "💳 Fee Payments",
+					"item": [
+						{
+							"name": "List Fee Payments",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/fee-payments"
+							}
+						},
+						{
+							"name": "Create Fee Payment",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('payment_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"studentId\": {{student_id}},\n    \"feeId\": {{fee_id}},\n    \"amountPaid\": 5000.00,\n    \"paymentMethod\": \"CREDIT_CARD\",\n    \"paymentStatus\": \"COMPLETED\",\n    \"transactionId\": \"TXN{{$randomInt}}\",\n    \"paymentDate\": \"2024-08-25\",\n    \"remarks\": \"Payment successful\"\n}"
+								},
+								"url": "{{base_url}}/api/v1/fee-payments"
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "📢 Communication",
+			"item": [
+				{
+					"name": "📣 Announcements",
+					"item": [
+						{
+							"name": "List Announcements",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/announcements"
+							}
+						},
+						{
+							"name": "Create Announcement",
+							"event": [
+								{
+									"listen": "test",
+									"script": {
+										"exec": [
+											"if (pm.response.code === 201) {",
+											"    const resp = pm.response.json();",
+											"    if (resp.id) pm.environment.set('announcement_id', resp.id);",
+											"}"
+										]
+									}
+								}
+							],
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"title\": \"Important Notice\",\n    \"content\": \"School will remain closed on Independence Day\",\n    \"targetAudience\": \"ALL\",\n    \"priority\": \"HIGH\",\n    \"isActive\": true,\n    \"publishDate\": \"2024-08-25\",\n    \"expiryDate\": \"2024-08-31\"\n}"
+								},
+								"url": "{{base_url}}/api/v1/announcements"
+							}
+						},
+						{
+							"name": "Get Announcement by ID",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/announcements/{{announcement_id}}"
+							}
+						}
+					]
+				}
+			]
+		},
+		{
+			"name": "📅 Attendance & Timetable",
+			"item": [
+				{
+					"name": "✅ Attendance",
+					"item": [
+						{
+							"name": "List Attendance",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/attendance"
+							}
+						},
+						{
+							"name": "Mark Attendance",
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"studentId\": {{student_id}},\n    \"classroomId\": {{classroom_id}},\n    \"attendanceDate\": \"2024-08-25\",\n    \"status\": \"PRESENT\",\n    \"remarks\": \"Regular attendance\"\n}"
+								},
+								"url": "{{base_url}}/api/v1/attendance"
+							}
+						}
+					]
+				},
+				{
+					"name": "📋 Timetables",
+					"item": [
+						{
+							"name": "List Timetables",
+							"request": {
+								"method": "GET",
+								"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+								"url": "{{base_url}}/api/v1/timetables"
+							}
+						},
+						{
+							"name": "Create Timetable",
+							"request": {
+								"method": "POST",
+								"header": [
+									{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+									{"key": "Content-Type", "value": "application/json"}
+								],
+								"body": {
+									"mode": "raw",
+									"raw": "{\n    \"classroomId\": {{classroom_id}},\n    \"subjectId\": {{subject_id}},\n    \"teacherId\": {{employee_id}},\n    \"dayOfWeek\": \"MONDAY\",\n    \"startTime\": \"09:00:00\",\n    \"endTime\": \"10:00:00\",\n    \"isActive\": true\n}"
+								},
+								"url": "{{base_url}}/api/v1/timetables"
+							}
+						}
+					]
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	]
+}

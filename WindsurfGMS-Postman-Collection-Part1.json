@@ -1,0 +1,266 @@
+{
+	"info": {
+		"_postman_id": "windsurf-gms-collection-2024",
+		"name": "WindsurfGMS Complete API Testing Suite",
+		"description": "🎯 Comprehensive API testing for WindsurfGMS School Management System\n\n**Testing Workflow:**\n1. Authentication → Get JWT Token\n2. School Management → CRUD Operations (with multi-tenant security)\n3. User & Employee Management\n4. Academic Management (Students, Classes, Subjects)\n5. Assessment (Exams, Results)\n6. Financial (Fees, Payments)\n7. Communication (Announcements)\n\n**Environment Variables:**\n- base_url: http://localhost:8080\n- jwt_token: (auto-set after login)\n- school_id: (auto-set)\n- user_id, employee_id, student_id, etc.\n\n**Authentication:** JWT Token-based\n**Multi-Tenant Security:** School-bounded isolation - users can only access their own school data\n\n**Security Notes:**\n- Admin users can only access their own school data\n- Superadmin users follow the same tenant isolation principles\n- Cross-school access attempts will be rejected with HTTP 403",
+		"schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+	},
+	"item": [
+		{
+			"name": "🔐 1. Authentication",
+			"item": [
+				{
+					"name": "Health Check",
+					"request": {
+						"method": "GET",
+						"header": [],
+						"url": "{{base_url}}/actuator/health"
+					}
+				},
+				{
+					"name": "Login - Username",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 200) {",
+									"    const resp = pm.response.json();",
+									"    pm.environment.set('jwt_token', resp.accessToken);",
+									"    // Extract schoolId from JWT token if needed",
+									"    if (resp.user?.schoolId) pm.environment.set('school_id', resp.user.schoolId);",
+									"    if (resp.user?.id) pm.environment.set('user_id', resp.user.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [{"key": "Content-Type", "value": "application/json"}],
+						"body": {
+							"mode": "raw",
+							"raw": "{\"username\": \"superadmin\", \"password\": \"SuperAdmin123!\"}"
+						},
+						"url": "{{base_url}}/api/v1/auth/login"
+					}
+				},
+				{
+					"name": "Get Current User Profile",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/users/me"
+					}
+				}
+			]
+		},
+		{
+			"name": "🏫 2. School Management",
+			"item": [
+				{
+					"name": "List My Schools",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/schools"
+					}
+				},
+				{
+					"name": "Get School by ID",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/schools/{{school_id}}"
+					}
+				},
+				{
+					"name": "Try Accessing Another School (Should Fail)",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/schools/1"
+					}
+				},
+				{
+					"name": "Create New School",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const resp = pm.response.json();",
+									"    if (resp.id) pm.environment.set('new_school_id', resp.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"schoolName\": \"Test Academy {{$timestamp}}\",\n    \"schoolCode\": \"TEST{{$randomInt}}\",\n    \"address\": \"123 Education Street, Learning City\",\n    \"phone\": \"1234567890\",\n    \"email\": \"admin{{$randomInt}}@testacademy.edu\",\n    \"principalName\": \"Dr. Principal Smith\",\n    \"establishedYear\": 2020,\n    \"boardAffiliation\": \"CBSE\",\n    \"adminFullName\": \"Test Admin {{$timestamp}}\",\n    \"adminEmail\": \"imshubhy@gmail.com\"\n}"
+						},
+						"url": "{{base_url}}/api/v1/schools/create"
+					}
+				},
+				{
+					"name": "Update School",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"schoolName\": \"Updated Test Academy\",\n    \"schoolCode\": \"UPDATED\",\n    \"address\": \"456 Updated Street, New City\",\n    \"phone\": \"0987654321\",\n    \"email\": \"updated@testacademy.edu\",\n    \"principalName\": \"Dr. Updated Principal\",\n    \"establishedYear\": 2021,\n    \"boardAffiliation\": \"ICSE\"\n}"
+						},
+						"url": "{{base_url}}/api/v1/schools/{{school_id}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "👥 3. User Management",
+			"item": [
+				{
+					"name": "List All Users",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/users"
+					}
+				},
+				{
+					"name": "Get User by ID",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/users/{{user_id}}"
+					}
+				},
+				{
+					"name": "Create Admin User",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const resp = pm.response.json();",
+									"    if (resp.id) pm.environment.set('admin_user_id', resp.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"username\": \"testadmin{{$randomInt}}\",\n    \"email\": \"testadmin{{$randomInt}}@school.edu\",\n    \"fullName\": \"Test Admin User\",\n    \"password\": \"TestAdmin@123\",\n    \"roles\": [\"ADMIN\"]\n}"
+						},
+						"url": "{{base_url}}/api/v1/users"
+					}
+				},
+				{
+					"name": "Update User",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"fullName\": \"Updated Test User\",\n    \"email\": \"updated{{$randomInt}}@school.edu\"\n}"
+						},
+						"url": "{{base_url}}/api/v1/users/{{user_id}}"
+					}
+				}
+			]
+		},
+		{
+			"name": "👨‍💼 4. Employee Management",
+			"item": [
+				{
+					"name": "List Employees",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/employees"
+					}
+				},
+				{
+					"name": "Create Employee",
+					"event": [
+						{
+							"listen": "test",
+							"script": {
+								"exec": [
+									"if (pm.response.code === 201) {",
+									"    const resp = pm.response.json();",
+									"    if (resp.id) pm.environment.set('employee_id', resp.id);",
+									"}"
+								]
+							}
+						}
+					],
+					"request": {
+						"method": "POST",
+						"header": [
+							{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"firstName\": \"John\",\n    \"lastName\": \"Teacher\",\n    \"email\": \"john.teacher{{$randomInt}}@school.edu\",\n    \"phoneNumber\": \"9876543210\",\n    \"department\": \"ACADEMIC\",\n    \"designation\": \"TEACHER\",\n    \"isTeaching\": true,\n    \"qualification\": \"M.Ed, B.Sc Mathematics\",\n    \"experienceYears\": 5,\n    \"salary\": 50000.00\n}"
+						},
+						"url": "{{base_url}}/api/v1/employees"
+					}
+				},
+				{
+					"name": "Get Employee by ID",
+					"request": {
+						"method": "GET",
+						"header": [{"key": "Authorization", "value": "Bearer {{jwt_token}}"}],
+						"url": "{{base_url}}/api/v1/employees/{{employee_id}}"
+					}
+				},
+				{
+					"name": "Update Employee",
+					"request": {
+						"method": "PUT",
+						"header": [
+							{"key": "Authorization", "value": "Bearer {{jwt_token}}"},
+							{"key": "Content-Type", "value": "application/json"}
+						],
+						"body": {
+							"mode": "raw",
+							"raw": "{\n    \"firstName\": \"John Updated\",\n    \"lastName\": \"Teacher\",\n    \"email\": \"john.updated{{$randomInt}}@school.edu\",\n    \"phoneNumber\": \"9876543211\",\n    \"department\": \"ACADEMIC\",\n    \"designation\": \"SENIOR_TEACHER\",\n    \"isTeaching\": true,\n    \"qualification\": \"M.Ed, B.Sc Mathematics, Advanced Teaching Cert\",\n    \"experienceYears\": 6,\n    \"salary\": 55000.00\n}"
+						},
+						"url": "{{base_url}}/api/v1/employees/{{employee_id}}"
+					}
+				}
+			]
+		}
+	],
+	"variable": [
+		{
+			"key": "base_url",
+			"value": "http://localhost:8080",
+			"type": "string"
+		}
+	]
+}
