@@ -1,28 +1,25 @@
-# IntelliJ IDEA
+# Environment variables
+.env
+.env.local
+.env.*.local
+
+# IDE
 .idea/
 *.iml
-out/
-*.ipr
-*.iws
+.vscode/
+*.swp
+*.swo
+*~
 
-# Logs
-*.log
-
-# OS files
+# OS
 .DS_Store
 Thumbs.db
 
-# Build outputs
+# Build
 target/
-build/
-
-# Dependency folders
-.gradle/
+dist/
 node_modules/
 
-# Environment / Secrets
-*.env
-*.key
-*.pem
-
-/memory-bank/
+# Logs
+*.log
+logs/
