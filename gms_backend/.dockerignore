@@ -1,0 +1,9 @@
+target/
+.git/
+.gitignore
+*.md
+memory-bank/
+.DS_Store
+.idea/
+*.iml
+

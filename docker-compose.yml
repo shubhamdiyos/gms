@@ -1,0 +1,74 @@
+version: '3.8'
+
+services:
+  # PostgreSQL Database
+  postgres:
+    image: postgres:16-alpine
+    container_name: gms-postgres
+    environment:
+      POSTGRES_DB: gms
+      POSTGRES_USER: gms_user
+      POSTGRES_PASSWORD: gms_password
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gms_user -d gms"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - gms-network
+
+  # Spring Boot Backend
+  backend:
+    build:
+      context: ./gms_backend
+      dockerfile: Dockerfile
+    container_name: gms-backend
+    environment:
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/gms
+      SPRING_DATASOURCE_USERNAME: gms_user
+      SPRING_DATASOURCE_PASSWORD: gms_password
+      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
+      SPRING_JPA_HIBERNATE_DDL_AUTO: update
+      SPRING_JPA_SHOW_SQL: "false"
+      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.PostgreSQLDialect
+      SERVER_PORT: 8080
+      CORS_ALLOWED_ORIGINS: http://localhost:3000,https://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - gms-network
+    healthcheck:
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1"]
+      interval: 30s
+      timeout: 10s
+      retries: 5
+      start_period: 60s
+
+  # React Frontend
+  frontend:
+    build:
+      context: ./gms_frontend
+      dockerfile: Dockerfile
+    container_name: gms-frontend
+    ports:
+      - "3000:80"
+    depends_on:
+      - backend
+    networks:
+      - gms-network
+
+volumes:
+  postgres_data:
+    driver: local
+
+networks:
+  gms-network:
+    driver: bridge
+
