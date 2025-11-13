@@ -3,7 +3,7 @@ import { toast } from 'react-toastify';
 
 // Create axios instance
 const apiClient = axios.create({
-  baseURL: 'http://localhost:8080/api/v1',
+  baseURL: 'http://ec2-65-0-109-47.ap-south-1.compute.amazonaws.com:8080/api/v1',
   headers: {
     'Content-Type': 'application/json',
   },

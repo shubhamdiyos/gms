@@ -1,5 +1,5 @@
 // API Configuration
-export const API_BASE_URL = 'http://localhost:8080/api/v1';
+export const API_BASE_URL = 'http://ec2-65-0-109-47.ap-south-1.compute.amazonaws.com:8080/api/v1';
 
 // Storage Keys
 export const STORAGE_KEYS = {
