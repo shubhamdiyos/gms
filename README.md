@@ -234,7 +234,7 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 - **Developer**: Shubham Kumar
 - **Email**: imshubhy@gmail.com
-- **GitHub**: [@imshubhy](https://github.com/shubhamdiyos)
+- **GitHub**: [@shubhamdiyos](https://github.com/shubhamdiyos)
 
 ## 🙏 Acknowledgments
 
