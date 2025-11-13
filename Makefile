@@ -7,6 +7,7 @@ help:
 	@echo "Available commands:"
 	@echo "  make build      - Build all Docker images"
 	@echo "  make up         - Start all services (database, backend, frontend)"
+	@echo "  make up-dev     - Start services using development.env (Neon DB)"
 	@echo "  make down       - Stop and remove all containers"
 	@echo "  make restart    - Restart all services"
 	@echo "  make logs       - Show logs from all services"
@@ -35,6 +36,17 @@ up:
 	@echo "  - Backend API: http://localhost:8080"
 	@echo "  - Frontend:    http://localhost:3000"
 	@echo ""
+	@echo "Use 'make logs' to view logs"
+
+# Start services with development.env (Neon database)
+up-dev:
+	ENV_FILE=development.env docker-compose up -d backend frontend
+	@echo ""
+	@echo "Services started with development.env (Neon DB):"
+	@echo "  - Backend API: http://localhost:8080"
+	@echo "  - Frontend:    http://localhost:3000"
+	@echo ""
+	@echo "Note: Using Neon PostgreSQL database (no local postgres container)"
 	@echo "Use 'make logs' to view logs"
 
 # Stop all services
@@ -100,4 +112,10 @@ shell-frontend:
 # Open PostgreSQL shell
 shell-db:
 	docker-compose exec postgres psql -U gms_user -d gms
+
+# Test database connectivity from backend container
+test-db-connection:
+	@echo "Testing database connection from backend container..."
+	# docker-compose run backend sh -c 'echo "DB_HOST=$$DB_HOST, DB_NAME=$$DB_NAME, DB_USERNAME=$$DB_USERNAME"'
+	docker-compose run backend sh -c 'wget -O- --timeout=5 "http://localhost:8080/actuator/health" 2>/dev/null || echo "Backend not responding"'
 

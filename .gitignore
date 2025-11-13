@@ -2,6 +2,7 @@
 .env
 .env.local
 .env.*.local
+development.env
 
 # IDE
 .idea/

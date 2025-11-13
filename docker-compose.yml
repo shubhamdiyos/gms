@@ -1,4 +1,4 @@
-version: '3.8'
+
 
 services:
   # PostgreSQL Database
@@ -30,11 +30,10 @@ services:
       dockerfile: Dockerfile
     container_name: gms-backend
     env_file:
-      - .env
+      - ${ENV_FILE:-.env}
     environment:
-      # Override DB_HOST for Docker network
-      DB_HOST: postgres
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-gms}
+      # Use DB_HOST from env file (postgres for local, Neon host for cloud)
+      SPRING_DATASOURCE_URL: jdbc:postgresql://${DB_HOST:-postgres}:${DB_PORT:-5432}/${DB_NAME:-gms}${DB_SSL_PARAMS:-}
       SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-gms_user}
       SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-gms_password}
       SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
