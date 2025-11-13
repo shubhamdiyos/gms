@@ -3,7 +3,7 @@ import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 export const apiSlice = createApi({
   reducerPath: 'api',
   baseQuery: fetchBaseQuery({
-    baseUrl: 'http://localhost:8080/api/v1',
+    baseUrl: 'http://ec2-65-0-109-47.ap-south-1.compute.amazonaws.com:8080/api/v1',
     prepareHeaders: (headers, { getState }) => {
       const token = getState().auth.token || localStorage.getItem('gms_token');
       if (token) {
