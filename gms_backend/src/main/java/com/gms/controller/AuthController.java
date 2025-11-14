@@ -20,7 +20,6 @@ import org.springframework.security.authentication.UsernamePasswordAuthenticatio
 import org.springframework.security.core.Authentication;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
@@ -33,7 +32,6 @@ import java.util.Set;
 import java.util.Optional;
 
 @RestController
-@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"})
 @RequestMapping(Constants.API_BASE_V1 + "/auth")
 public class AuthController {
 
