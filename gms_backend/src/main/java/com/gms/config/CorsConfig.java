@@ -15,7 +15,7 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://localhost:3000,http://127.0.0.1:3000,http://127.0.0.1:5173}")
+    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://gms-react.vercel.app,https://gms-react-git-master-shubhamdiyos-projects.vercel.app}")
     private String allowedOrigins;
 
     @Bean
