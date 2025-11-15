@@ -12,6 +12,10 @@ on:
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    concurrency:
+      group: deploy-backend
+      cancel-in-progress: true
+    timeout-minutes: 20
 
     steps:
       - name: Checkout repository
@@ -22,9 +26,62 @@ jobs:
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
 
-      - name: Deploy to EC2 via SSH
+      - name: Show config (sanitized)
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
           EC2_USER: ${{ secrets.EC2_USER }}
+        shell: bash
         run: |
-          ssh -o StrictHostKeyChecking=no $EC2_USER@$EC2_HOST 'bash ~/deploy_backend.sh'
+          set -euxo pipefail
+          echo "EC2_USER set"
+          echo "EC2_HOST: ${EC2_HOST:0:10}... (masked)"
+
+      - name: Verify SSH connectivity
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for i in {1..3}; do
+            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$EC2_USER@$EC2_HOST" 'echo connected'; then
+              break
+            fi
+            echo "SSH attempt $i failed; retrying in 5s" && sleep 5
+          done
+      
+      - name: Deploy backend on EC2
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" 'test -f ~/deploy_backend.sh && bash ~/deploy_backend.sh'
+
+      - name: Post-deploy health check
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          for i in {1..10}; do
+            status=$(curl -sS --max-time 5 -o /dev/null -w "%{http_code}" "http://$EC2_HOST:8080/api/v1/ping" || true)
+            if [[ "$status" == "200" ]]; then
+              echo "Health check passed (200)"
+              exit 0
+            fi
+            echo "Ping returned $status; retry $i/10" && sleep 3
+          done
+          echo "Health check failed"
+          exit 1
+
+      - name: Show Docker status (diagnostic)
+        if: always()
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_USER: ${{ secrets.EC2_USER }}
+        shell: bash
+        run: |
+          set -euxo pipefail
+          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" 'docker ps -a || true'
