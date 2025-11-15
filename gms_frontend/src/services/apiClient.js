@@ -3,23 +3,14 @@ import { toast } from 'react-toastify';
 
 // Get API base URL from environment variable or use default
 const getApiBaseUrl = () => {
-  // Use environment variable if provided (recommended for production)
   const customUrl = import.meta.env.VITE_API_BASE_URL;
-  
   if (customUrl) {
     return customUrl;
   }
-  
-  // Default backend URL - using HTTP for now
-  // IMPORTANT: For production on Vercel, you MUST set VITE_API_BASE_URL with HTTPS
-  // because Vercel serves over HTTPS and blocks HTTP requests (Mixed Content policy)
-  // Options:
-  // 1. Set up SSL certificate on your EC2 backend
-  // 2. Use AWS Application Load Balancer with SSL
-  // 3. Use AWS API Gateway with custom domain and SSL
-  // 4. Use a reverse proxy (nginx) with Let's Encrypt SSL
-  const backendHost = 'ec2-65-0-109-47.ap-south-1.compute.amazonaws.com:8080';
-  return `http://${backendHost}/api/v1`;
+  if (import.meta.env.PROD) {
+    return '/api/v1';
+  }
+  return 'http://localhost:8080/api/v1';
 };
 
 // Create axios instance
