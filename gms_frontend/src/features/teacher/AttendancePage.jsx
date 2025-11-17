@@ -87,16 +87,20 @@ const AttendancePage = () => {
 
     try {
       const attendanceRecords = Object.entries(attendanceData).map(([studentId, status]) => ({
-        studentId: parseInt(studentId),
+        studentId: parseInt(studentId, 10),
         status,
         date: selectedDate,
       }));
 
-      await markAttendance({
-        classId: selectedClass,
-        date: selectedDate,
-        attendanceRecords,
-      }).unwrap();
+      await Promise.all(
+        attendanceRecords.map((record) =>
+          markAttendance({
+            studentId: record.studentId,
+            date: record.date,
+            status: record.status,
+          }).unwrap()
+        )
+      );
 
       toast.success('Attendance marked successfully');
       setAttendanceData({});

@@ -27,7 +27,7 @@ import {
   Phone,
   Email,
 } from '@mui/icons-material';
-import { useGetParentChildrenQuery } from '../../store/api/apiSlice';
+import { useGetParentChildrenQuery, useGetChildAttendanceQuery, useGetChildResultsQuery, useGetChildFeesQuery } from '../../store/api/apiSlice';
 import dayjs from 'dayjs';
 
 const ParentChildrenPage = () => {
@@ -35,6 +35,20 @@ const ParentChildrenPage = () => {
   const [tabValue, setTabValue] = useState(0);
   
   const { data: children = [], isLoading } = useGetParentChildrenQuery();
+  const currentChild = children[selectedChild];
+
+  const { data: childAttendance = [], isLoading: attendanceLoading } = useGetChildAttendanceQuery(
+    currentChild?.id || 0,
+    { skip: !currentChild?.id }
+  );
+  const { data: childResults = [], isLoading: resultsLoading } = useGetChildResultsQuery(
+    currentChild?.id || 0,
+    { skip: !currentChild?.id }
+  );
+  const { data: childFees = [], isLoading: feesLoading } = useGetChildFeesQuery(
+    currentChild?.id || 0,
+    { skip: !currentChild?.id }
+  );
 
   const handleChildChange = (childIndex) => {
     setSelectedChild(childIndex);
@@ -45,27 +59,28 @@ const ParentChildrenPage = () => {
     setTabValue(newValue);
   };
 
-  // Mock data for demonstration - in real app, this would come from API
-  const getChildAttendance = (childId) => ({
-    percentage: 87,
-    present: 78,
-    absent: 12,
-    total: 90,
-  });
+  // Calculate attendance stats from real data
+  const getAttendanceStats = () => {
+    if (!childAttendance.length) return { percentage: 0, present: 0, absent: 0, total: 0 };
+    
+    const total = childAttendance.length;
+    const present = childAttendance.filter(a => a.status === 'PRESENT').length;
+    const absent = total - present;
+    const percentage = total > 0 ? Math.round((present / total) * 100) : 0;
+    
+    return { percentage, present, absent, total };
+  };
 
-  const getChildGrades = (childId) => [
-    { subject: 'Mathematics', grade: 'A', marks: '92/100' },
-    { subject: 'Science', grade: 'B+', marks: '85/100' },
-    { subject: 'English', grade: 'A-', marks: '88/100' },
-    { subject: 'History', grade: 'B', marks: '82/100' },
-  ];
-
-  const getChildFees = (childId) => ({
-    totalFees: 50000,
-    paidFees: 35000,
-    pendingFees: 15000,
-    nextDueDate: '2024-11-15',
-  });
+  // Calculate fee stats from real data
+  const getFeeStats = () => {
+    if (!childFees.length) return { totalFees: 0, paidFees: 0, pendingFees: 0 };
+    
+    const totalFees = childFees.reduce((sum, fee) => sum + (fee.totalAmount || 0), 0);
+    const paidFees = childFees.reduce((sum, fee) => sum + (fee.amountPaid || 0), 0);
+    const pendingFees = totalFees - paidFees;
+    
+    return { totalFees, paidFees, pendingFees };
+  };
 
   if (isLoading) {
     return (
@@ -75,24 +90,9 @@ const ParentChildrenPage = () => {
     );
   }
 
-  if (children.length === 0) {
-    return (
-      <Box sx={{ textAlign: 'center', py: 4 }}>
-        <Person sx={{ fontSize: 64, color: 'text.secondary', mb: 2 }} />
-        <Typography variant="h6" color="text.secondary" gutterBottom>
-          No Children Found
-        </Typography>
-        <Typography variant="body2" color="text.secondary">
-          No children are associated with your account
-        </Typography>
-      </Box>
-    );
-  }
-
-  const currentChild = children[selectedChild];
-  const attendance = getChildAttendance(currentChild?.id);
-  const grades = getChildGrades(currentChild?.id);
-  const fees = getChildFees(currentChild?.id);
+  const attendance = getAttendanceStats();
+  const grades = childResults; // Use real results data
+  const fees = getFeeStats();
 
   return (
     <Box>

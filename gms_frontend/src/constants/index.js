@@ -35,6 +35,8 @@ export const ROUTES = {
   SUPERADMIN: {
     DASHBOARD: '/superadmin/dashboard',
     SCHOOLS: '/superadmin/schools',
+    REPORTS: '/superadmin/reports',
+    SETTINGS: '/superadmin/settings',
   },
   ADMIN: {
     DASHBOARD: '/admin/dashboard',
@@ -44,7 +46,9 @@ export const ROUTES = {
     SUBJECTS: '/admin/subjects',
     ACADEMIC_YEARS: '/admin/academic-years',
     FEES: '/admin/fees',
+    EXAMS: '/admin/exams',
     REPORTS: '/admin/reports',
+    ANNOUNCEMENTS: '/admin/announcements',
   },
   TEACHER: {
     DASHBOARD: '/teacher/dashboard',

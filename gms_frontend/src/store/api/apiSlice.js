@@ -183,6 +183,14 @@ export const apiSlice = createApi({
       invalidatesTags: ['Employee'],
     }),
 
+    toggleEmployee: builder.mutation({
+      query: ({ id, isActive }) => ({
+        url: `/employees/toggle?id=${id}&isActive=${isActive}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Employee'],
+    }),
+
     // Teacher role-specific endpoints
     getTeacherProfile: builder.query({
       query: () => '/teachers/profile',
@@ -196,13 +204,25 @@ export const apiSlice = createApi({
       query: () => '/teachers/students',
     }),
 
-    // Parent role-specific endpoints
-    getParentProfile: builder.query({
-      query: () => '/parents/profile',
-    }),
-    
+    // Parents
     getParentChildren: builder.query({
       query: () => '/parents/children',
+      providesTags: ['Parent'],
+    }),
+
+    getChildAttendance: builder.query({
+      query: (studentId) => `/parents/children/${studentId}/attendance`,
+      providesTags: ['Attendance'],
+    }),
+
+    getChildResults: builder.query({
+      query: (studentId) => `/parents/children/${studentId}/results`,
+      providesTags: ['Result'],
+    }),
+
+    getChildFees: builder.query({
+      query: (studentId) => `/parents/children/${studentId}/fees`,
+      providesTags: ['Fee'],
     }),
 
     // Classroom endpoints
@@ -254,7 +274,7 @@ export const apiSlice = createApi({
     
     updateSubject: builder.mutation({
       query: ({ id, ...subject }) => ({
-        url: `/subjects/${id}`,
+        url: `/subjects/update/${id}`,
         method: 'PUT',
         body: subject,
       }),
@@ -277,7 +297,7 @@ export const apiSlice = createApi({
     
     createAcademicYear: builder.mutation({
       query: (academicYear) => ({
-        url: '/academic-years/create',
+        url: '/academic-years',
         method: 'POST',
         body: academicYear,
       }),
@@ -303,20 +323,28 @@ export const apiSlice = createApi({
 
     // Attendance endpoints
     getAttendance: builder.query({
-      query: (params) => ({
-        url: '/attendance',
-        params,
+      query: ({ classId, date }) => ({
+        url: `/attendance/classroom/${classId}`,
+        params: { date },
       }),
       providesTags: ['Attendance'],
     }),
     
     markAttendance: builder.mutation({
-      query: (attendanceData) => ({
-        url: '/attendance/mark',
+      query: (attendance) => ({
+        url: '/attendance',
         method: 'POST',
-        body: attendanceData,
+        body: attendance,
       }),
       invalidatesTags: ['Attendance'],
+    }),
+
+    getStudentAttendanceRange: builder.query({
+      query: ({ studentId, startDate, endDate }) => ({
+        url: `/attendance/student/${studentId}/range`,
+        params: { startDate, endDate },
+      }),
+      providesTags: ['Attendance'],
     }),
 
     // Fee endpoints
@@ -327,7 +355,7 @@ export const apiSlice = createApi({
     
     createFee: builder.mutation({
       query: (fee) => ({
-        url: '/fees/create',
+        url: '/fees',
         method: 'POST',
         body: fee,
       }),
@@ -349,6 +377,11 @@ export const apiSlice = createApi({
         method: 'DELETE',
       }),
       invalidatesTags: ['Fee'],
+    }),
+
+    getStudentFeesByStudent: builder.query({
+      query: (studentId) => `/student-fees/student/${studentId}`,
+      providesTags: ['Fee'],
     }),
 
     // Notification endpoints
@@ -373,9 +406,42 @@ export const apiSlice = createApi({
     
     createAnnouncement: builder.mutation({
       query: (announcement) => ({
-        url: '/announcements/create',
+        url: '/announcements',
         method: 'POST',
         body: announcement,
+      }),
+      invalidatesTags: ['Announcement'],
+    }),
+
+    updateAnnouncement: builder.mutation({
+      query: ({ id, ...announcement }) => ({
+        url: `/announcements/${id}`,
+        method: 'PUT',
+        body: announcement,
+      }),
+      invalidatesTags: ['Announcement'],
+    }),
+
+    deleteAnnouncement: builder.mutation({
+      query: (id) => ({
+        url: `/announcements/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Announcement'],
+    }),
+
+    publishAnnouncement: builder.mutation({
+      query: (id) => ({
+        url: `/announcements/${id}/publish`,
+        method: 'POST',
+      }),
+      invalidatesTags: ['Announcement'],
+    }),
+
+    unpublishAnnouncement: builder.mutation({
+      query: (id) => ({
+        url: `/announcements/${id}/unpublish`,
+        method: 'POST',
       }),
       invalidatesTags: ['Announcement'],
     }),
@@ -395,6 +461,15 @@ export const apiSlice = createApi({
       invalidatesTags: ['Section'],
     }),
 
+    // Timetable endpoints
+    getTeacherTimetable: builder.query({
+      query: () => '/timetables/teacher/me',
+    }),
+
+    getMyTimetable: builder.query({
+      query: () => '/students/my-timetable',
+    }),
+
     // Exam endpoints
     getExams: builder.query({
       query: () => '/exams',
@@ -403,16 +478,77 @@ export const apiSlice = createApi({
     
     createExam: builder.mutation({
       query: (exam) => ({
-        url: '/exams/create',
+        url: '/exams',
         method: 'POST',
         body: exam,
       }),
       invalidatesTags: ['Exam'],
     }),
 
+    updateExam: builder.mutation({
+      query: ({ id, ...exam }) => ({
+        url: `/exams/${id}`,
+        method: 'PUT',
+        body: exam,
+      }),
+      invalidatesTags: ['Exam'],
+    }),
+
+    deleteExam: builder.mutation({
+      query: (id) => ({
+        url: `/exams/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Exam'],
+    }),
+
+    getExamsByAcademicYear: builder.query({
+      query: (academicYear) => ({
+        url: '/exams/academic-year',
+        params: { academicYear },
+      }),
+      providesTags: ['Exam'],
+    }),
+
     // Result endpoints
     getResults: builder.query({
-      query: () => '/results',
+      query: () => '/results', // reserved for potential future list endpoint
+      providesTags: ['Result'],
+    }),
+
+    recordResult: builder.mutation({
+      query: (result) => ({
+        url: '/results',
+        method: 'POST',
+        body: result,
+      }),
+      invalidatesTags: ['Result'],
+    }),
+
+    updateResult: builder.mutation({
+      query: ({ id, ...result }) => ({
+        url: `/results/${id}`,
+        method: 'PUT',
+        body: result,
+      }),
+      invalidatesTags: ['Result'],
+    }),
+
+    deleteResult: builder.mutation({
+      query: (id) => ({
+        url: `/results/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['Result'],
+    }),
+
+    getResultsForStudentExam: builder.query({
+      query: (studentExamId) => `/results/student-exam/${studentExamId}`,
+      providesTags: ['Result'],
+    }),
+
+    getResultsForStudent: builder.query({
+      query: (studentId) => `/results/student/${studentId}`,
       providesTags: ['Result'],
     }),
   }),
@@ -456,6 +592,9 @@ export const {
   // Parents
   useGetParentProfileQuery,
   useGetParentChildrenQuery,
+  useGetChildAttendanceQuery,
+  useGetChildResultsQuery,
+  useGetChildFeesQuery,
   
   // Classrooms
   useGetClassroomsQuery,
@@ -478,12 +617,14 @@ export const {
   // Attendance
   useGetAttendanceQuery,
   useMarkAttendanceMutation,
+  useGetStudentAttendanceRangeQuery,
   
   // Fees
   useGetFeesQuery,
   useCreateFeeMutation,
   useUpdateFeeMutation,
   useDeleteFeeMutation,
+  useGetStudentFeesByStudentQuery,
   
   // Notifications
   useGetNotificationsQuery,
@@ -492,15 +633,31 @@ export const {
   // Announcements
   useGetAnnouncementsQuery,
   useCreateAnnouncementMutation,
+  useUpdateAnnouncementMutation,
+  useDeleteAnnouncementMutation,
+  usePublishAnnouncementMutation,
+  useUnpublishAnnouncementMutation,
   
   // Sections
   useGetSectionsQuery,
   useCreateSectionMutation,
   
+  // Timetable
+  useGetTeacherTimetableQuery,
+  useGetMyTimetableQuery,
+  
   // Exams
   useGetExamsQuery,
   useCreateExamMutation,
+  useUpdateExamMutation,
+  useDeleteExamMutation,
+  useGetExamsByAcademicYearQuery,
   
   // Results
   useGetResultsQuery,
+  useRecordResultMutation,
+  useUpdateResultMutation,
+  useDeleteResultMutation,
+  useGetResultsForStudentExamQuery,
+  useGetResultsForStudentQuery,
 } = apiSlice;

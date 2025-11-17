@@ -175,9 +175,9 @@ public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> impl
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getChildAttendance(String username, Integer studentId) {
         Parent parent = validateParentAndChild(username, studentId);
-        
-        // TODO: Implement proper attendance retrieval when attendance service methods are available
-        return Collections.emptyList();
+
+        // Use AttendanceService to get attendance for the student
+        return attendanceService.getAttendanceByStudentAndDateRange(studentId, LocalDate.now().minusMonths(1), LocalDate.now());
     }
 
     @Override
@@ -185,7 +185,13 @@ public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> impl
     public List<ResultResponse> getChildResults(String username, Integer studentId) {
         Parent parent = validateParentAndChild(username, studentId);
         
-        // TODO: Implement proper result retrieval when result service methods are available
+        // Get all results for this student across all exams
+        ResponseEntity<List<Result>> resultResponse = resultService.getResultsForStudent(studentId, null);
+        if (resultResponse.getBody() != null) {
+            return resultResponse.getBody().stream()
+                    .map(this::mapResultToResponse)
+                    .collect(Collectors.toList());
+        }
         return Collections.emptyList();
     }
 
@@ -194,7 +200,13 @@ public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> impl
     public List<StudentFeeResponse> getChildFees(String username, Integer studentId) {
         Parent parent = validateParentAndChild(username, studentId);
         
-        // TODO: Implement proper fee retrieval when student fee service methods are available
+        // Get fees for the student
+        ResponseEntity<List<StudentFee>> feeResponse = studentFeeService.getStudentFeesByStudent(studentId, null);
+        if (feeResponse.getBody() != null) {
+            return feeResponse.getBody().stream()
+                    .map(this::mapStudentFeeToResponse)
+                    .collect(Collectors.toList());
+        }
         return Collections.emptyList();
     }
 
@@ -337,5 +349,30 @@ public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> impl
                 s.getGender(),
                 s.getStatus()
         );
+    }
+
+    private ResultResponse mapResultToResponse(Result result) {
+        ResultResponse response = new ResultResponse();
+        response.setId(result.getId());
+        response.setStudentExamId(result.getStudentExam().getId());
+        response.setStudentName(result.getStudentExam().getStudent().getFullName());
+        response.setExamName(result.getStudentExam().getExamSubject().getExam().getName());
+        response.setSubjectName(result.getStudentExam().getExamSubject().getSubject().getName());
+        response.setObtainedMarks(result.getObtainedMarks());
+        response.setGrade(result.getGrade());
+        response.setPercentage(result.getPercentage());
+        response.setRemarks(result.getRemarks());
+        response.setStatus(result.getStatus());
+        return response;
+    }
+
+    private StudentFeeResponse mapStudentFeeToResponse(StudentFee studentFee) {
+        StudentFeeResponse response = new StudentFeeResponse();
+        response.setId(studentFee.getId());
+        response.setStudentId(studentFee.getStudent().getId());
+        response.setFeeId(studentFee.getFee().getId());
+        response.setStatus(studentFee.getStatus());
+        response.setAmountPaid(studentFee.getAmountPaid());
+        return response;
     }
 }

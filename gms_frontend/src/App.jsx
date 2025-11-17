@@ -16,6 +16,8 @@ import DashboardLayout from './components/layout/DashboardLayout';
 
 // Dashboard Pages
 import SuperAdminDashboard from './features/dashboard/SuperAdminDashboard';
+import SuperAdminReportsPage from './features/superadmin/SuperAdminReportsPage';
+import SuperAdminSettingsPage from './features/superadmin/SuperAdminSettingsPage';
 import AdminDashboard from './features/dashboard/AdminDashboard';
 import TeacherDashboard from './features/dashboard/TeacherDashboard';
 import StudentDashboard from './features/dashboard/StudentDashboard';
@@ -28,14 +30,22 @@ import EmployeesPage from './features/employees/EmployeesPage';
 import ClassroomsPage from './features/classrooms/ClassroomsPage';
 import SubjectsPage from './features/subjects/SubjectsPage';
 import AcademicYearsPage from './features/academic-years/AcademicYearsPage';
+import AnnouncementsPage from './features/announcements/AnnouncementsPage';
+import ExamsPage from './features/exams/ExamsPage';
 
 // Teacher Pages
 import TeacherClassesPage from './features/teacher/TeacherClassesPage';
 import AttendancePage from './features/teacher/AttendancePage';
+import TeacherStudentsPage from './features/teacher/TeacherStudentsPage';
+import TeacherSchedulePage from './features/teacher/TeacherSchedulePage';
+import TeacherGradesPage from './features/teacher/TeacherGradesPage';
 
 // Student Pages
 import StudentProfilePage from './features/student/StudentProfilePage';
 import StudentAttendancePage from './features/student/StudentAttendancePage';
+import StudentResultsPage from './features/student/StudentResultsPage';
+import StudentFeesPage from './features/student/StudentFeesPage';
+import StudentTimetablePage from './features/student/StudentTimetablePage';
 
 // Parent Pages
 import ParentChildrenPage from './features/parent/ParentChildrenPage';
@@ -159,6 +169,22 @@ const AppRouter = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="superadmin/settings"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.SUPERADMIN]}>
+              <SuperAdminSettingsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="superadmin/reports"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.SUPERADMIN]}>
+              <SuperAdminReportsPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Admin Routes */}
         <Route
@@ -217,6 +243,22 @@ const AppRouter = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="admin/exams"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+              <ExamsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/announcements"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+              <AnnouncementsPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Teacher Routes */}
         <Route
@@ -243,6 +285,30 @@ const AppRouter = () => {
             </ProtectedRoute>
           }
         />
+        <Route
+          path="teacher/students"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.TEACHER]}>
+              <TeacherStudentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="teacher/schedule"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.TEACHER]}>
+              <TeacherSchedulePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="teacher/grades"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.TEACHER]}>
+              <TeacherGradesPage />
+            </ProtectedRoute>
+          }
+        />
 
         {/* Student Routes */}
         <Route
@@ -266,6 +332,30 @@ const AppRouter = () => {
           element={
             <ProtectedRoute requiredRoles={[ROLES.STUDENT]}>
               <StudentAttendancePage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="student/results"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.STUDENT]}>
+              <StudentResultsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="student/fees"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.STUDENT]}>
+              <StudentFeesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="student/timetable"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.STUDENT]}>
+              <StudentTimetablePage />
             </ProtectedRoute>
           }
         />

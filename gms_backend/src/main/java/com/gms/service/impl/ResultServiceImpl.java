@@ -141,7 +141,7 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
     }
 
     @Override
-    public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId, Integer schoolId) {
+    public ResponseEntity<List<ResultResponse>> getResultsForStudentExam(Integer studentExamId, Integer schoolId) {
         // Validate student exam exists
         StudentExam studentExam = studentExamRepository.findById(studentExamId)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
@@ -151,19 +151,20 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
             return ResponseEntity.status(403).build();
         }
 
-        // In a complete implementation, we would query results by student exam
-        // For now, we'll return an empty list
-        return ResponseEntity.ok(List.of());
+        // Get results for this student exam
+        List<Result> results = resultRepository.findByStudentExamId(studentExamId);
+        List<ResultResponse> resultResponses = results.stream().map(this::mapToResponse).toList();
+        return ResponseEntity.ok(resultResponses);
     }
 
     @Override
     public ResponseEntity<List<Result>> getResultsForStudent(Integer studentId, Integer schoolId) {
-        // Validate student exists
+        // Validate student exists and belongs to school
         // In a complete implementation, we would validate student and school
 
-        // In a complete implementation, we would query results by student
-        // For now, we'll return an empty list
-        return ResponseEntity.ok(List.of());
+        // Get all results for this student across all exams
+        List<Result> results = resultRepository.findByStudentExam_Student_Id(studentId);
+        return ResponseEntity.ok(results);
     }
 
     private ResultResponse mapToResponse(Result result) {

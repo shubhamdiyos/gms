@@ -61,12 +61,12 @@ const Sidebar = () => {
           {
             text: 'System Reports',
             icon: <BarChart />,
-            path: '/superadmin/reports',
+            path: ROUTES.SUPERADMIN.REPORTS,
           },
           {
             text: 'Settings',
             icon: <Settings />,
-            path: '/superadmin/settings',
+            path: ROUTES.SUPERADMIN.SETTINGS,
           },
         ];
 
@@ -108,6 +108,11 @@ const Sidebar = () => {
             path: ROUTES.ADMIN.FEES,
           },
           {
+            text: 'Exams',
+            icon: <Assignment />,
+            path: ROUTES.ADMIN.EXAMS,
+          },
+          {
             text: 'Reports',
             icon: <Assessment />,
             path: ROUTES.ADMIN.REPORTS,
@@ -115,7 +120,7 @@ const Sidebar = () => {
           {
             text: 'Announcements',
             icon: <Campaign />,
-            path: '/admin/announcements',
+            path: ROUTES.ADMIN.ANNOUNCEMENTS,
           },
         ];
 

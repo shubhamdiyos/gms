@@ -11,6 +11,8 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
+import java.util.Collections;
+import java.util.stream.Collectors;
 
 @RestController
 @CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"})
@@ -57,8 +59,30 @@ public class ResultController {
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
-    public ResponseEntity<List<Result>> getResultsForStudent(@PathVariable Integer studentId) {
+    public ResponseEntity<List<ResultResponse>> getResultsForStudent(@PathVariable Integer studentId) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return resultService.getResultsForStudent(studentId, schoolId);
+        ResponseEntity<List<Result>> result = resultService.getResultsForStudent(studentId, schoolId);
+        if (result.getBody() != null) {
+            List<ResultResponse> responses = result.getBody().stream()
+                    .map(this::mapToResponse)
+                    .collect(Collectors.toList());
+            return ResponseEntity.ok(responses);
+        }
+        return ResponseEntity.ok(java.util.Collections.emptyList());
+    }
+
+    private ResultResponse mapToResponse(Result result) {
+        ResultResponse response = new ResultResponse();
+        response.setId(result.getId());
+        response.setStudentExamId(result.getStudentExam().getId());
+        response.setStudentName(result.getStudentExam().getStudent().getFullName());
+        response.setExamName(result.getStudentExam().getExamSubject().getExam().getName());
+        response.setSubjectName(result.getStudentExam().getExamSubject().getSubject().getName());
+        response.setObtainedMarks(result.getObtainedMarks());
+        response.setGrade(result.getGrade());
+        response.setPercentage(result.getPercentage());
+        response.setRemarks(result.getRemarks());
+        response.setStatus(result.getStatus());
+        return response;
     }
 }
