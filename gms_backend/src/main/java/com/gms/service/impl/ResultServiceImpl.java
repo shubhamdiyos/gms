@@ -19,6 +19,7 @@ import org.springframework.stereotype.Service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.util.List;
+import java.util.Optional;
 
 @Service
 public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> implements ResultService {
@@ -141,7 +142,7 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
     }
 
     @Override
-    public ResponseEntity<List<ResultResponse>> getResultsForStudentExam(Integer studentExamId, Integer schoolId) {
+    public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId, Integer schoolId) {
         // Validate student exam exists
         StudentExam studentExam = studentExamRepository.findById(studentExamId)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
@@ -151,10 +152,10 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
             return ResponseEntity.status(403).build();
         }
 
-        // Get results for this student exam
-        List<Result> results = resultRepository.findByStudentExamId(studentExamId);
-        List<ResultResponse> resultResponses = results.stream().map(this::mapToResponse).toList();
-        return ResponseEntity.ok(resultResponses);
+        // There should be at most one Result per StudentExam; repository returns Optional
+        Optional<Result> resultOpt = resultRepository.findByStudentExamId(studentExamId);
+        List<Result> results = resultOpt.map(List::of).orElseGet(List::of);
+        return ResponseEntity.ok(results);
     }
 
     @Override
