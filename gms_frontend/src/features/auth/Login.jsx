@@ -84,12 +84,24 @@ const Login = () => {
             backdropFilter: 'blur(10px)',
           }}
         >
-          {/* Debug Info */}
-          <Box textAlign="center" mb={2}>
-            <Typography variant="caption" color="text.secondary">
-              Backend: http://localhost:8080 | Frontend: http://localhost:5173
-            </Typography>
-          </Box>
+          {/* Mock mode banner */}
+          {import.meta.env.VITE_MOCK_AUTH === 'true' && (
+            <Box
+              textAlign="center"
+              mb={2}
+              sx={{
+                background: 'linear-gradient(90deg, #f59e0b22, #f59e0b44)',
+                border: '1px solid #f59e0b',
+                borderRadius: 1,
+                px: 2,
+                py: 0.75,
+              }}
+            >
+              <Typography variant="caption" sx={{ color: '#b45309', fontWeight: 600 }}>
+                🟡 Mock Mode — Backend bypassed. Any password accepted.
+              </Typography>
+            </Box>
+          )}
 
           {/* Header */}
           <Box textAlign="center" mb={4}>
