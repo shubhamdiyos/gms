@@ -1,5 +1,8 @@
 import apiClient from './apiClient';
 import { jwtDecode } from 'jwt-decode';
+import MockAuthService from './mockAuthService';
+
+const MOCK_AUTH = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 class AuthService {
   static TOKEN_KEY = 'gms_token';
@@ -7,6 +10,16 @@ class AuthService {
 
   // Login user
   static async login(credentials) {
+    // --- MOCK MODE: bypass backend when VITE_MOCK_AUTH=true ---
+    if (MOCK_AUTH) {
+      console.info('🟡 [MockAuth] Backend bypassed — using mock login');
+      const result = await MockAuthService.login(credentials);
+      this.setToken(result.token);
+      this.setUser(result.user);
+      return result;
+    }
+    // --- END MOCK MODE ---
+
     try {
       console.log('🔐 Attempting login with:', { username: credentials.username });
       const response = await apiClient.post('/auth/login', credentials);

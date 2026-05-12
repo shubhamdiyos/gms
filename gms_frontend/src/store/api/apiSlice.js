@@ -1,4 +1,5 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
+import { mockBaseQuery } from '../../services/mockBaseQuery';
 
 // Get API base URL from environment variable or use default
 const getApiBaseUrl = () => {
@@ -12,18 +13,23 @@ const getApiBaseUrl = () => {
   return 'http://localhost:8080/api/v1';
 };
 
+const MOCK_AUTH = import.meta.env.VITE_MOCK_AUTH === 'true';
+
+const realBaseQuery = fetchBaseQuery({
+  baseUrl: getApiBaseUrl(),
+  prepareHeaders: (headers, { getState }) => {
+    const token = getState().auth.token || localStorage.getItem('gms_token');
+    if (token) {
+      headers.set('authorization', `Bearer ${token}`);
+    }
+    return headers;
+  },
+});
+
 export const apiSlice = createApi({
   reducerPath: 'api',
-  baseQuery: fetchBaseQuery({
-    baseUrl: getApiBaseUrl(),
-    prepareHeaders: (headers, { getState }) => {
-      const token = getState().auth.token || localStorage.getItem('gms_token');
-      if (token) {
-        headers.set('authorization', `Bearer ${token}`);
-      }
-      return headers;
-    },
-  }),
+  // When VITE_MOCK_AUTH=true → use in-memory mock; otherwise → real HTTP
+  baseQuery: MOCK_AUTH ? mockBaseQuery() : realBaseQuery,
   tagTypes: [
     'School',
     'Student', 
