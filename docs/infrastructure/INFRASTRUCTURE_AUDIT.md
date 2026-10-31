@@ -747,6 +747,8 @@ outright wrong.
 | `docker compose build backend frontend` | executed for §13; reported in §7.1 |
 | Frontend lint | **47 errors / 22 files** — unchanged, advisory |
 | Backend unit tests (`mvn -B verify` in CI) | **PASS** in CI runs 41245769121 / 41245531864 / 41245233160 |
+| Docs-only change starts no build | **PASS (negative case exercised)** — PR #11 is documentation-only and produced **no** `ci.yml` run (`gh run list` shows nothing for the branch), which is the `paths-ignore` contract at `ci.yml:11-22` observed from the other side. The deploy workflow's `paths:` filter is not proven by this, since it triggers only on `push` to `master`. |
+| A Vercel GitHub App is already in the delivery path | **observed** — PR #11 reports `Vercel / pass` against `shubhamdiyos-projects/gms-react`, so preview deployments are built per PR by a third party that no document in this repository names. Relevant to ADR-013 and to §8's privacy review: the access policy of those preview URLs is unverified. |
 | `scripts/verify-security.sh` (18 assertions) | **18/18 PASS** locally, recorded in [BASELINE_STATUS.md §13.2](../audit/BASELINE_STATUS.md) |
 
 ### 7.1 Image build result
@@ -794,6 +796,10 @@ Not evidence of safety. Mandate §14 requires these rows to be `BLOCKED`, not `P
    turn the CI checks into required checks and enable `enforce_admins`; restore or formally retire the EC2 host;
    authorise a prod schema export for the Flyway baseline; decide 403-vs-404 for cross-tenant reads; approve or
    reject the domain and off-host-backup costs in §5.
+6. **The Vercel preview-deployment policy is unverified.** A Vercel GitHub App is attached to this repository and
+   builds a preview for each pull request (§7). Whether those preview URLs are unlisted, password-protected or
+   indexable is a privacy question (§18 of the first mandate) that cannot be answered from the repository, and it
+   matters because the app ships a mock mode that renders synthetic tenant data when `VITE_MOCK_AUTH=true`.
 
 ---
 

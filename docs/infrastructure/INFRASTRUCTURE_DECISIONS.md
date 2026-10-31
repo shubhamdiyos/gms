@@ -424,6 +424,9 @@ milestones — would silently invalidate every existing citation, which is worse
 **Context.** The frontend is served by Vercel with a rewrite to the EC2 backend (`vercel.json:5`), while a second,
 contradictory path exists: `gms_frontend/Dockerfile` + `nginx.conf`, which has no `/api` proxy at all and is
 therefore unable to serve the application (OPS-10). Two deployment paths for one artifact, neither complete.
+Confirmed live during M0, not inferred: a Vercel GitHub App is already wired to this repository — PR #11 reported a
+`Vercel` check against `shubhamdiyos-projects/gms-react` — so preview deployments are produced per pull request by a
+third party that no document in this repository names, and its preview-URL access policy is unverified.
 
 **Decision.** Declare the Vercel path canonical and the container path **not deployed**. Serve the SPA from Vercel
 (free HTTPS, free CDN, no host load), and let the EC2 host run API + Postgres only, behind Caddy. Fold the
