@@ -558,10 +558,13 @@ outside the repository.
 1. **The deployed backend is unreachable.** Both attempts against the recorded EC2 host fail with
    `ssh: connect to host … port 22: Connection timed out`. Every status above is therefore *local*. Mandate §25.13 and
    §27 apply literally: this branch is not evidence that production is safer, only that the code awaiting deployment is.
-2. **No CI run has executed for this branch** — `deploy-backend.yml` requires `EC2_SSH_*` secrets and
-   `ci.yml` requires nothing but permissions the repository has not granted to a workflow run yet. The branch is
-   mergeable on `mvn test` + `npm run build` locally; the checks themselves are the owner's next action
-   ("make `Backend build and tests` and `Frontend lint and build` required").
+2. **`ci.yml` has executed and passed; `deploy-backend.yml` has not.** The first run of the CI workflow on PR #10
+   returned `Backend build and tests=success, Frontend lint and build=success` on `ubuntu-latest` — so `mvn -B verify`
+   against JDK 21 and `npm ci`/`npm run build` are now proven on a clean runner, not just on this machine. What that
+   does **not** establish: the checks are advisory (branch protection lists `required_status_checks: []`), the two
+   frontend steps configured as `continue-on-error` did not have to prove anything, and the deploy workflow — the one
+   that SSHes into production, and the reason the `EC2_SSH_*` and `EC2_SSH_KNOWN_HOSTS` secrets matter — has still
+   never run. Making those two checks required is the owner action (§11 item 5 of BASELINE_STATUS).
 3. **Prod profile never booted.** `application-prod.properties` (`ddl-auto=validate`, Flyway enabled,
    `baseline-on-migrate=false`) is written but unexercised, and deliberately so: booting it needs the Neon credential
    the owner has not rotated, and §25.2 forbids connecting to production without explicit authorisation.

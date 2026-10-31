@@ -443,8 +443,13 @@ Two rows of the §5 table no longer describe the repository, and the developer-f
 ### 13.6 Still unverified after M1
 
 The EC2 host remains unreachable (`ssh: connect to host … port 22: Connection timed out`), so **no M1 change has been
-observed in production**, no `ci.yml` run has executed, and the prod profile has never booted. The honest reading of
-this branch is "the code awaiting deployment is measurably safer than the code deployed"; §27 forbids more than that.
+observed in production**. `ci.yml` has now executed — its first run, on PR #10, reported
+`Backend build and tests=success, Frontend lint and build=success` on a clean `ubuntu-latest` runner, which is the
+strongest form of evidence §13.1 could ask for, because §13.1's local result and the CI result are now the same claim
+measured twice on different machines. Still unverified: the prod profile has never booted, `deploy-backend.yml` has
+never run (it needs the owner's `EC2_SSH_*` and `EC2_SSH_KNOWN_HOSTS` secrets), and no check is marked required, so CI
+reports rather than enforces. The honest reading of this branch remains "the code awaiting deployment is measurably
+safer than the code deployed"; §27 forbids more than that.
 
 Also unverified by choice: the frontend gates in `ci.yml` are **advisory**. `npm run lint` fails on 47 pre-existing
 errors (FE-14) and there are no frontend tests yet (F3), so only `npm ci` and `npm run build` can block a merge today.

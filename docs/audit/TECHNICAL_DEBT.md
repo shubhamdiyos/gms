@@ -145,8 +145,10 @@ itself is currently unreachable enough that even the claim "the deployed system 
 * `.github/workflows/deploy-backend.yml` triggers, until a test job exists to guard them — narrowing the trigger without a gate just hides the risk.
   **Status after M1: this constraint was lifted deliberately, and the reason is recorded here rather than buried in a diff.** M1 added `.github/workflows/ci.yml`
   (backend `mvn verify` + frontend lint/build on every PR and every push to `master`) and narrowed the deploy `paths:` to backend/runtime inputs. That is a gate
-  *authored*, not a gate *enforced*: no `ci.yml` run has executed, and branch protection does not yet mark it required, so a green CI is not what stops a merge
-  today. What the narrowing does change is one specific real hazard — a documentation-only commit to `master` used to SSH into production. Enforcing the checks is
+  *authored*, and it has now **executed** — the first `ci.yml` run on PR #10 returned `Backend build and tests=success`
+  and `Frontend lint and build=success` on ubuntu-latest — but it is not yet *enforced*: branch protection lists
+  `required_status_checks: []`, so a green CI is not what stops a merge today. What the narrowing does change is one
+  specific real hazard — a documentation-only commit to `master` used to SSH into production. Enforcing the checks is
   the owner action in BASELINE_STATUS §11 item 5.
 
 ## 4. Debt quantification
