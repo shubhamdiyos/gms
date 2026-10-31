@@ -49,7 +49,7 @@ public class SubjectController extends AbstractCRUDController<Subject, Integer> 
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     @Override
     public ResponseEntity<List<Subject>> getAll() {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
@@ -62,7 +62,7 @@ public class SubjectController extends AbstractCRUDController<Subject, Integer> 
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     @Override
     public ResponseEntity<Subject> getById(@PathVariable Integer id) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
@@ -91,7 +91,7 @@ public class SubjectController extends AbstractCRUDController<Subject, Integer> 
     }
 
     @GetMapping("/teacher/assigned")
-    @PreAuthorize("hasRole('TEACHER')")
+    @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<List<SubjectResponse>> getAssignedSubjectsForTeacher() {
         List<SubjectResponse> subjects = subjectService.findSubjectsForAuthenticatedTeacher();
         if (subjects.isEmpty()) {

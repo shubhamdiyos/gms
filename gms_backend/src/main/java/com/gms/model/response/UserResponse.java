@@ -10,9 +10,11 @@ import java.util.Set;
 public class UserResponse {
     private Integer id;
     private Integer schoolId;
+    private String username;
     private String fullName;
     private String email;
     private boolean enabled;
+    private boolean requirePasswordChange;
     private Set<String> roles;
     private String phoneNumber;
     private String employeeId;

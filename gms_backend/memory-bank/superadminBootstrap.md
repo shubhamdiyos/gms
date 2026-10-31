@@ -9,8 +9,9 @@ The SuperAdmin Bootstrap System is a critical component of the WindsurfGMS appli
 ### Environment-Based Credential Management
 The SuperAdmin bootstrap system uses environment-based credential management for production security:
 
-- **Password Requirement**: The SuperAdmin password must be provided via the `SUPERADMIN_PASSWORD` environment variable
+- **Password Requirement**: The SuperAdmin password must be provided via the `APP_SUPERADMIN_PASSWORD` environment variable
 - **No Hardcoded Credentials**: For security reasons, passwords cannot be hardcoded in configuration files
+- **Fails Closed**: Bootstrap is `enabled=false` by default and an enabled-but-incomplete configuration aborts startup, so a deployment cannot silently fall back to a source-code default (finding **SEC-03**)
 - **Secure Storage**: Credentials are stored securely in the database using BCrypt hashing
 - **Discarded Plaintext**: The plaintext password is only used during bootstrap and then discarded
 
@@ -93,24 +94,29 @@ Key features:
 
 `SuperAdminBootstrapProperties` is annotated `@ConfigurationProperties(prefix = "app.superadmin")`, so Spring's
 relaxed binding reads the `APP_SUPERADMIN_*` names below. The `SUPERADMIN_*` names previously listed in this file —
-and still written in the class Javadoc — **bind to nothing**; setting `SUPERADMIN_PASSWORD` leaves the source-code
-default in force. Recorded as finding **SEC-15**.
+and written in earlier revisions of the class Javadoc — **bind to nothing**; setting `SUPERADMIN_PASSWORD` leaves
+whatever default the code carries in force. Recorded as finding **SEC-15**; the Javadoc now names the
+`APP_SUPERADMIN_*` properties.
 
 | Variable | Description | Default in code today |
 |----------|-------------|---------|
-| `APP_SUPERADMIN_PASSWORD` | SuperAdmin password (minimum 8 characters) | ⚠️ a shipped literal (**SEC-03**) |
-| `APP_SUPERADMIN_USERNAME` | SuperAdmin username | ⚠️ a shipped literal |
-| `APP_SUPERADMIN_EMAIL` | SuperAdmin email | ⚠️ a shipped literal |
-| `APP_SUPERADMIN_FULL_NAME` | SuperAdmin full name | ⚠️ a shipped literal |
-| `APP_SUPERADMIN_ENABLED` | Enable/disable bootstrap | `true` — must fail closed in production |
+| `APP_SUPERADMIN_PASSWORD` | SuperAdmin password (minimum 12 characters) | blank — required when bootstrap is enabled (**SEC-03**) |
+| `APP_SUPERADMIN_USERNAME` | SuperAdmin username (3-50 characters) | blank — required when bootstrap is enabled |
+| `APP_SUPERADMIN_EMAIL` | SuperAdmin email | blank — required when bootstrap is enabled |
+| `APP_SUPERADMIN_FULL_NAME` | SuperAdmin full name | blank — required when bootstrap is enabled |
+| `APP_SUPERADMIN_ENABLED` | Enable/disable bootstrap | `false` — fails closed, an operator opts in |
 | `APP_SUPERADMIN_SKIP_IF_EXISTS` | Skip if superadmin exists | `true` |
 | `APP_SUPERADMIN_FORCE_PASSWORD_CHANGE` | Force password change on first login | `true` |
+
+The retired default password is rejected on purpose, not merely unused: `isRetiredDefault` compares case-insensitively
+so an operator who copies the value that shipped in this repository for years is told to pick a different one instead of
+booting a publicly known credential. Asserted by `SuperAdminBootstrapPropertiesTest`.
 
 ## 🛡️ Security Features
 
 ### Password Security
 - **BCrypt Hashing**: Passwords are securely hashed using BCrypt
-- **Minimum Length**: Enforces minimum 8-character passwords
+- **Minimum Length**: `MIN_PASSWORD_LENGTH` = 12 characters, enforced at startup
 - **Environment Only**: Passwords must be provided via environment variables
 - **No Logging**: Password values are never logged
 
@@ -144,8 +150,8 @@ This information can be used for monitoring and debugging purposes.
 ## 🎯 Best Practices
 
 ### For Development
-1. Set `SUPERADMIN_PASSWORD` environment variable before running the application
-2. Use strong passwords (minimum 8 characters) for security
+1. Set the `APP_SUPERADMIN_*` environment variables (password included) before running the application, or leave `APP_SUPERADMIN_ENABLED=false` and create accounts through the API
+2. Use strong passwords (minimum 12 characters) for security
 3. Verify bootstrap logs to ensure successful initialization
 4. Check that superadmin user is created with correct roles
 
@@ -171,7 +177,7 @@ The system implements comprehensive error handling:
 - **Monitoring Ready**: Designed for integration with monitoring systems
 
 Common error scenarios and guidance:
-- **Missing Password**: "Ensure SUPERADMIN_PASSWORD environment variable is set"
+- **Missing Password**: "Bootstrap is enabled but no password was supplied. Set APP_SUPERADMIN_PASSWORD; ..."
 - **Database Issues**: "Ensure database is running and accessible"
 - **Validation Errors**: "Check SuperAdmin configuration properties"
 
@@ -189,8 +195,14 @@ A critical fix was implemented to resolve authentication issues for SuperAdmin u
 
 **Fix Implemented:**
 - Modified `AuthController` to use the user ID as the employee ID when no employee is associated with the user
-- This ensures that SuperAdmin users can authenticate successfully and perform administrative operations
-- The fix maintains security while enabling proper functionality for SuperAdmin users
+- This makes login succeed for a bootstrapped SuperAdmin, who otherwise had no `empId` claim at all
+
+**Do not read the bullet above as a solution — it is recorded as finding BKL-08.** It substitutes a *user* primary key
+into a claim that every reader interprets as an *employee* primary key. `UserServiceImpl.createUserFromRequest` resolves
+the acting principal through `findByEmployee_Id(empId)`, so the substitution guarantees a miss and
+`POST /users/create` still fails for the only account a fresh deployment has. It is also an attribute-integrity hazard:
+if a bootstrap user id happens to equal some other tenant's employee id, `created_by` is recorded against that
+unrelated employee.
 
 ### School Creation Process Enhancement
 The school creation process was successfully tested and verified to work correctly with the SuperAdmin user:

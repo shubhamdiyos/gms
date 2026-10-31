@@ -4,7 +4,6 @@ import com.gms.model.entity.User;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
 import com.gms.service.impl.UserServiceImpl;
-import com.gms.repository.UserRepository;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
@@ -13,18 +12,22 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * User administration for the caller's tenant.
+ *
+ * <p>This controller no longer extends {@code AbstractCRUDController}: that template answers
+ * {@code GET /} and {@code GET /{id}} with the JPA entity, and mandating a DTO there would change
+ * the response type of all nine inherited controllers at once. The two affected endpoints are
+ * declared here against {@code UserResponse} instead (mandate §10.2).</p>
+ */
 @RestController
-@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"})
 @RequestMapping(Constants.API_BASE_V1 + "/users")
-public class UserController extends AbstractCRUDController<User, Integer> {
+public class UserController {
 
     private final UserServiceImpl userService;
-    private final UserRepository userRepository;
 
-    public UserController(UserServiceImpl service, UserRepository userRepository) {
-        super(service);
-        this.userService = service;
-        this.userRepository = userRepository;
+    public UserController(UserServiceImpl userService) {
+        this.userService = userService;
     }
 
     @PostMapping("/create")
@@ -41,34 +44,56 @@ public class UserController extends AbstractCRUDController<User, Integer> {
         return userService.update(request, empId, schoolId);
     }
 
+    /**
+     * The tenant's own accounts. `GET /users` previously serialised the {@code User} entity, which
+     * failed on the lazy {@code School} proxy and answered 500 for every caller — reproduced in
+     * {@code docs/audit/BASELINE_STATUS.md} §4.5. Mandate §10.2 keeps entities inside the service
+     * layer for exactly this reason.
+     */
     @GetMapping
-    public ResponseEntity<List<User>> getAll() {
+    public ResponseEntity<List<UserResponse>> getAll() {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        List<User> users = userService.findBySchool(schoolId);
+        List<UserResponse> users = userService.findBySchool(schoolId).stream()
+                .map(userService::toResponse)
+                .toList();
         if (users.isEmpty()) {
             return ResponseEntity.noContent().build();
         }
         return ResponseEntity.ok(users);
     }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<UserResponse> getById(@PathVariable Integer id) {
+        return ResponseEntity.ok(userService.getById(id));
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+        if (!userService.existsById(id)) {
+            return ResponseEntity.notFound().build();
+        }
+        userService.deleteById(id);
+        return ResponseEntity.noContent().build();
+    }
+
     @GetMapping("/me")
-    public ResponseEntity<User> me() {
+    public ResponseEntity<UserResponse> me() {
         String username = SecurityUtil.getUsernameFromToken();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }
-        return userRepository.findByUsername(username)
-                .map(ResponseEntity::ok)
+        return userService.findByUsername(username)
+                .map(user -> ResponseEntity.ok(userService.toResponse(user)))
                 .orElse(ResponseEntity.status(404).build());
     }
 
     @PutMapping("/me")
-    public ResponseEntity<User> updateMe(@Valid @RequestBody UserRequest request) {
+    public ResponseEntity<UserResponse> updateMe(@Valid @RequestBody UserRequest request) {
         String username = SecurityUtil.getUsernameFromToken();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }
-        User user = userRepository.findByUsername(username).orElse(null);
+        User user = userService.findByUsername(username).orElse(null);
         if (user == null) {
             return ResponseEntity.status(404).build();
         }
@@ -79,7 +104,6 @@ public class UserController extends AbstractCRUDController<User, Integer> {
             user.setPhoneNumber(request.getPhoneNumber());
         }
         // Do not allow role/email/password updates here
-        userRepository.save(user);
-        return ResponseEntity.ok(user);
+        return ResponseEntity.ok(userService.toResponse(userService.save(user)));
     }
 }

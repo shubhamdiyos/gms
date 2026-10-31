@@ -23,4 +23,10 @@ public interface UserService {
     boolean existsByEmail(String email);
     boolean existsByUsername(String username);
     User save(User user);
+
+    /**
+     * Maps a user onto the transport DTO. Controllers must serialise this rather than the entity:
+     * the entity's lazy associations fail JSON writing (500) and its shape is not a contract.
+     */
+    UserResponse toResponse(User user);
 }

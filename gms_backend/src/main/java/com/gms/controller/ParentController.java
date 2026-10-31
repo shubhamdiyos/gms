@@ -27,7 +27,7 @@ public class ParentController extends AbstractCRUDController<Parent, Integer> {
     }
 
     @PostMapping("/create")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ParentResponse> create(@Valid @RequestBody ParentRequest request) {
         Integer empId = SecurityUtil.getEmpIdFromToken();
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
@@ -38,7 +38,7 @@ public class ParentController extends AbstractCRUDController<Parent, Integer> {
     }
 
     @PutMapping("/update")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ParentResponse> update(@Valid @RequestBody ParentRequest request) {
         Integer empId = SecurityUtil.getEmpIdFromToken();
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
@@ -49,7 +49,7 @@ public class ParentController extends AbstractCRUDController<Parent, Integer> {
     }
 
     @GetMapping
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<Parent>> getAll() {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -63,7 +63,7 @@ public class ParentController extends AbstractCRUDController<Parent, Integer> {
     }
 
     @PatchMapping("/toggle")
-    @PreAuthorize("hasRole('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
         Integer empId = SecurityUtil.getEmpIdFromToken();
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();

@@ -23,3 +23,6 @@ node_modules/
 # Logs
 *.log
 logs/
+
+# Compiled artifacts (a stray .class under src/ once shipped the default admin password)
+*.class

@@ -47,7 +47,7 @@ public class TimetableController {
     }
 
     @GetMapping("/student/me")
-    @PreAuthorize("hasRole('STUDENT')")
+    @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<TimetableResponse> getTimetableForCurrentStudent() {
         // Get student ID from the security context
         String username = SecurityUtil.getUsernameFromToken();

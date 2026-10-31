@@ -1,5 +1,7 @@
 package com.gms.service.impl;
 
+import com.gms.enums.RoleEnum;
+import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
 import com.gms.exception.NotFoundException;
@@ -8,6 +10,7 @@ import com.gms.model.response.UserResponse;
 import com.gms.repository.UserRepository;
 import com.gms.service.*;
 import com.gms.util.PasswordValidator;
+import com.gms.util.SecurityUtil;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -17,8 +20,10 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashSet;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 @Service
 @Transactional
@@ -47,7 +52,7 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
 
         User user = createUserFromRequest(request, new User(), empId, schoolId);
         User saved = this.create(user);
-        return ResponseEntity.ok(mapToResponse(saved));
+        return ResponseEntity.ok(toResponse(saved));
     }
 
     public User createUserFromRequest(UserRequest request, User user, Integer empId, Integer schoolId) {
@@ -83,10 +88,36 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
         }
 
         if (request.getRoles() != null && !request.getRoles().isEmpty()) {
-            user.setRoles(request.getRoles());
+            user.setRoles(authoriseRoles(request.getRoles()));
         }
 
         return user;
+    }
+
+    /**
+     * Validates a role set coming from the API and rejects escalations.
+     *
+     * <p>Role names are checked against {@link RoleEnum} so a typo can no longer mint an
+     * unauthorisable role, and SUPERADMIN may only be granted by a caller who already holds it
+     * (finding AP-4: any school ADMIN could create a platform owner, or promote themselves).</p>
+     *
+     * @throws IllegalArgumentException when a role is unknown or the caller may not grant it
+     */
+    private Set<String> authoriseRoles(Set<String> requested) {
+        Set<String> validated = new HashSet<>();
+        for (String code : requested) {
+            RoleEnum role = RoleEnum.fromCode(code);   // throws for anything outside the vocabulary
+            if (role.isSystemLevel() && !currentCallerHas(RoleEnum.SUPERADMIN)) {
+                throw new IllegalArgumentException("Only a SUPERADMIN may grant the SUPERADMIN role");
+            }
+            validated.add(role.getCode());
+        }
+        return validated;
+    }
+
+    private static boolean currentCallerHas(RoleEnum role) {
+        Set<String> callerRoles = SecurityUtil.getRolesFromToken();
+        return callerRoles != null && callerRoles.contains(role.getCode());
     }
 
     @Override
@@ -109,9 +140,13 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
         org.springframework.beans.BeanUtils.copyProperties(
                 request,
                 user,
-                "id", "createdBy", "createdAt", "school", "schoolId", "updatedBy", "updatedAt", "password", "version"
+                "id", "createdBy", "createdAt", "school", "schoolId", "updatedBy", "updatedAt",
+                "password", "version", "roles"
         );
         user.setUpdatedBy(updaterUser);
+        if (request.getRoles() != null && !request.getRoles().isEmpty()) {
+            user.setRoles(authoriseRoles(request.getRoles()));
+        }
 
         // Only update password if provided
         if (request.getPassword() != null && !request.getPassword().isEmpty()) {
@@ -122,7 +157,7 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
         }
 
         User saved = this.create(user);
-        return ResponseEntity.ok(mapToResponse(saved));
+        return ResponseEntity.ok(toResponse(saved));
     }
 
     @Override
@@ -130,14 +165,14 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
     public UserResponse getById(Integer id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found with ID: " + id));
-        return mapToResponse(user);
+        return toResponse(user);
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<UserResponse> listBySchool(Integer schoolId, Pageable pageable) {
         Page<User> users = userRepository.findAllBySchool_Id(schoolId, pageable);
-        return users.map(this::mapToResponse);
+        return users.map(this::toResponse);
     }
 
     @Override
@@ -171,9 +206,31 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
         return userRepository.save(user);
     }
     
-    private UserResponse mapToResponse(User user) {
+    /**
+     * {@inheritDoc}
+     *
+     * <p>Associations are read defensively: {@code school} and the audit columns are referenced by
+     * identifier only, which Hibernate answers from the proxy without a session, while
+     * {@code employee} needs its row and is therefore mapped only when it is already loaded.</p>
+     */
+    @Override
+    public UserResponse toResponse(User user) {
         UserResponse response = new UserResponse();
-        org.springframework.beans.BeanUtils.copyProperties(user, response);
+        org.springframework.beans.BeanUtils.copyProperties(user, response, "createdBy", "updatedBy");
+        if (user.getSchool() != null) {
+            response.setSchoolId(user.getSchool().getId());
+        }
+        if (user.getCreatedBy() != null) {
+            response.setCreatedBy(user.getCreatedBy().getId());
+        }
+        if (user.getUpdatedBy() != null) {
+            response.setUpdatedBy(user.getUpdatedBy().getId());
+        }
+        Employee employee = user.getEmployee();
+        if (employee != null && org.hibernate.Hibernate.isInitialized(employee)) {
+            response.setEmployeeId(employee.getEmployeeId());
+            response.setDesignation(employee.getDesignation());
+        }
         return response;
     }
 

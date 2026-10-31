@@ -148,6 +148,26 @@ Dependency order, not preference order:
 6. **Financial integrity** — **FIN-01…06**, after tenant enforcement exists, since a payment state machine is meaningless while balances are cross-tenant writable.
 7. **Transport and hosting** — **SEC-14**, **OPS-03/04/05/06**.
 
+### 5.1 Status after M1 (`fix/gms-critical-security`)
+
+Step 2 landed completely and step 3 landed **partially**: **SEC-04**, **SEC-07**, **SEC-08**, **SEC-09**, **SEC-10**,
+**SEC-13**, **SEC-15**, **SEC-16** and **BKL-07** are closed with runtime or test evidence, while **SEC-05** (unguarded
+inherited `GET /{id}` / `DELETE /{id}`) and **SEC-12** (plaintext gateway keys in responses) are untouched, and
+**SEC-11** (revocation) and **SEC-14** (transport) remain open by dependency. The row-by-row dispositions, with the
+evidence each one earned, are in [REPOSITORY_AUDIT.md §16](REPOSITORY_AUDIT.md) and the command log is in
+[BASELINE_STATUS.md §13](BASELINE_STATUS.md).
+
+Two things this audit must not let the reader conclude:
+
+* **Nothing here is deployed.** The EC2 host is unreachable, so every verification is against a local dev-profile boot
+  on a disposable database. The attack paths AP-1…AP-9 may still describe the live system.
+* **Step 4 is not done.** AP-1's root cause — tenancy travelling in the token instead of being resolved server-side
+  from the authenticated principal (**TEN-01…07**) — is unchanged by M1. M1 made the *mechanisms* honest (a role check
+  now means something, a denied request now says so); it did not make the *tenancy invariant* true. A caller who
+  legitimately holds a SUPERADMIN token can still address another school's rows through the unfiltered repositories,
+  which is exactly what the tenant-isolation package and mandate §6's cross-tenant matrix exist to close.
+
+
 ### SEC-REMED — the invariant to introduce
 
 Mandate §6 asks for centralised tenant resolution. Concretely, on the existing architecture and without new infrastructure:

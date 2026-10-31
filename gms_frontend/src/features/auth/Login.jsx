@@ -46,9 +46,9 @@ const Login = () => {
   } = useForm({
     resolver: yupResolver(schema),
     defaultValues: {
-      username: 'superadmin',
-      password: 'SuperAdmin123!'
-    }
+      username: '',
+      password: '',
+    },
   });
 
   const onSubmit = async (data) => {
@@ -199,17 +199,8 @@ const Login = () => {
             </Button>
           </form>
 
-          {/* Quick Login for Testing */}
+          {/* Development helper: drops any stored token and starts a clean session. */}
           <Box textAlign="center" mt={2}>
-            <Button
-              variant="outlined"
-              size="small"
-              onClick={() => onSubmit({ username: 'superadmin', password: 'SuperAdmin123!' })}
-              disabled={loading}
-              sx={{ textTransform: 'none', mb: 1, mr: 1 }}
-            >
-              Quick Login (SuperAdmin)
-            </Button>
             <Button
               variant="outlined"
               color="error"

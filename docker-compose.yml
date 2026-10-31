@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # PostgreSQL Database
   postgres:
@@ -10,13 +8,13 @@ services:
     environment:
       POSTGRES_DB: ${DB_NAME:-gms}
       POSTGRES_USER: ${DB_USERNAME:-gms_user}
-      POSTGRES_PASSWORD: ${DB_PASSWORD:-gms_password}
+      POSTGRES_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
     ports:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U gms_user -d gms"]
+      test: ["CMD-SHELL", "pg_isready -U ${DB_USERNAME:-gms_user} -d ${DB_NAME:-gms}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -32,17 +30,14 @@ services:
     env_file:
       - .env
     environment:
-      # Override DB_HOST for Docker network
-      DB_HOST: postgres
-      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-gms}
-      SPRING_DATASOURCE_USERNAME: ${DB_USERNAME:-gms_user}
-      SPRING_DATASOURCE_PASSWORD: ${DB_PASSWORD:-gms_password}
-      SPRING_DATASOURCE_DRIVER_CLASS_NAME: org.postgresql.Driver
-      SPRING_JPA_HIBERNATE_DDL_AUTO: update
-      SPRING_JPA_SHOW_SQL: ${JPA_SHOW_SQL:-false}
-      SPRING_JPA_PROPERTIES_HIBERNATE_DIALECT: org.hibernate.dialect.PostgreSQLDialect
+      # Only values that differ because they are inside the compose network.
+      # Everything else (SECURITY_JWT_SECRET, APP_SUPERADMIN_*, MAIL_*) arrives from .env:
+      # an `environment:` entry here would silently override the env_file value.
+      DB_URL: jdbc:postgresql://postgres:5432/${DB_NAME:-gms}
+      DB_USERNAME: ${DB_USERNAME:-gms_user}
+      DB_PASSWORD: ${DB_PASSWORD:?DB_PASSWORD must be set in .env}
+      SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       SERVER_PORT: ${SERVER_PORT:-8080}
-      CORS_ALLOWED_ORIGINS: ${CORS_ALLOWED_ORIGINS:-http://localhost:3000,https://localhost:3000,http://127.0.0.1:3000,http://localhost:5173,http://127.0.0.1:5173}
     ports:
       - "8080:8080"
     depends_on:
@@ -51,7 +46,7 @@ services:
     networks:
       - gms-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health/readiness || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
