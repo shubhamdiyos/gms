@@ -27,7 +27,7 @@ for that reason.
 | # | Area | Acceptance criteria (§14) | Status | Primary evidence | Findings |
 |---|---|---|---|---|---|
 | 1 | **Containers** | Reproducible, secure, independently manageable | **PARTIALLY_IMPLEMENTED** | `docker compose build backend frontend` → exit 0; multi-stage separation confirmed (`no mvn` in runtime image); `docker compose config --quiet` → exit 0 | INF-08 (`id -u`=0), INF-09 (`:latest` only), INF-04/05/06/07, INF-19 |
-| 2 | **CI** | Required checks run and report accurately | **PARTIALLY_IMPLEMENTED** | `ci.yml` executed and passed on PR #10 and on the merge commit (runs 41245233160, 41245531864, 41245769121; backend job 50 s) — but `required_status_checks.contexts=[]` | INF-10, INF-16, INF-18 |
+| 2 | **CI** | Required checks run and report accurately | **PARTIALLY_IMPLEMENTED** | `ci.yml` executed and passed on PR #10 and on the merge commit (runs 41245233160, 41245531864, 41245769121; backend job 50 s) — but `required_status_checks.contexts=[]`, and a change to the workflow file itself starts no run | INF-10, INF-16, INF-18, INF-23 |
 | 3 | **CD** | Controlled, traceable and recoverable | **NOT_IMPLEMENTED** | `deploy-backend.yml` has no build step, no `environment:`, no `permissions:`, `cancel-in-progress: true`, and executes an unversioned remote script | INF-03, INF-09, OPS-01/02/05/06 |
 | 4 | **Security** | Least privilege and no secret leakage | **PARTIALLY_IMPLEMENTED** | One control proven at runtime: the host-key guard refused a production deploy (audit §6.2). App-level secrets fail-closed via `StartupSecurityValidator`. Everything container-level is inverted | INF-05, INF-08, INF-18, INF-01 |
 | 5 | **Networking** | Only intended public services exposed | **NOT_IMPLEMENTED** | `docker ps` shows `0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp` live on this machine; one flat bridge network; no TLS material anywhere in the repo | INF-01, INF-02, INF-04 |
@@ -70,6 +70,7 @@ Each item names the command or artefact that produced the status. An item with n
 | Item | Status | Evidence / gap |
 |---|---|---|
 | Backend compile + test executes | `VERIFIED` | three `ci.yml` runs concluded `success`; job name `Backend build and tests`, `mvn -B verify` |
+| Workflow validation (mandate §6.1 stage 1) | `NOT_IMPLEMENTED` | `.github/**` is in both `ci.yml` `paths-ignore` lists, so no workflow can check a change to a workflow — measured: `6198d86` edits `ci.yml` and starts no run (INF-23) |
 | Frontend lint + production build executes | `VERIFIED` | same runs; `npm ci`, lint advisory (47 errors/22 files measured), `npm run build` |
 | Checks are *required* | `NOT_IMPLEMENTED` | `contexts=[]`, `strict=false`, `enforce_admins=false`; PR #10 merged with `--admin` |
 | Workflow-token least privilege | `PARTIALLY_IMPLEMENTED` | `ci.yml:32` declares `permissions: {contents: read}`; `deploy-backend.yml` declares none |

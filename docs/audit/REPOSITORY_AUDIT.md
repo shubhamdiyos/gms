@@ -593,8 +593,9 @@ outside the repository.
 The second MASTER ENGINEERING MANDATE (Production-Grade Infrastructure, Container Architecture, DevOps & CI/CD)
 opened a separate findings namespace so this file stays the application's record and the platform gets its own:
 
-- **[docs/infrastructure/INFRASTRUCTURE_AUDIT.md](../infrastructure/INFRASTRUCTURE_AUDIT.md)** — 22 `INF-*` findings
-  with executed evidence, and the §17 revalidation of every claim carried forward from this document.
+- **[docs/infrastructure/INFRASTRUCTURE_AUDIT.md](../infrastructure/INFRASTRUCTURE_AUDIT.md)** — 23 `INF-*` findings
+  (3 CRITICAL, 11 HIGH, 5 MEDIUM, 2 LOW, 2 INFORMATIONAL) with executed evidence, and the §17 revalidation of every
+  claim carried forward from this document.
 - **[docs/infrastructure/PRODUCTION_READINESS_MATRIX.md](../infrastructure/PRODUCTION_READINESS_MATRIX.md)** — the §14
   scorecard, ten areas, five statuses.
 - **[docs/infrastructure/INFRASTRUCTURE_DECISIONS.md](../infrastructure/INFRASTRUCTURE_DECISIONS.md)** — fourteen ADRs,
@@ -617,6 +618,12 @@ One more document contradicted the code and was corrected in the same pass: `REA
 "There are no automated tests in this repository yet" and "the single workflow … runs no build, test or scan job"
 after M1 had added 36 passing tests in 6 classes and a second workflow. Rewritten with the measured figures, and
 `ci.yml`'s lint comment corrected from "~25 files" to the measured **22**.
+
+One consequence of the push cycle itself became a finding rather than a footnote: the commit that corrected
+`ci.yml`'s lint comment touched `.github/workflows/` and started **no run at all**, because `.github/**` is in both
+of that workflow's `paths-ignore` lists. The gate therefore cannot validate an edit to itself — recorded as
+[INF-23 · HIGH](../infrastructure/INFRASTRUCTURE_AUDIT.md) and given a milestone (Infra-M2's workflow-validation
+stage, which is mandate §6.1 stage 1 and was previously unimplemented).
 
 The consequence that reorders the programme is stated once, at the end of
 [INFRASTRUCTURE_AUDIT.md §9](../infrastructure/INFRASTRUCTURE_AUDIT.md): the missing known-hosts secret is currently

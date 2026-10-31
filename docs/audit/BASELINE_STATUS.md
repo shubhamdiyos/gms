@@ -95,12 +95,12 @@ reproducible without network access once dependencies are cached.
 | Application starts on a fresh database | ❌ **fails closed at schema validation** | R1 |
 | Application starts with schema auto-update | ✅ starts (only escape hatch that exists) | R2 |
 | Readiness/liveness probe usable | ❌ `/actuator/health` is permanently `DOWN` without SMTP | R3 |
-| `docker compose up` works out of the box | ❌ exit 1 without an undocumented `.env`; and even with one the backend healthcheck can never pass (R3 + `wget --spider /actuator/health || exit 1`) | I1, I3, R3 |
+| `docker compose up` works out of the box | ❌ exit 1 without an undocumented `.env`; and even with one the backend healthcheck can never pass (R3 + `wget --spider /actuator/health \|\| exit 1`) | I1, I3, R3 |
 | Authentication works | ✅ for an account whose password you know | R4 |
 | Authorization works | ❌ forged token accepted; inherited CRUD routes unguarded | R5, §4 |
 | Tenant isolation works | ❌ not enforced on inherited CRUD paths; 12 tables have no tenant column at all | §5, §6 |
 | Database schema is reproducible from the repo | ❌ **0 migration files**, no `flyway-core` dependency, `spring.flyway.*` keys inert | §6 |
-| Documentation matches the running system | ❌ see §7 |
+| Documentation matches the running system | ❌ | §7 |
 
 **One-line verdict: green build, red product.** The CI signal a reviewer would see today (`mvn test` → BUILD SUCCESS,
 `vite build` → success) certifies nothing about behaviour, because there is nothing to run.

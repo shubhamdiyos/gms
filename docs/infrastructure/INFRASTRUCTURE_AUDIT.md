@@ -86,6 +86,10 @@ Image sizes on this host, for scale: `maven:3.9-eclipse-temurin-21` 847 MB (buil
 ## 3. Findings
 
 Severity vocabulary is the mandate's: **CRITICAL / HIGH / MEDIUM / LOW / INFORMATIONAL**.
+Twenty-three findings: 3 CRITICAL, 11 HIGH, 5 MEDIUM, 2 LOW, 2 INFORMATIONAL. The register is read in **severity**
+order, so `INF-01…22` run from CRITICAL to INFORMATIONAL; `INF-23` is the one exception — discovered after the
+register was drafted and filed at its severity position (last HIGH), which makes it numerically out of sequence.
+The id is stable, so cross-references in the other documents never have to move.
 Each finding carries evidence, impact, remediation, cost and verification criteria — a remediation is not
 accepted until its verification criterion has been executed and recorded.
 
@@ -445,6 +449,37 @@ key is proven to be outside the repository and outside the image.
 
 ---
 
+### INF-23 · HIGH — The CI gate cannot validate a change to itself
+
+*(Found after the register was drafted, and filed here because it is the last HIGH — see §3 on why the id sorts out
+of numeric sequence.)*
+
+**Evidence.** `ci.yml:11-22` puts `.github/**` in **both** `paths-ignore` lists, so no change to any workflow can
+cause a workflow run to check it. Observed directly: `6198d86` — the only commit on this branch that touches
+`.github/workflows/ci.yml`, 6 comment lines — was pushed to PR #11 and `gh run list --branch infra/gms-platform-audit`
+still returns **empty** (checked again for this entry). Nothing else in the repository parses YAML or validates
+workflow schema, and the mandate's own §6.1 stage 1 is named "Workflow validation".
+
+**Impact.** Every other gate in this programme is downstream of a file that has no gate. A malformed `ci.yml`, a
+typo in a `needs:` key, a removed step or — worse — a widened `paths-ignore` merges green with no signal, because
+GitHub surfaces a workflow that never ran as the absence of a check rather than as a failure. Combined with
+INF-10's empty required-checks list, a silent disabling of CI would be noticed only when something breaks in
+production.
+
+**Remediation.** A third workflow triggered **only** on `.github/**` changes that runs `actionlint` (plus a YAML
+parse of each file and a check that the `ci.yml`/`deploy-backend.yml` trigger sets have not narrowed
+unintentionally), and which cannot itself be skipped by a path filter because its trigger *is* the path filter's
+excluded set. Keep `ci.yml`'s paths-ignore — the build-skipping is correct for docs — but stop relying on it to
+cover the gate's own edits.
+
+**Cost.** $0 (actionlint is open source; a validation-only run on a public repo costs nothing).
+
+**Verification.** Deliberately breaking `ci.yml` on a branch produces a red workflow-validation run on that PR, and
+the branch cannot merge; restoring it turns green. The job must be marked required alongside the two CI checks
+(INF-10) or it inherits the same advisory weakness.
+
+---
+
 ### INF-14 · MEDIUM — The deploy health gate depends on the exposure that must be closed
 
 **Evidence.** `deploy-backend.yml:99` probes `http://$EC2_HOST:8080/api/v1/ping`, and `:96` retries ten times
@@ -753,6 +788,7 @@ outright wrong.
 | Backend unit tests (`mvn -B verify` in CI) | **PASS** in CI runs 41245769121 / 41245531864 / 41245233160 |
 | Docs-only change starts no build | **PASS (negative case exercised)** — PR #11 is documentation-only and produced **no** `ci.yml` run (`gh run list` shows nothing for the branch), which is the `paths-ignore` contract at `ci.yml:11-22` observed from the other side. The deploy workflow's `paths:` filter is not proven by this, since it triggers only on `push` to `master`. |
 | A Vercel GitHub App is already in the delivery path | **observed** — PR #11 reports `Vercel / pass` against `shubhamdiyos-projects/gms-react`, so preview deployments are built per PR by a third party that no document in this repository names. Relevant to ADR-013 and to §8's privacy review: the access policy of those preview URLs is unverified. |
+| A workflow file edited on a PR branch starts **no** check | **FAIL — INF-23 proved by execution.** Commit `6198d86` changed `.github/workflows/ci.yml` (6 lines) and was pushed to PR #11; `gh run list --branch infra/gms-platform-audit` afterwards returns **empty**. `.github/**` is in both `paths-ignore` lists, so the gate that runs the tests cannot validate a change to itself, and GitHub reports a workflow that never ran as the *absence* of a check rather than a failure. |
 | `scripts/verify-security.sh` (18 assertions) | **18/18 PASS** locally, recorded in [BASELINE_STATUS.md §13.2](../audit/BASELINE_STATUS.md) |
 
 ### 7.1 Image build result
@@ -816,11 +852,16 @@ Mandate §15 names these. **Namespace note:** the first mandate's milestones M0�
 | Milestone | Scope | Acceptance criteria (all must be executed, not asserted) | Cost | Findings closed |
 |---|---|---|---|---|
 | **Infra-M1** Container foundation | `compose.yaml` + `compose.dev.yaml` + `compose.prod.yaml`; multi-stage non-root images with `HEALTHCHECK`; digest-pinned bases; `npm ci`; `.dockerignore` hardening; Makefile → `docker compose` + guarded `clean`; per-service env files; two networks with `internal: true` | dev stack boots green on a clean clone; prod stack renders with no `build:` and no published db port; `docker top -o user` non-root ×3; `config --quiet` ×2; image layer scan finds no `.env`; restart and SIGTERM behaviour observed | $0 | INF-02/04/05/06/07/08/09/12/17/19 |
-| **Infra-M2** CI foundation | workflow permissions pinned and minimal; required status checks + `enforce_admins`; dependabot; secret scan; image scan (Trivy, advisory→blocking); SBOM; artefact-retention fix; CODEOWNERS; documented-and-consumed variable catalogue | a failing or red-lint-escalating PR cannot merge even as admin; an injected fake secret blocks merge; live artefact bytes under a stated ceiling for a week | $0 | INF-10/16/18/20 |
+| **Infra-M2** CI foundation | workflow permissions pinned and minimal; a `.github/**`-triggered workflow-validation gate (`actionlint` + YAML parse) so the gate checks its own edits; required status checks + `enforce_admins`; dependabot; secret scan; image scan (Trivy, advisory→blocking); SBOM; artefact-retention fix; CODEOWNERS; documented-and-consumed variable catalogue | a failing or red-lint-escalating PR cannot merge even as admin; a deliberately malformed `ci.yml` turns the validation gate red on that PR; an injected fake secret blocks merge; live artefact bytes under a stated ceiling for a week | $0 | INF-10/16/18/20/23 |
 | **Infra-M3** Deployment engineering | versioned `scripts/deploy.sh` replacing the untracked remote script; host survey written up; immutable `<sha>` image tags in a registry; `environment: production` with required reviewers; `cancel-in-progress: false`; deployment lock; post-deploy SHA/digest verification + proxied health; expand-migrate-verify-contract migrations (Flyway baseline from an authorised schema export) | one deploy on a non-production target observed end-to-end; **one rollback executed**; a stale deploy job refused; a concurrent deploy serialised | $0 | INF-03/09/11 (part)/14 (part), OPS-01/02/05/06/07 |
 | **Infra-M4** Runtime security | Caddy/nginx + TLS; HTTPS enforcement; security headers; `client_max_body_size`; proxy timeouts; rate limiting; 8080/5432 closed publicly; least-privilege DB role; secret rotation procedure | external scan shows only 443 (and 80 redirecting) open; renewal observed once and its failure path tested; the app works through the proxy with `VITE_API_BASE_URL=/api/v1` | **domain ~$10–15/yr — owner approval required before purchase** | INF-01/02/14 |
 | **Infra-M5** Observability and recovery | log pattern with `%X{traceId}`; json-file rotation; `/actuator/prometheus` behind auth; `/actuator/info` build contributor; `db-backup.sh` / `db-restore.sh` with checksum + encryption + rotation; the five runbooks | a trace id is findable in logs for a real request; a restore executed into an isolated container and row counts compared; disk-pressure alert observed firing on a full test volume | <$1/mo if off-host approved; $0 otherwise | INF-06/13/15, OPS-16 |
 | **Infra-M6** Production qualification | full §14 scorecard re-run with runtime evidence; host reboot recovery; failed-deploy and rollback rehearsals; staging boot of `prod` | every row either `VERIFIED` with a citation or explicitly `BLOCKED` with the owner action named; no row promoted on authorship alone | $0 | closes the programme |
+
+Coverage is exhaustive and deliberately stated: every actionable finding `INF-01…20` and `INF-23` appears in at least
+one "Findings closed" column — `INF-02`, `INF-06`, `INF-09` and `INF-14` appear in two each, because their fix is
+split across milestones. The only ids with no milestone are `INF-21` and `INF-22`, which are informational
+records of checks that came back clear — assigning them work would invent it.
 
 Dependency rule, and it is the most important line in this file: **do not restore EC2 connectivity or add
 `EC2_SSH_KNOWN_HOSTS` before Infra-M2 and Infra-M3 land.** Today's missing secret is the only thing preventing an

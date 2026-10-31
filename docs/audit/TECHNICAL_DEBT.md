@@ -155,7 +155,7 @@ itself is currently unreachable enough that even the claim "the deployed system 
   workflow now executes on every `master` push and is stopped only by that missing secret
   (run 41245769175, recorded in [INFRASTRUCTURE_AUDIT.md §6.2](../infrastructure/INFRASTRUCTURE_AUDIT.md)). Adding
   the secret, or restoring port 22, hands merge-to-`master` an ungated production deploy with no build step upstream.
-* Platform debt has its own register and is not repeated here: findings `INF-01…22` live in
+* Platform debt has its own register and is not repeated here: findings `INF-01…23` live in
   **[docs/infrastructure/INFRASTRUCTURE_AUDIT.md](../infrastructure/INFRASTRUCTURE_AUDIT.md)**, their status in
   **[PRODUCTION_READINESS_MATRIX.md](../infrastructure/PRODUCTION_READINESS_MATRIX.md)**, and the reasoning behind each
   chosen approach in **[INFRASTRUCTURE_DECISIONS.md](../infrastructure/INFRASTRUCTURE_DECISIONS.md)**. This file keeps
