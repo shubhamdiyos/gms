@@ -84,9 +84,9 @@ jobs:
 
       - name: Lint
         run: npm run lint
-        # Measured on this branch: 47 errors across ~25 files, none introduced by the security
-        # package (verified by grouping `npm run lint` output per file — `Login.jsx` contributes
-        # zero). Eight of them sit in the dead `api/[...path].js` proxies from SEC-14. Making this
+        # Measured again on 2026-11-01 (`npx eslint . --format json`): 47 errors across 22 files, 0 warnings,
+        # none introduced by the security package (verified by grouping the output per file — `Login.jsx`
+        # contributes zero). Eight of them sit in the dead `api/[...path].js` proxies from SEC-14. Making this
         # blocking now would turn the gate into noise and invite a blanket eslint-disable; it
         # becomes a hard check with the frontend contract package (TECHNICAL_DEBT §2 row 11),
         # which is also where the errors are actually fixed.

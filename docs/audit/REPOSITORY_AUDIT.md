@@ -600,7 +600,9 @@ opened a separate findings namespace so this file stays the application's record
 - **[docs/infrastructure/INFRASTRUCTURE_DECISIONS.md](../infrastructure/INFRASTRUCTURE_DECISIONS.md)** — fourteen ADRs,
   including the four that need an owner decision before any money or account is involved.
 
-Four corrections to this file came out of that pass, and they are recorded here rather than silently patched:
+Six corrections came out of that pass — four from re-testing claims carried forward, and two from an independent
+re-verification of every `file:line` citation in the new documents. They are recorded here rather than silently
+patched:
 
 | Item in this file | Correction | Where |
 |---|---|---|
@@ -608,6 +610,13 @@ Four corrections to this file came out of that pass, and they are recorded here 
 | OPS-04 "hostname echoed in logs, defeating the masking" | **Downgraded.** The failing run's log shows `EC2_HOST: ***` and `***@***`; GitHub masks secret values inside `set -x` traces. Annotated at §11. | INF-01 |
 | OPS-03 host-key verification | **Closed in code *and* proven executed** — the guard refused a production deploy on its first run. §16 rows promoted from *Changed* to *Verified*. | audit §6.2 |
 | §17 "the deploy workflow has never run; it needs owner-provisioned secrets" | **Partly wrong.** It ran on the merge commit, and `EC2_HOST`/`EC2_USER`/`EC2_SSH_KEY` **do** exist. Only `EC2_SSH_KNOWN_HOSTS` is absent. | audit §6.2 |
+| OPS-09 "every Makefile target uses `docker-compose`" | **16 of 17 recipes** — `help` is the exception. The count matters because the fix is mechanical per recipe. | [INF-12](../infrastructure/INFRASTRUCTURE_AUDIT.md) |
+| OPS-15 "there are no `*.class` rules" | **Half closed by M1**: `.gitignore:28` now carries `*.class` (added in `939e063`). `*.pem`, `*.key` and `secrets/` remain absent, and `gms_frontend/.env.production` is still tracked. | audit §4 |
+
+One more document contradicted the code and was corrected in the same pass: `README.md` §Testing still asserted
+"There are no automated tests in this repository yet" and "the single workflow … runs no build, test or scan job"
+after M1 had added 36 passing tests in 6 classes and a second workflow. Rewritten with the measured figures, and
+`ci.yml`'s lint comment corrected from "~25 files" to the measured **22**.
 
 The consequence that reorders the programme is stated once, at the end of
 [INFRASTRUCTURE_AUDIT.md §9](../infrastructure/INFRASTRUCTURE_AUDIT.md): the missing known-hosts secret is currently

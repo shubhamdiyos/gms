@@ -37,6 +37,7 @@ response retrieved this session.
 | 14 | `gh api accounts/shubhamdiyos/settings/billing/actions` → HTTP 404 | metered Actions usage is **not** readable through the REST API for a personal account; the quota check in §5 is arithmetic, not telemetry |
 | 15 | `psql 'select pg_size_pretty(pg_database_size('gms'))'` and a `pg_dump \| gzip -1` on the **local dev** database | 9.4 MB database, 12.7 KB compressed dump — the backup sizing input in §5.3 |
 | 16 | `grep -rn "logging.pattern" gms_backend/src/main/resources` → no match, plus reading `TraceIdFilter.java` | the filter *is* registered; no log pattern prints the id — INF-15, and a correction (§6.6) |
+| 17 | **Independent re-verification of every `file:line` citation in this file** against the source, not against other documents | four citations were wrong and are corrected here rather than quietly patched: `nginx.conf:1`→`:2`, `ci.yml:36-40`→`:51-56`, "15 Makefile recipes"→**16 of 17**, and OPS-15's "`*.class` rule absent" (`*.class` is at `.gitignore:28`, added by M1). Everything else confirmed, including all compose, Dockerfile, workflow, properties and `pom.xml` line numbers |
 
 Where a claim could not be tested, it is in [§8](#8-what-could-not-be-tested-and-what-is-blocked-on-the-owner), not in a finding.
 
@@ -93,7 +94,7 @@ accepted until its verification criterion has been executed and recorded.
 **Evidence.** `gms_frontend/vercel.json:5` rewrites `/api/:path*` to `http://<ec2 public dns>:8080/api/:path*`.
 There is no certificate, key, `listen 443`, `ssl_certificate` or TLS term anywhere in the repository:
 `grep -rliE "ssl_certificate|443" --include=*.conf --include=*.yml --include=Dockerfile` returns nothing, and
-`gms_frontend/nginx.conf:1` listens on 80 only. Port 8080 is published on all interfaces (§1 row 1).
+`gms_frontend/nginx.conf:2` listens on 80 only. Port 8080 is published on all interfaces (§1 row 1).
 
 **What is and is not protected.** Browser → Vercel is HTTPS with a Vercel-managed certificate. The
 Vercel → EC2 hop is plaintext HTTP over the public internet and carries every `Authorization: Bearer <JWT>`,
@@ -390,7 +391,8 @@ staging URL is unreachable from outside; a documented runbook shows the prod-par
 
 ### INF-12 · HIGH — The documented container workflow does not run, and one target deletes the data
 
-**Evidence.** Every one of the 15 recipes in `Makefile` invokes `docker-compose` (v1): `make build` fails here
+**Evidence.** Sixteen of `Makefile`'s seventeen recipes invoke `docker-compose` (v1) — only `help` does not;
+`make build` fails here
 with `make: docker-compose: No such file or directory` → `Error 1`, and `make up` exits 2. The binary is not
 installed; Compose v5.6.1 is available as `docker compose`. `make clean` (`:65-67`) is `docker-compose down -v`
 with the warning printed *after* the destructive call, and `.PHONY` (`:1`) omits seven declared targets.
@@ -401,7 +403,7 @@ improvise — which is how data-destroying commands get run in desperation. `mak
 `postgres_data`; there is no backup to restore from (INF-13), so `make clean` is currently equivalent to
 "destroy the database".
 
-**Remediation.** Replace all 15 recipes with `docker compose`, add `-f compose.yaml -f compose.dev.yaml`, guard
+**Remediation.** Replace all sixteen with `docker compose`, add `-f compose.yaml -f compose.dev.yaml`, guard
 `clean` behind an explicit confirmation variable, and add `test`, `migrate`, `db-backup`, `db-restore` and
 `config-validate` targets so the operational verbs in §12 of the mandate are reachable from the repository
 rather than from memory.
@@ -496,7 +498,9 @@ commit the workflow just deployed.
 
 ### INF-16 · MEDIUM — CI uploads a 53 MB artefact that nothing downloads
 
-**Evidence.** `ci.yml:36-40` uploads `gms-backend-jar` on every run. `gh api …/actions/artifacts`: 6 live
+**Evidence.** `ci.yml:51-56` uploads `gms-backend-jar` on every run (and `:58-65` uploads JaCoCo); nothing in either
+workflow ever downloads either one — `grep download-artifact .github/workflows/` returns no match.
+`gh api …/actions/artifacts`: 6 live
 artefacts totalling 162,252,049 bytes (154.74 MB) from three runs — 53.4 MB per jar, plus 0.68 MB JaCoCo, each
 with `retention-days: 7`. Nothing in either workflow consumes them, and no release process uses them. GitHub
 Free includes 500 MB of artefact storage **shared with Packages**, overage billed per GB-month;
@@ -655,12 +659,12 @@ The first audit already owns these; this table records only what Infra-M0 change
 | OPS-06 no rollback | Still open | root cause named: INF-03 (no artefact lineage) + INF-09 (no immutable tags) |
 | OPS-07 no migrations | Still open, re-verified | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` key is inert; dev defaults to `ddl-auto=${JPA_DDL_AUTO:update}` (`application-dev.properties:20`) |
 | OPS-08 compose cannot boot from a fresh clone | **Partially closed** | INF-22: config validates; the `env_file: .env` requirement on both services remains, and ports/networks remain — INF-19 |
-| OPS-09 EOL `docker-compose` in Makefile | Still open, escalated | proved broken on this machine (`make build` → `Error 1`) — INF-12 |
+| OPS-09 EOL `docker-compose` in Makefile | Still open, escalated | measured as **16 of the 17 recipes** (`help` is the only exception); proved broken on this machine (`make build` → `Error 1`, `make up` → exit 2) — INF-12 |
 | OPS-10 frontend image cannot reach an API | Still open | `nginx.conf` re-read: no `/api` block; combined with INF-14 the container path has no health gate either |
 | OPS-11 debug logging by default | **Closed in code** | `application.properties:95-96` now defaults `INFO`; rotation/size still unbounded — INF-06 |
 | OPS-12 JaCoCo decorative | Improved | `mvn -B verify` runs in CI and a coverage artefact is produced (`jacoco-coverage`, 679 KB) — the artefact-sizing problem is INF-16 |
 | OPS-13 no Spring profiles | **Closed in code** | base/dev/prod exist; `prod` has never booted — INF-11 |
-| OPS-15 `.gitignore` gaps | Still open | `.gitignore:2-4` covers `.env*` correctly and root `.env` is untracked, but `gms_frontend/.env.production` is tracked and `*.pem`/`*.key`/`secrets/` are absent — INF-17 |
+| OPS-15 `.gitignore` gaps | Still open | `.gitignore:2-4` covers `.env*` correctly and root `.env` is untracked. `*.class` is now present at `:28` (added by M1, so that half of the original claim is closed); `gms_frontend/.env.production` remains tracked and `*.pem`/`*.key`/`secrets/` remain absent — INF-17 |
 | OPS-16 no backup procedure | Still open, sized | measured dump size turns "unknown" into "MB-scale, placement is the problem" — INF-13 |
 | OPS-17 health endpoint always DOWN | Fixed by M1 (readiness group) | compose healthcheck now targets `/actuator/health/readiness` (`:49`); the prometheus/info half remains — INF-15 |
 
