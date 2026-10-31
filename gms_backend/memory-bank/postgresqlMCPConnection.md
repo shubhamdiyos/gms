@@ -1,5 +1,16 @@
 # PostgreSQL MCP Connection Status - WindsurfGMS
 
+> **Historical snapshot — not current state (verified 2026-11-01).** This file records an
+> ad-hoc inspection of a *local* PostgreSQL 14.13 (Homebrew) instance. It is out of date and
+> partly contradicts the repository: `application.properties` points the application at a
+> hosted Neon database, not `localhost`, and the "Multi-Tenancy: ✅ supported" and
+> "tenant isolation operational" claims are **not** true — see
+> [docs/audit/REPOSITORY_AUDIT.md](../../docs/audit/REPOSITORY_AUDIT.md) findings TEN-01…TEN-07.
+> The table inventory below (39 tables) also disagrees with the 38 tables Hibernate
+> generates from the current entities (see
+> [docs/audit/BASELINE_STATUS.md](../../docs/audit/BASELINE_STATUS.md) §6). Treat this as a
+> dated note about a developer laptop, not as a description of the deployed schema.
+
 ## 🔗 CONNECTION ESTABLISHED SUCCESSFULLY
 
 ### 📊 Database Connection Details
@@ -29,32 +40,23 @@
 - **Communication**: announcements, messages, notifications, communication_templates, email_logs, sms_logs
 - **Relationships**: parent_student, student_admissions
 
-### 📈 Current Data Statistics
+### 📈 Data statistics at the time of the snapshot
 
-**Schools**: 14 active schools  
-**Users**: 14 registered users  
-**Students**: 1 student record  
-**Database Growth**: Active with recent entries (latest school created Aug 21, 2025)
+**Schools**: 14 · **Users**: 14 · **Students**: 1 (latest school created 2025-08-21)
 
-#### 🏫 Recent Schools Sample
-```
-ID | School Name         | Code   | Created
-36 | Acme High          | ACME03 | 2025-08-21 20:47:16
-35 | Acme High          | ACME02 | 2025-08-21 20:45:33
-34 | Acme High          | ACME01 | 2025-08-21 20:44:57
-33 | System Scope       | SYS    | [system]
-32 | Test6 Public School| SPS006 | 2025-08-20 15:34:10
-```
+Row-level samples that previously sat here (school names/codes, usernames, e-mail
+addresses) have been removed: they were personal data copied out of a database into a
+publicly readable document, and mandate §3 forbids that. If you need the equivalent
+evidence, query a **disposable** database during a test run and keep the output out of the
+repository.
 
-#### 👥 Recent Users Sample
-```
-ID | Username | Email                      | Full Name    | Role
-36 | alice3   | admin3@example.com         | Alice Admin  | ADMIN
-35 | alice2   | admin2@example.com         | Alice Admin  | ADMIN
-34 | alice1   | admin@example.com          | Alice Admin  | ADMIN
-32 | school5  | warmachinegaming4@gmail.com| School Admin | ADMIN
-31 | school4  | imshubhy@gmail.com         | School Admin | ADMIN
-```
+One structural observation survives the removal and is worth keeping: the sample contained
+three schools all named "Acme High" (`ACME01`, `ACME02`, `ACME03`) created within three
+minutes of each other, plus a `SYS` row (the bootstrap system school). `schools.school_code`
+*is* unique, but nothing guards `school_name`, and the create-tenant flow has no idempotency
+key — so a double-clicked "Create School" mints a new tenant each time. That is a
+tenant-provisioning defect, recorded in
+[docs/audit/REPOSITORY_AUDIT.md](../../docs/audit/REPOSITORY_AUDIT.md).
 
 ### 🔐 Security Configuration
 

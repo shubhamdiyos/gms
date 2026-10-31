@@ -22,8 +22,8 @@ The system is configured through `SuperAdminBootstrapProperties` with the follow
 app.superadmin.enabled=true
 app.superadmin.skip-if-exists=true
 app.superadmin.username=superadmin
-app.superadmin.password=SuperAdmin123!
-app.superadmin.email=superadmin@gms.local
+app.superadmin.password=<APP_SUPERADMIN_PASSWORD>
+app.superadmin.email=<superadmin-email>
 app.superadmin.full-name=Super Administrator
 app.superadmin.force-password-change=true
 ```
@@ -89,20 +89,22 @@ Key features:
 
 ## 🔧 Environment Variables
 
-### Required Environment Variables
-| Variable | Description | Required |
-|----------|-------------|----------|
-| `SUPERADMIN_PASSWORD` | SuperAdmin password (minimum 8 characters) | ✅ Yes |
+### Environment variables that actually bind
 
-### Optional Environment Variables
-| Variable | Description | Default |
+`SuperAdminBootstrapProperties` is annotated `@ConfigurationProperties(prefix = "app.superadmin")`, so Spring's
+relaxed binding reads the `APP_SUPERADMIN_*` names below. The `SUPERADMIN_*` names previously listed in this file —
+and still written in the class Javadoc — **bind to nothing**; setting `SUPERADMIN_PASSWORD` leaves the source-code
+default in force. Recorded as finding **SEC-15**.
+
+| Variable | Description | Default in code today |
 |----------|-------------|---------|
-| `SUPERADMIN_USERNAME` | SuperAdmin username | superadmin |
-| `SUPERADMIN_EMAIL` | SuperAdmin email | superadmin@gms.local |
-| `SUPERADMIN_FULL_NAME` | SuperAdmin full name | Super Administrator |
-| `SUPERADMIN_BOOTSTRAP_ENABLED` | Enable/disable bootstrap | true |
-| `SUPERADMIN_SKIP_IF_EXISTS` | Skip if superadmin exists | true |
-| `SUPERADMIN_FORCE_PASSWORD_CHANGE` | Force password change on first login | true |
+| `APP_SUPERADMIN_PASSWORD` | SuperAdmin password (minimum 8 characters) | ⚠️ a shipped literal (**SEC-03**) |
+| `APP_SUPERADMIN_USERNAME` | SuperAdmin username | ⚠️ a shipped literal |
+| `APP_SUPERADMIN_EMAIL` | SuperAdmin email | ⚠️ a shipped literal |
+| `APP_SUPERADMIN_FULL_NAME` | SuperAdmin full name | ⚠️ a shipped literal |
+| `APP_SUPERADMIN_ENABLED` | Enable/disable bootstrap | `true` — must fail closed in production |
+| `APP_SUPERADMIN_SKIP_IF_EXISTS` | Skip if superadmin exists | `true` |
+| `APP_SUPERADMIN_FORCE_PASSWORD_CHANGE` | Force password change on first login | `true` |
 
 ## 🛡️ Security Features
 
@@ -203,7 +205,7 @@ The school creation process was successfully tested and verified to work correct
 - ✅ SuperAdmin login successful with proper JWT token generation
 - ✅ School creation endpoint accessible with valid credentials
 - ✅ New school created with correct details
-- ✅ Admin user automatically created with specified email ("imshubhy@gmail.com")
+- ✅ Admin user automatically created with specified email ("<admin-email>")
 - ✅ Employee record created for admin user
 - ✅ ADMIN role assigned to admin user
 - ✅ All multi-tenant security validations working correctly
@@ -228,21 +230,25 @@ Potential improvements for future development:
 
 ## 📝 Usage Examples
 
+The property is `app.superadmin.password`; Spring relaxed binding reads the environment
+variable `APP_SUPERADMIN_PASSWORD`. Supply the value from your secret store — never commit
+it and never reuse the example shape below as a real password.
+
 ### Setting Environment Variable (Linux/Mac)
 ```bash
-export SUPERADMIN_PASSWORD="SecurePassword123!"
-./mvnw spring-boot:run
+export APP_SUPERADMIN_PASSWORD="<from your secret manager>"
+mvn -f gms_backend/pom.xml spring-boot:run
 ```
 
 ### Setting Environment Variable (Windows)
 ```cmd
-set SUPERADMIN_PASSWORD=SecurePassword123!
+set APP_SUPERADMIN_PASSWORD=<from your secret manager>
 mvn spring-boot:run
 ```
 
 ### Docker Run with Environment Variable
 ```bash
-docker run -e SUPERADMIN_PASSWORD="SecurePassword123!" windsurfgms/app
+docker run -e APP_SUPERADMIN_PASSWORD="<from your secret manager>" gms-backend
 ```
 
 ## 📈 Testing the Bootstrap

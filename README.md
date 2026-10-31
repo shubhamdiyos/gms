@@ -83,22 +83,46 @@ WindsurfGMS/
 
 1. **Clone the repository**
 ```bash
-git clone https://github.com/imshubhy/gms.git
+git clone https://github.com/shubhamdiyos/gms.git
 cd gms/gms_backend
 ```
 
-2. **Configure database**
-```properties
-# Update gms_backend/src/main/resources/application.properties
-spring.datasource.url=jdbc:postgresql://localhost:5432/gms
-spring.datasource.username=gms_user
-spring.datasource.password=gms_password
+2. **Point the application at a database you own**
+
+Do **not** hand-edit `gms_backend/src/main/resources/application.properties`: the committed file currently carries a
+hosted database credential (finding SEC-01 in
+[docs/audit/REPOSITORY_AUDIT.md](docs/audit/REPOSITORY_AUDIT.md)), and editing it is how a developer ends up working
+against production data by accident. Override the datasource at run time instead:
+
+```bash
+# start the disposable Postgres from Compose
+cp .env.example .env
+docker compose up -d postgres
+
+# run the backend against it (command-line properties win over the file)
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # JDK 21 only — see below
+mvn spring-boot:run -Dspring-boot.run.arguments=" \
+  --spring.datasource.url=jdbc:postgresql://localhost:5432/gms?sslmode=disable \
+  --spring.datasource.username=gms_user \
+  --spring.datasource.password=<DB_PASSWORD from your .env>"
 ```
 
-3. **Run the application**
-```bash
-mvn spring-boot:run
-```
+Two caveats that are real today, not aspirational:
+
+* **Java 21 is required.** With a newer default JDK the build fails with
+  `Fatal error compiling: … TypeTag :: UNKNOWN` (a Lombok/javac incompatibility). Nothing in the repository pins this
+  yet.
+* **The application cannot create its own schema from a clean database.** `ddl-auto` defaults to `validate` and there
+  are no migration files, so startup fails with `Schema-validation: missing table [academic_years]` until Flyway
+  migrations exist (OPS-07). The temporary workaround used during the baseline was
+  `--spring.jpa.hibernate.ddl-auto=update` **against a disposable database only** — never against a hosted one.
+
+Full reproduction steps and measured outputs: [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md).
+
+3. **Start the backend**
+
+Use the command in step 2 — plain `mvn spring-boot:run` reads the committed datasource URL, which points at a hosted
+database.
 
 Backend will start on `http://localhost:8080`
 
@@ -121,12 +145,21 @@ npm run dev
 
 Frontend will start on `http://localhost:5173`
 
-## 🔑 Default Credentials
+## 🔑 Initial SuperAdmin
 
-### SuperAdmin
-- **Username**: `superadmin`
-- **Password**: `SuperAdmin123!`
-- **Access**: System-wide management
+The first SuperAdmin is created at startup by the bootstrap runner. Its username and
+password are **not** stored in this repository — they come from deployment configuration:
+
+| Property | Purpose |
+| --- | --- |
+| `APP_SUPERADMIN_ENABLED` | Turn the bootstrap on or off |
+| `APP_SUPERADMIN_USERNAME` | Login name of the initial platform administrator |
+| `APP_SUPERADMIN_PASSWORD` | Initial password (must satisfy the password policy) |
+| `APP_SUPERADMIN_EMAIL` | Contact address for the account |
+| `APP_SUPERADMIN_FULL_NAME` | Display name |
+
+See [docs/audit/SECURITY_AUDIT.md](docs/audit/SECURITY_AUDIT.md) for why a shipped default is
+not acceptable. The initial password is single-use: the first login forces a change.
 
 ## 📊 API Endpoints
 
@@ -153,23 +186,32 @@ Frontend will start on `http://localhost:5173`
 
 ## 🔐 Security Features
 
+Status labels below describe the **implemented** behaviour, measured on 2026-11-01 against a local instance
+([docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md) §4). The target design is in the audit; the gaps are
+tracked by finding ID.
+
 ### JWT Authentication
-- Stateless authentication with JWT tokens
-- Role-based claims in JWT payload
-- Automatic token refresh mechanism
-- Secure password hashing with BCrypt
+- Stateless authentication with JWT tokens — implemented
+- Role-based claims in the JWT payload — implemented
+- Secure password hashing with BCrypt — implemented
+- ~~Automatic token refresh mechanism~~ — **does not exist** (SEC-11): there is no refresh endpoint, no logout and no
+  revocation list, so a 1-hour token cannot be withdrawn, even after a password change
+- Token signing key — **currently the source-code default**, which is public (SEC-02). Rotating it is an owner action
 
 ### Multi-Tenant Architecture
-- School-level data isolation
-- Automatic school ID injection via JWT
-- Cross-school access for SuperAdmin only
-- Tenant-aware repository queries
+- One `School` = one tenant, resolved from the token — implemented as a convention
+- ~~School-level data isolation~~ / ~~Tenant-aware repository queries~~ — **not enforced**. The seven controllers that
+  inherit `AbstractCRUDController` expose `GET /{id}` and `DELETE /{id}` with no tenant predicate (TEN-01…TEN-07),
+  `users`, `schools`, `students`, `fee_payments` and 12 tables in total have no tenant column at all, and the student
+  and parent portal routes are unreachable because of filter-chain ordering (SEC-06)
+- ~~Cross-school access for SuperAdmin only~~ — a correctly signed token asserts whatever `schoolId` it carries
 
 ### RBAC Implementation
-- Method-level security with `@PreAuthorize`
-- Role hierarchy enforcement
-- Permission-based UI rendering
-- Protected routes in frontend
+- Method-level security with `@PreAuthorize` — partially: 6 of 36 controllers have none, and 20 of 36 are protected
+  only by `anyRequest().authenticated()`
+- ~~Role hierarchy enforcement~~ — no hierarchy is configured; authorities come from the `user_roles` table
+- Permission-based UI rendering and protected frontend routes — implemented, but client-side only and therefore not a
+  security control
 
 ## 🎨 Frontend Features
 
@@ -206,17 +248,20 @@ Frontend will start on `http://localhost:5173`
 
 ## 🧪 Testing
 
-### Backend Testing
-```bash
-cd gms_backend
-mvn test
-```
+**There are no automated tests in this repository yet** (finding OPS-14), and this section previously told you
+otherwise:
 
-### Frontend Testing
-```bash
-cd gms_frontend
-npm test
-```
+| Command | What actually happens today |
+| --- | --- |
+| `mvn test` | exits `BUILD SUCCESS` after printing `No tests to run.` — `gms_backend/src/test` does not exist |
+| `npm test` | fails: `gms_frontend/package.json` has no `test` script and no test runner installed |
+| JaCoCo | declared in `pom.xml` with no `<executions>`, so it never instruments and never reports (OPS-12) |
+| CI | the single workflow (`.github/workflows/deploy-backend.yml`) deploys to production on push to `master` and runs no build, test or scan job (OPS-01) |
+
+Until the testing milestones land, the only manual verification path is the Postman collection — 45 requests against
+roughly 230 endpoint mappings — documented in
+[docs/WindsurfGMS-Postman-Testing-Guide.md](docs/WindsurfGMS-Postman-Testing-Guide.md). Run it against a disposable
+database only.
 
 ## 📝 Contributing
 
@@ -233,8 +278,8 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 ## 👥 Team
 
 - **Developer**: Shubham Kumar
-- **Email**: imshubhy@gmail.com
-- **GitHub**: [@shubhamdiyos](https://github.com/shubhamdiyos)
+- **GitHub**: [@shubhamdiyos](https://github.com/shubhamdiyos) — open an issue on this repository for anything
+  GMS-related
 
 ## 🙏 Acknowledgments
 
