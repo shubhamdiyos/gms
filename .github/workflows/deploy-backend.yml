@@ -5,13 +5,23 @@ on:
     branches:
       - master
     paths:
-      - 'gms_backend/**'
-      - '.github/workflows/**'
+      # Deployment is for deployables. Documentation, the memory-bank notes and
+      # CI workflow edits must not be able to push a release: merging PR #9 ran
+      # this workflow twice because `gms_backend/**` also matched
+      # gms_backend/memory-bank/*.md.
+      - 'gms_backend/src/**'
+      - 'gms_backend/pom.xml'
+      - 'gms_backend/Dockerfile'
+      - '.github/workflows/deploy-backend.yml'
   workflow_dispatch:
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
+    env:
+      # Host-key verification is mandatory (mandate §25.8); the known_hosts file is
+      # written by the "Pin SSH host key" step from the EC2_SSH_KNOWN_HOSTS secret.
+      SSH_OPTS: -o StrictHostKeyChecking=yes -o UserKnownHostsFile=/home/runner/.ssh/known_hosts -o ConnectTimeout=10
     concurrency:
       group: deploy-backend
       cancel-in-progress: true
@@ -25,6 +35,26 @@ jobs:
         uses: webfactory/ssh-agent@v0.9.0
         with:
           ssh-private-key: ${{ secrets.EC2_SSH_KEY }}
+
+      - name: Pin SSH host key
+        env:
+          EC2_HOST: ${{ secrets.EC2_HOST }}
+          EC2_SSH_KNOWN_HOSTS: ${{ secrets.EC2_SSH_KNOWN_HOSTS }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if [[ -z "${EC2_SSH_KNOWN_HOSTS:-}" ]]; then
+            echo "::error::secret EC2_SSH_KNOWN_HOSTS is not set. Add the line produced by" \
+                 "'ssh-keygen -t ed25519 -F <host>' or 'ssh-keyscan <host> | ssh-keygen -lf -'," \
+                 "verified out of band. Deploy is refused rather than run with host-key checking" \
+                 "disabled (mandate §25.8)."
+            exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$EC2_SSH_KNOWN_HOSTS" > ~/.ssh/known_hosts
+          chmod 600 ~/.ssh/known_hosts
+          ssh-keygen -l -f ~/.ssh/known_hosts >/dev/null
+          echo "Pinned $(wc -l < ~/.ssh/known_hosts) known host key(s)."
 
       - name: Show config (sanitized)
         env:
@@ -44,12 +74,12 @@ jobs:
         run: |
           set -euxo pipefail
           for i in {1..3}; do
-            if ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "$EC2_USER@$EC2_HOST" 'echo connected'; then
+            if ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" 'echo connected'; then
               break
             fi
             echo "SSH attempt $i failed; retrying in 5s" && sleep 5
           done
-      
+
       - name: Deploy backend on EC2
         env:
           EC2_HOST: ${{ secrets.EC2_HOST }}
@@ -57,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" 'test -f ~/deploy_backend.sh && bash ~/deploy_backend.sh'
+          ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" 'test -f ~/deploy_backend.sh && bash ~/deploy_backend.sh'
 
       - name: Post-deploy health check
         env:
@@ -84,4 +114,4 @@ jobs:
         shell: bash
         run: |
           set -euxo pipefail
-          ssh -o StrictHostKeyChecking=no "$EC2_USER@$EC2_HOST" 'docker ps -a || true'
+          ssh $SSH_OPTS "$EC2_USER@$EC2_HOST" 'docker ps -a || true'

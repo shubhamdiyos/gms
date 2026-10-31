@@ -38,7 +38,7 @@ public class TeacherAssignmentController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<TeacherAssignmentResponse>> getAllAssignments() {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -49,7 +49,7 @@ public class TeacherAssignmentController {
     }
 
     @GetMapping("/teacher/{teacherId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<TeacherAssignmentResponse>> getAssignmentsByTeacher(@PathVariable Integer teacherId) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -60,7 +60,7 @@ public class TeacherAssignmentController {
     }
 
     @GetMapping("/classroom/{classroomId}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<TeacherAssignmentResponse>> getAssignmentsByClassroom(@PathVariable Integer classroomId) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -71,7 +71,7 @@ public class TeacherAssignmentController {
     }
 
     @GetMapping("/academic-year/{academicYear}")
-    @PreAuthorize("hasAnyRole('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<TeacherAssignmentResponse>> getAssignmentsByAcademicYear(@PathVariable String academicYear) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -105,7 +105,7 @@ public class TeacherAssignmentController {
     }
 
     @GetMapping("/my-assignments")
-    @PreAuthorize("hasRole('TEACHER')")
+    @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<List<TeacherAssignmentResponse>> getMyAssignments() {
         String username = SecurityUtil.getUsernameFromToken();
         List<TeacherAssignmentResponse> assignments = teacherAssignmentService.getAssignmentsByUsername(username);

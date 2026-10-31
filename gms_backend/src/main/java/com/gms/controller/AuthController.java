@@ -1,6 +1,5 @@
 package com.gms.controller;
 
-import com.gms.config.SuperAdminBootstrapProperties;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.User;
 import com.gms.model.request.LoginRequest;
@@ -9,15 +8,18 @@ import com.gms.model.request.SelfRegisterRequest;
 import com.gms.model.response.AuthTokenResponse;
 import com.gms.security.JwtTokenProvider;
 import com.gms.service.EmployeeService;
+import com.gms.service.LoginAttemptService;
 import com.gms.service.UserService;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import com.gms.util.PasswordValidator;
 import jakarta.validation.Valid;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.AuthenticationException;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,6 +33,7 @@ import java.util.HashSet;
 import java.util.Set;
 import java.util.Optional;
 
+@Slf4j
 @RestController
 @RequestMapping(Constants.API_BASE_V1 + "/auth")
 public class AuthController {
@@ -40,49 +43,45 @@ public class AuthController {
     private final UserService userService;
     private final EmployeeService employeeService;
     private final PasswordEncoder passwordEncoder;
-    private final SuperAdminBootstrapProperties bootstrapProperties;
+    private final LoginAttemptService loginAttemptService;
 
     public AuthController(AuthenticationManager authenticationManager, JwtTokenProvider tokenProvider, 
                          UserService userService, EmployeeService employeeService, PasswordEncoder passwordEncoder,
-                         SuperAdminBootstrapProperties bootstrapProperties) {
+                         LoginAttemptService loginAttemptService) {
         this.authenticationManager = authenticationManager;
         this.tokenProvider = tokenProvider;
         this.userService = userService;
         this.employeeService = employeeService;
         this.passwordEncoder = passwordEncoder;
-        this.bootstrapProperties = bootstrapProperties;
+        this.loginAttemptService = loginAttemptService;
     }
 
     /**
      * Unified login endpoint for all users including superadmin, admin, teacher, parent, and student.
      * Accepts username and password for authentication.
-     * 
+     *
+     * <p>No part of the credential is logged (mandate §7.4). Every failure answers with the same bare
+     * 401 so the endpoint cannot be used to enumerate accounts, and repeated failures lock the account
+     * through {@link LoginAttemptService}.</p>
+     *
      * @param request LoginRequest containing username and password
      * @return AuthTokenResponse with JWT token and user information
      */
     @PostMapping("/login")
     public ResponseEntity<AuthTokenResponse> login(@Valid @RequestBody LoginRequest request) {
-        System.out.println("Login request received for username: " + request.getUsername());
-        // Find user by username only (no email fallback)
         Optional<User> userOptional = userService.findByUsername(request.getUsername());
-        User domainUser = userOptional.orElse(null);
-        
-        // If not found, return unauthorized
-        if (domainUser == null || domainUser.getUsername() == null) {
-            System.out.println("User not found or username is null");
+        if (userOptional.isEmpty()) {
+            log.debug("Login for unknown username: {}", request.getUsername());
             return ResponseEntity.status(401).build();
         }
-        
-        System.out.println("User found: " + domainUser.getUsername() + " with password hash: " + domainUser.getPassword());
+        User domainUser = userOptional.get();
 
-        // Authenticate using username from request (not from domainUser) to match UserDetailsService implementation
         try {
-            System.out.println("Attempting authentication with username: " + request.getUsername());
             Authentication auth = authenticationManager.authenticate(
                     new UsernamePasswordAuthenticationToken(request.getUsername(), request.getPassword())
             );
-            System.out.println("Authentication successful");
-            
+            loginAttemptService.onSuccess(domainUser);
+
             UserDetails principal = (UserDetails) auth.getPrincipal();
             Set<String> roles = principal.getAuthorities().stream()
                     .map(authority -> authority.getAuthority().replace("ROLE_", ""))
@@ -91,16 +90,14 @@ public class AuthController {
             Integer schoolId = (domainUser.getSchool() != null) ? domainUser.getSchool().getId() : null;
             // For superadmin and other special users, use user ID as employee ID if no employee is associated
             Integer empId = (domainUser.getEmployee() != null) ? domainUser.getEmployee().getId() : domainUser.getId();
-            String subject = domainUser.getUsername();
-            String token = tokenProvider.createToken(subject, roles, schoolId, empId);
+            String token = tokenProvider.createToken(domainUser.getUsername(), roles, schoolId, empId);
 
-            boolean requirePasswordChange = domainUser.isRequirePasswordChange();
-            // Create AuthTokenResponse without user details
-            AuthTokenResponse payload = new AuthTokenResponse(token, 3600, requirePasswordChange);
+            AuthTokenResponse payload = new AuthTokenResponse(token,
+                    (int) tokenProvider.getValiditySeconds(), domainUser.isRequirePasswordChange());
             return ResponseEntity.ok(payload);
-        } catch (Exception e) {
-            System.out.println("Authentication failed: " + e.getMessage());
-            e.printStackTrace();
+        } catch (AuthenticationException e) {
+            loginAttemptService.onFailure(domainUser);
+            log.debug("Login failed for {}: {}", request.getUsername(), e.getClass().getSimpleName());
             return ResponseEntity.status(401).build();
         }
     }

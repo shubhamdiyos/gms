@@ -1,0 +1,100 @@
+name: CI
+
+# Gates every change before it can reach `master`. Runs on GitHub-hosted
+# ubuntu-latest only — no paid runners, no cloud services, no managed databases
+# (mandate §13, and the founder's standing zero-unexpected-cost rule).
+# Documentation-only changes do not start a build.
+
+on:
+  pull_request:
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'gms_backend/memory-bank/**'
+      - '.github/**'
+  push:
+    branches:
+      - master
+    paths-ignore:
+      - 'docs/**'
+      - '*.md'
+      - 'gms_backend/memory-bank/**'
+      - '.github/**'
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend build and tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    defaults:
+      run:
+        working-directory: gms_backend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'                     # the project targets 21; JDK 24 breaks Lombok
+          cache: maven
+
+      - name: Compile, test and package
+        run: mvn -B verify
+
+      - name: Upload jar
+        uses: actions/upload-artifact@v4
+        with:
+          name: gms-backend-jar
+          path: gms_backend/target/*.jar
+          retention-days: 7
+
+      - name: Upload coverage
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage
+          path: gms_backend/target/site/jacoco
+          retention-days: 7
+          if-no-files-found: ignore
+
+  frontend:
+    name: Frontend lint and build
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        working-directory: gms_frontend
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: gms_frontend/package-lock.json
+
+      - run: npm ci
+
+      - name: Lint
+        run: npm run lint
+        # Measured on this branch: 47 errors across ~25 files, none introduced by the security
+        # package (verified by grouping `npm run lint` output per file — `Login.jsx` contributes
+        # zero). Eight of them sit in the dead `api/[...path].js` proxies from SEC-14. Making this
+        # blocking now would turn the gate into noise and invite a blanket eslint-disable; it
+        # becomes a hard check with the frontend contract package (TECHNICAL_DEBT §2 row 11),
+        # which is also where the errors are actually fixed.
+        continue-on-error: true
+
+      - name: Unit tests
+        run: npm test -- --run --watchAll=false
+        continue-on-error: true          # Vitest/RTL arrive with M3; must not block merges yet
+
+      - name: Production build
+        run: npm run build

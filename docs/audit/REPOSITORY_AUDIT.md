@@ -201,6 +201,23 @@ Compose; correct the Javadoc and the memory-bank tables.
 success when it is set, plus an assertion that the seeded BCrypt digest matches the injected value and not the default;
 a repository-wide grep showing no `SUPERADMIN_PASSWORD` without the `APP_` prefix.
 
+**SEC-16 — Thirteen authorisation guards written in a vocabulary the application can never produce.**
+At baseline `git grep -c "has\(Any\)\?Role(" HEAD` returns 13 matches in four controllers — 6 `hasRole('ADMIN')` /
+`hasAnyRole('ADMIN','TEACHER')` on parent and subject reads, 2 `hasRole('TEACHER')`, 1 `hasRole('STUDENT')`. `hasRole('X')`
+tests for the authority `ROLE_X`, but `CustomUserDetailsService.java:43` (its own comment said `// Don't add ROLE_ prefix`)
+grants the bare role code from `user_roles`, and no code in the repository ever prefixes it. The expression is therefore
+never true: those thirteen endpoints answer **403 for every caller including a genuine SUPERADMIN**, so the parent,
+subject and timetable portals were unreachable regardless of tenancy. This is not an opening, it is a silent denial of
+service, and it is dangerous for a different reason: an inert rule teaches the next operator that role checks do not
+work and that the fix is to widen the filter-chain matchers — which is exactly how SEC-04 and SEC-06 were made.
+*Remediation (M1):* converted to the mechanism the rest of the codebase already uses (`hasAuthority` /
+`hasAnyAuthority` on the bare role code) rather than introducing a prefix or a second authorization system; the
+`ROLE_`-prefix idea is explicitly rejected because 200+ existing guards and `AuthController.java:87` assume the bare
+code.
+*Verification:* `git grep "hasRole("` returns nothing; `scripts/verify-security.sh` §3 asserts a real SUPERADMIN token
+reaches `/users`, `/users/me` and `/actuator/info` and is refused `/students/my-fees` with 403 (checked, not assumed:
+both the allow and the deny path are exercised).
+
 ### Tenant isolation (mandate §6)
 
 **TEN-01 — `schoolId` accepted then ignored, with a literal TODO.** `FeePaymentServiceImpl.java:150-152`, `ReceiptServiceImpl.java:145-147`, `InvoiceServiceImpl.java:154-156`, `ResultServiceImpl.java:162-168`, `StudentExamServiceImpl.java:127`, `AttendanceServiceImpl.java:201-211`, `TimetableServiceImpl.java:72-99`, `UserServiceImpl.java:130` all receive the tenant and never filter by it — several carry the comment `// Filter by schoolId if needed`. Repositories back this: `FeePaymentRepository.java:19`, `ReceiptRepository.java:17`, `InvoiceRepository.java:17`, `ResultRepository.java:13,16`, `AttendanceRepository.java:16,18`, `UserRepository.java:70` (`findByRole` spans every school), `TeacherAssignmentRepository.java:21` (`findByAcademicYear` spans every school).
@@ -296,6 +313,40 @@ jar lists no `Test`/`Util` password classes.
 
 **BKL-06 (P2)** Inconsistent empties: several list endpoints return 204 while others return `[]` (`ParentController.java:59-61`, `ClassroomController.java:59`).
 
+**BKL-07 (P1)** Client-caused rejections answered **HTTP 500**, and `UserRequest.email` had no format validation.
+`GlobalExceptionHandler` mapped only the repository's own `NotFoundException`; the two exception types the service layer
+actually throws for bad input fell through to the catch-all. `EntityNotFoundException` is the codebase's not-found signal (28 service implementations import it), and every
+`throw new IllegalArgumentException` site is a caller-correctable
+conflict — duplicate business key, null tenant reference, password below policy, unknown role code. So `POST /users/create`
+with a duplicated email returned 500, and `not-an-email` passed bean validation entirely.
+*Remediation (M1):* added an `IllegalArgumentException` → 400 and `EntityNotFoundException` → 404 handler (both logged at
+WARN with the trace id, both returning a business message rather than the exception identity), and `@Email` on
+`UserRequest.email`. `DomainException`/`NotFoundException` are untouched — the new handlers complement the existing
+mechanism instead of replacing it.
+*Verification:* `GlobalExceptionHandlerTest` (4 cases) plus the live probes in `docs/audit/BASELINE_STATUS.md` §4.6 —
+duplicate email now `400 {"error":"Invalid request","message":"Email already in use"}`, malformed email
+`400 {"fields":{"email":"must be a well-formed email address"}}`, absent creator `404` with no internals.
+*Deliberately not done:* mapping `EntityNotFoundException` to 404 does mean a Hibernate-originated instance (a proxy whose
+row vanished) also reports 404 instead of 500. That trade is accepted for M1 because the alternative — rewriting 28 call
+sites onto a repository exception — is the schema/test-gated refactor this audit schedules for M3+.
+
+**BKL-08 (P1) — Found while verifying M1.** A bootstrapped administrator can never create a user.
+`UserServiceImpl.createUserFromRequest` resolves the acting principal through `findByEmployee_Id(empId)` and throws
+`EntityNotFoundException("Creator user not found")` when it fails. `SuperAdminBootstrapRunner` creates a `User` row with
+no `Employee`, and `AuthController.java:91` papers over that with `empId = employee != null ? employee.getId() : user.getId()`
+— substituting a **user** primary key into a claim that every reader interprets as an **employee** primary key. So a
+fresh deployment issues a token with `empId=2` for the user whose id is 2, the lookup queries `employees`, finds nothing,
+and `POST /users/create` — the endpoint every other module's `created_by` chain depends on — fails. The two id spaces
+collide by accident, which also means a bootstrap admin whose user id happens to equal some other tenant's employee id
+would be recorded as created-by *that* employee.
+At baseline this presented as a 500; after BKL-07 it presents as a 404. Neither is correct: the caller cannot fix it.
+*Remediation:* undecided and owner-facing — either provision an `Employee` alongside the bootstrap user and delete the
+id-substitution, or stop deriving `created_by` from an employee identity and derive it from the `User` principal.
+Recorded here for the M2/M3 schema and audit-trail work rather than patched silently in M1.
+*Verification:* reproducible on a disposable database — `select employee_id from users where username='smokeadmin'` is
+null with `select count(*) from employees` equal to 0, the issued token decodes to `{"sub":"smokeadmin","empId":2,…}`,
+and the create call returns the creator-not-found 404 above.
+
 ## 10. Frontend findings
 
 **FE-01 (P1) — Contract drift; the app has never round-tripped its own backend.**
@@ -328,6 +379,12 @@ Wrong field reads: `DashboardLayout.jsx:46` filters `n.read_status` while the AP
 **FE-13 (P2)** Redux: `store.js:15` whitelists `persist/*` actions although redux-persist is not installed; `uiSlice` is entirely unused by the components that supposedly consume it; `authSlice.js:40` calls `AuthService.logout()` inside a reducer. `providesTags:['Parent']` (`apiSlice.js:216`) names a tag type that is not in `tagTypes` → RTK dev warning and never invalidated.
 
 **FE-14 (P2)** Tooling: `package.json:6-11` has no `test` script and devDependencies contain no runner, so the README's `npm test` fails outright; React 18 runtime with `@types/react@19` and no TypeScript; `axios` and RTK Query are two parallel HTTP stacks; `recharts`/`dayjs` unused; `Dockerfile:9` uses `npm install` over a committed lockfile; `eslint.config.js:17,21` sets `ecmaVersion` twice.
+*Measured at M1 (2026-11-01):* `npm run lint` exits non-zero with **47 errors across ~25 files** — 38 `no-unused-vars`,
+8 `no-undef`, 1 `no-useless-catch` — none of them in the code this branch touched. 8 of the 47 live in the dead
+`api/[...path].js` proxies (**SEC-14**). Consequence for CI: `.github/workflows/ci.yml` runs lint and tests as
+**advisory** steps (`continue-on-error: true`) while `npm ci` and `npm run build` remain blocking. That is a decision
+with a cost — a lint regression can reach `master` — taken deliberately instead of silencing 47 errors with
+`eslint-disable` comments or skipping the step, and it is reversed by the frontend contract package (§2 row 11).
 
 ## 11. Infrastructure, CI/CD and operations findings
 
@@ -429,7 +486,13 @@ Server-side pagination, sorting and filtering; OpenAPI generation; centralised t
 
 The debt concentrates in four places: (1) authorization is expressed twice, in two mechanisms that contradict each other (SEC-04/05/06); (2) tenancy is a convention rather than an enforced invariant (TEN-01…07); (3) money has no transaction boundary and no single source of truth (FIN-01…06); (4) there is no schema history and no test suite, so nothing is safely changeable (OPS-07, OPS-14).
 
-Recommended sequence is in `docs/roadmap/MODERNIZATION_ROADMAP.md`; the dependency rule to respect is: **tests before refactors** (OPS-14 blocks TEN-06 and BKL-02), **schema baseline before entity changes** (OPS-07 blocks DB-01/DB-05), and **SEC-01/02/03 before any deploy**, since the current deployment is publicly reachable with documented credentials and a forgeable token.
+The ranked remediation sequence is in **[TECHNICAL_DEBT.md §2](TECHNICAL_DEBT.md)** (package table) and **§2.1** (what M1 actually
+closed); `docs/roadmap/MODERNIZATION_ROADMAP.md`, which earlier revisions of this file pointed at, **does not exist yet** — it
+is the milestone M1 docs package, and citing an unwritten file is itself a DOC-class defect. The dependency rule to respect
+is unchanged: **tests before refactors** (OPS-14 blocks TEN-06 and BKL-02), **schema baseline before entity changes** (OPS-07
+blocks DB-01/DB-05), and **SEC-01/02/03 before any deploy** — those three are public information in the repository itself
+(credential in git history, signing key in source, bootstrap password in documentation), which is why they do not depend on
+whether the recorded EC2 host currently answers.
 
 ## 15. Baseline build status (verified)
 
@@ -450,4 +513,62 @@ verdict, and every row there is backed by an executed command rather than an exp
 | App boot with `ddl-auto=update` against the same database | success — Hibernate creates the schema; this is the only way the application can start today |
 | Runtime security probes | forged-token acceptance, default-credential login, hash logging, error-body leakage and a 500 on `GET /users` were all **reproduced**; see BASELINE_STATUS §4 |
 | App boot against live Neon | **not attempted** — production access requires owner authorisation |
+
+## 16. M1 remediation status (`fix/gms-critical-security`, verified)
+
+Mandate §3: *"Do not mark a vulnerability as fixed merely because code has been changed."* Each row therefore states
+the **status vocabulary** and the **evidence that earned it**, and nothing is claimed beyond what was executed. All
+evidence below is against a **local** dev-profile boot on a disposable PostgreSQL 16 container. Nothing in this table
+means the deployed system changed: the EC2 host is unreachable (§17), so no M1 change has run in production.
+
+Status vocabulary — **Verified** = observed at runtime or asserted by an executed test · **Changed** = code is correct
+in `HEAD` but the behaviour was not observed · **Open** = untouched by this branch · **Owner** = requires an action
+outside the repository.
+
+| Finding | Status | Evidence |
+|---|---|---|
+| SEC-01 committed Neon credential | **Owner** | The literals are gone from `application.properties:24-26` (`${DB_URL:}` etc.), which is a repository change only. The credential in git history is still valid until rotated; `git log -p` still shows it. Revocation is the owner's action and no amount of code change performs it. |
+| SEC-02 publicly known JWT key | **Verified** (local) | `JwtTokenProvider` has no default; blank, <32-byte and retired-default secrets fail startup outside `dev`, and `dev` gets a per-process `SecureRandom` key. `JwtTokenProviderTest` (10 cases) proves a token from one dev boot is unreadable by another; `verify-security.sh` proves a token forged with the old published secret is answered **401**. |
+| SEC-03 default bootstrap credential | **Verified** | `SuperAdminBootstrapProperties` defaults are `enabled=false` with blank identity and secret, the credential that historically shipped as the repository default is refused case-insensitively (a real bug caught by `SuperAdminBootstrapPropertiesTest`: the comparison was against the lower-cased literal, so the capitalised form everyone was told to use passed), and enabled-with-incomplete-config aborts startup. The dev boot in BASELINE_STATUS §13 created its account purely from environment variables. |
+| SEC-04 client-controlled role assignment | **Verified** | `UserServiceImpl.authoriseRoles` validates every code against `RoleEnum` and requires a SUPERADMIN authority to grant SUPERADMIN; `UserServiceImplRoleGuardTest` (4 cases) covers `ROOT`, unknown codes and the update path. |
+| SEC-05 unguarded inherited CRUD | **Open** (1 of 7) | Only `UserController` left the template. `Parent`, `Student`, `Subject`, `School`, `Classroom`, `Employee` still inherit `GET /{id}` and `DELETE /{id}` returning raw entities with no tenant predicate — the delete path in AP-3 is unchanged. Needs the ownership guard from the tenant-isolation package, not a per-controller patch. |
+| SEC-06 matcher order blocking portals | **Verified** (admin paths) | `verify-security.sh` §3 exercises both directions: an admin token reaches `/users` and `/users/me`, is refused `/students/my-fees` with **403**, and an unlisted path fails closed with **403** under `anyRequest().denyAll()`. **Not** verified: STUDENT and PARENT portal happy paths, because a disposable database with no seeded enrolments cannot produce those principals. |
+| SEC-07 password hashes in logs | **Verified** | `CustomUserDetailsService` logs only `enabled/locked/passwordExpired` flags; the full dev boot log for the matrix run (login failures, lockout, authenticated reads) contains no `$2a$` digest — grep of the captured log, not an assumption. |
+| SEC-08 error bodies disclose internals | **Verified** | 500 body is `{traceId,path,error,message}` with a reference-only message; 403 body is `{"error":"Forbidden"}`; `GlobalExceptionHandlerTest` asserts a 500 whose exception message contains a JDBC URL and a password leaks neither. |
+| SEC-09 unauthenticated self-register, unprotected password change | **Verified** | `POST /auth/self-register` is now `hasAnyAuthority("ADMIN","SUPERADMIN")` and answers **401** anonymously. `change-password` reads the principal from the token, verifies `oldPassword` with `passwordEncoder.matches`, and enforces `PasswordValidator` — no caller-supplied username. |
+| SEC-10 no throttling, lockout columns ignored | **Verified** | `LoginAttemptService` on the pre-existing `login_attempts`/`account_locked` columns; the matrix's §5 proves ten failures set `account_locked=true` (read from the database, not inferred) and the **correct** password is then refused **401**. `LoginAttemptServiceTest` covers the reset path. |
+| SEC-11 no revocation / refresh | **Open** | Untouched; needs a token-version or jti store (schema work, M2+). |
+| SEC-12 plaintext gateway keys in responses | **Open** | `PaymentGatewayController.java:53,60` still return `List<PaymentGateway>`/`PaymentGateway`; the redacting mapper remains create/update-only. Scheduled with the financial-integrity package. |
+| SEC-13 actuator without authentication | **Verified** | `/actuator/info` is **401** anonymously and **200** for SUPERADMIN; only `health` stays public, on the readiness group, with `show-details=never` in prod. |
+| SEC-14 plaintext HTTP, host disclosed | **Open** | Deployment-side (`vercel.json` rewrite, TLS termination); unreachable from here — see §17. |
+| SEC-15 documented names do not bind | **Verified** (dev) | `application.properties` now carries `${SECURITY_JWT_SECRET}`, `${APP_SUPERADMIN_*}`, `${DB_*}` placeholders; `.env.example` and Compose pass the same names; the memory-bank page that told operators to set `SUPERADMIN_PASSWORD` is corrected. Prod-profile boot **not** executed. |
+| SEC-16 inert `hasRole` guards | **Verified** | 13 → 0 (`git grep hasRole(` is empty), converted to the 216-guard `hasAuthority` convention already in the codebase rather than a new mechanism. |
+| BKL-07 client errors as 500 | **Verified** | New 400/404 handlers plus `@Email`; live probes in BASELINE_STATUS §13.4 and `GlobalExceptionHandlerTest` (4 cases). |
+| BKL-08 bootstrap admin cannot create users | **Open** — new | Discovered while probing BKL-07; deliberately not patched in a security branch because the fix is a schema/audit-trail decision (§13's missing audit trail). |
+| OPS-08 Compose cannot boot from a fresh clone | **Changed** | Obsolete `version:` key removed, `${DB_PASSWORD:?}` now fails loudly, `DB_URL`/credentials/`SPRING_PROFILES_ACTIVE` are passed, healthcheck moved to `/actuator/health/readiness`. Still `env_file: .env` on both services, so a clone without a `.env` still fails at `docker compose config` — the full fix belongs to the M4 Docker package. |
+| OPS-11 debug logging in every profile | **Verified** | Base and prod default to INFO (`application.properties:95-98`); DEBUG is only what `application-dev.properties` opts into, and `StartupSecurityValidator` refuses to boot with `com.gms` at DEBUG/TRACE outside `dev`. |
+| OPS-14 no test suite | **Changed** | 36 backend tests now execute under `mvn test` and JaCoCo writes a report; `mvn -DskipTests` is no longer the only command that works. Frontend still has zero tests (FE-14) and no Playwright/Testcontainers coverage — that is M3. |
+| FE Quick-Login default credential button | **Verified** | Removed from `Login.jsx`, along with the blank `defaultValues`; the "Clear Storage & Logout" escape hatch is retained. |
+| Deploy workflow triggered by documentation edits | **Changed** | `deploy-backend.yml` `paths:` narrowed to backend/runtime inputs and `ci.yml` ignores docs. **Not** verified in CI: the workflow needs owner-provisioned secrets (§17), so no run has executed. |
+| SSH host-key verification disabled in deploy | **Changed** | `SSH_OPTS` now pins `StrictHostKeyChecking=yes` with a `known_hosts` file, and a new step fails the job when `EC2_SSH_KNOWN_HOSTS` is unset — the deploy cannot silently downgrade to a blind trust-on-first-use. **Not** verified in CI for the same reason. |
+| Dead password utilities packaged in the jar | **Verified** | `util/PasswordEncoderTest.java`, `util/PasswordVerificationTest.java`, `util/PasswordTestUtil.java`, the committed `PasswordVerificationTest.class` and the top-level `JwtDecoder.java` are deleted; the tracked-file list contains no `.class` entry. |
+
+## 17. What M1 could not verify, and why
+
+1. **The deployed backend is unreachable.** Both attempts against the recorded EC2 host fail with
+   `ssh: connect to host … port 22: Connection timed out`. Every status above is therefore *local*. Mandate §25.13 and
+   §27 apply literally: this branch is not evidence that production is safer, only that the code awaiting deployment is.
+2. **`ci.yml` has executed and passed; `deploy-backend.yml` has not.** The first run of the CI workflow on PR #10
+   returned `Backend build and tests=success, Frontend lint and build=success` on `ubuntu-latest` — so `mvn -B verify`
+   against JDK 21 and `npm ci`/`npm run build` are now proven on a clean runner, not just on this machine. What that
+   does **not** establish: the checks are advisory (branch protection lists `required_status_checks: []`), the two
+   frontend steps configured as `continue-on-error` did not have to prove anything, and the deploy workflow — the one
+   that SSHes into production, and the reason the `EC2_SSH_*` and `EC2_SSH_KNOWN_HOSTS` secrets matter — has still
+   never run. Making those two checks required is the owner action (§11 item 5 of BASELINE_STATUS).
+3. **Prod profile never booted.** `application-prod.properties` (`ddl-auto=validate`, Flyway enabled,
+   `baseline-on-migrate=false`) is written but unexercised, and deliberately so: booting it needs the Neon credential
+   the owner has not rotated, and §25.2 forbids connecting to production without explicit authorisation.
+4. **Cross-tenant behaviour is untouched by design.** M1 closes authentication and authorisation *mechanisms*; the
+   tenancy invariant (TEN-01…07) is the next package, because fixing SEC-05 and the ownership guards without a
+   `TenantContext` would mean writing the same guard twelve times.
 

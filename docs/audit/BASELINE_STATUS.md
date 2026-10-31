@@ -367,3 +367,107 @@ rest are the owner items above:
 A verified engineering baseline now exists: every P0/P1 claim in the three audit documents is backed by a command in
 §2 or a probe in §4, the gap list in §8 is explicit about what remains unverified, and no claim in this file depends
 on a database, host or deployment that was not touched during the measurement.
+
+---
+
+## 13. M1 verification evidence (`fix/gms-critical-security`)
+
+Everything above §13 describes the **baseline**; nothing in it was edited to reflect the remediation, because a
+before/after document is only useful if the *before* stays fixed. The per-finding dispositions are in
+[REPOSITORY_AUDIT.md §16](REPOSITORY_AUDIT.md); this section is the command evidence behind them.
+
+**Environment.** Local `dev` profile, JDK 21.0.1, PostgreSQL 16 in container `gms-postgres`, backend on `:8080`.
+The operator-supplied test account was created from `APP_SUPERADMIN_*` environment variables only. No Neon
+connection was made at any point in M1 (§25 rules 1–2).
+
+### 13.1 Build and tests
+
+| Command | Result |
+| --- | --- |
+| `mvn -o -DskipTests compile` (JDK 21) | BUILD SUCCESS |
+| `mvn -o test` | **Tests run: 36, Failures: 0, Errors: 0, Skipped: 0** — BUILD SUCCESS |
+| surefire per class | `JwtTokenProviderTest` 10 · `CustomUserDetailsServiceTest` 6 · `SuperAdminBootstrapPropertiesTest` 8 · `GlobalExceptionHandlerTest` 4 · `UserServiceImplRoleGuardTest` 4 · `LoginAttemptServiceTest` 4 |
+| JaCoCo | `prepare-agent` + `report` executions now bound to `verify`; report produced against the same 36 tests |
+| Baseline comparison (§2) | `mvn test` used to report **BUILD SUCCESS while executing nothing**. It now executes, and one of the 36 tests found a real defect rather than confirming one: the retired-default check was case-sensitive, so the historically shipped `SuperAdmin123!` passed it |
+
+### 13.2 Security matrix — `scripts/verify-security.sh`, 18 checks, 0 failures
+
+The matrix is committed, not a transcript: `scripts/verify-security.sh` re-runs every row below against any
+`GMS_BASE_URL`. Its first execution returned **11 PASS / 7 FAIL**, and the discrepancy was the harness, not the
+product: a previous manual probe had left the test account `account_locked=true`, so every token-dependent check
+inherited a locked state. The script now unlocks its own test account before §2 and on exit (`trap`), and prints the
+raw login body when it cannot extract a token. An assertion that depends on undeclared prior state is not evidence.
+
+```
+1. Anonymous surface        GET /actuator/health 200 · /api/v1/ping 200 · /actuator/info 401 · /students 401 · /auth/self-register 401
+2. Credential handling      wrong password 401 · correct password issues a token · JWT forged with the retired default secret 401
+3. Authorisation            /users/me 200 · /users 200 · /students/my-fees 403 for an admin · /actuator/info 200 for SUPERADMIN · unlisted path 403 · denied body leaks no internals
+4. Error shape              per-field validation errors present · body leaks no internals
+5. Brute-force throttling   ten failures set account_locked=true (read from the database) · correct password after lock 401
+GMS_BASE_URL=http://localhost:8080  checks=18  failures=0
+```
+
+### 13.3 Log inspection (SEC-07)
+
+`grep -c '\$2a\$' ` over the captured dev-profile boot log covering the entire matrix run — every failed login, the
+lockout, and dozens of authenticated reads — returns **0**. The login-failure line is
+`Login failed for smokeadmin: BadCredentialsException`; the principal line is
+`Loaded authentication principal smokeadmin (enabled=true, locked=false, passwordExpired=false)`.
+
+### 13.4 Error-contract probes (BKL-07, the row that failed first)
+
+`POST /api/v1/users/create` as SUPERADMIN. The payloads are shown as sent; the first run of these five probes is what
+discovered BKL-08.
+
+| Payload condition | Baseline | Now |
+| --- | --- | --- |
+| `email` = `not-an-email` | 500 (no `@Email` constraint existed) | `400 {"error":"Validation failed","fields":{"email":"must be a well-formed email address"}}` |
+| duplicate email | 500 `{"error":"Internal Server Error"}` | `400 {"error":"Invalid request","message":"Email already in use"}` |
+| `password` below `PasswordValidator` | 500 | `400 {"error":"Invalid request","message":"Password does not meet policy requirements"}` |
+| creator reference unresolvable (BKL-08) | 500 | `404 {"error":"Not Found","message":"The requested record does not exist."}` |
+| any 500 still reachable | class, root cause, two stack frames | `{"traceId":…,"path":…,"error":"Internal Server Error","message":"The request could not be completed. Report reference <id>."}` |
+
+### 13.5 What changed about §5's "clean clone" walk
+
+Two rows of the §5 table no longer describe the repository, and the developer-facing trap in row 4 is closed:
+
+* `mvn test` no longer requires the operator to know that JDK 24 breaks the build — it requires JDK 21 (§1) and
+  executes 36 tests.
+* **`mvn spring-boot:run` no longer connects to the hosted database.** The datasource is `${DB_URL:}` with blank
+  defaults, `dev` supplies a localhost container URL, and `StartupSecurityValidator` aborts any non-`dev` boot that
+  has a blank datasource, a writable `ddl-auto`, a wildcard/empty CORS origin, an incomplete enabled bootstrap, or
+  `com.gms` at DEBUG/TRACE. A fresh clone can now reach a running system without touching production.
+* Not yet closed: `docker compose config` still fails without a `.env` (`env_file:` on both services — §5 row 2), and
+  the frontend still has no test command (§5 row 8).
+
+### 13.6 Still unverified after M1
+
+The EC2 host remains unreachable (`ssh: connect to host … port 22: Connection timed out`), so **no M1 change has been
+observed in production**. `ci.yml` has now executed — its first run, on PR #10, reported
+`Backend build and tests=success, Frontend lint and build=success` on a clean `ubuntu-latest` runner, which is the
+strongest form of evidence §13.1 could ask for, because §13.1's local result and the CI result are now the same claim
+measured twice on different machines. Still unverified: the prod profile has never booted, `deploy-backend.yml` has
+never run (it needs the owner's `EC2_SSH_*` and `EC2_SSH_KNOWN_HOSTS` secrets), and no check is marked required, so CI
+reports rather than enforces. The honest reading of this branch remains "the code awaiting deployment is measurably
+safer than the code deployed"; §27 forbids more than that.
+
+Also unverified by choice: the frontend gates in `ci.yml` are **advisory**. `npm run lint` fails on 47 pre-existing
+errors (FE-14) and there are no frontend tests yet (F3), so only `npm ci` and `npm run build` can block a merge today.
+Marking a step `continue-on-error` is not the same as green — it is a gate that reports and does not enforce, recorded
+here so nobody reads "CI passed" as "the frontend was checked".
+
+### 13.7 State left on this machine by M1
+
+Supersedes §10 for the items it touches.
+
+* Container `gms-postgres` is running, holding the same disposable schema. It now additionally contains: a second user
+  row (`smokeadmin`, SUPERADMIN, created from environment variables during verification), and **one deliberately
+  inserted `employees` row (id 9001) attached to that user** so that the BKL-08 creator lookup could be exercised past
+  its failure. That row is probe furniture, not product data; `docker compose down -v` removes it. Never use
+  `docker compose down -v` against anything but this container.
+* The backend was left **running** on `:8080` (`dev` profile, launched from `gms_backend` with `.env` sourced).
+  Stop with `lsof -ti tcp:8080 | xargs kill`.
+* `/tmp/gms-m1-boot.log` holds the boot and matrix log referenced in §13.3. It is outside the repository and contains
+  no credential material.
+* `/Users/shubhamkumar/Desktop/GMS-V1/.env` (git-ignored) supplies `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and the
+  dev-profile bootstrap variables used above. It is not committed and is not copied into any file in this document.

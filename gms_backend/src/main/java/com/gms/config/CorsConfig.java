@@ -15,17 +15,23 @@ import java.util.List;
 @Configuration
 public class CorsConfig {
 
-    @Value("${cors.allowed-origins:http://localhost:5173,http://localhost:3000,https://gms-react.vercel.app,https://gms-react-git-master-shubhamdiyos-projects.vercel.app}")
+    /**
+     * Deliberately no default: the browser origins belong to the environment, so they come from
+     * application-dev.properties / application-prod.properties or from CORS_ALLOWED_ORIGINS. With no
+     * value configured the API simply refuses cross-origin calls (finding SEC-12).
+     */
+    @Value("${cors.allowed-origins:}")
     private String allowedOrigins;
 
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        List<String> origins = Arrays.asList(allowedOrigins.split(","));
-        // Trim whitespace from origins
-        origins = origins.stream().map(String::trim).toList();
-        log.info("CORS ConfigurationSource - Allowed Origins: {}", origins);
-        
+        List<String> origins = Arrays.stream(allowedOrigins.split(","))
+                .map(String::trim)
+                .filter(origin -> !origin.isEmpty())
+                .toList();
+        log.info("CORS ConfigurationSource - Allowed Origins: {}", origins.isEmpty() ? "(none)" : origins);
+
         configuration.setAllowedOrigins(origins);
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
         configuration.setAllowedHeaders(Arrays.asList("*"));

@@ -1,72 +1,148 @@
 package com.gms.config;
 
 import com.gms.security.JwtAuthenticationFilter;
+import jakarta.servlet.DispatcherType;
+import jakarta.servlet.http.HttpServletResponse;
+import java.io.IOException;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
+import org.springframework.http.HttpStatus;
+import org.springframework.http.MediaType;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.config.annotation.authentication.configuration.AuthenticationConfiguration;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
-import org.springframework.http.HttpMethod;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 
+/**
+ * Transport-level authorisation for the API.
+ *
+ * <p>Three rules govern the matcher list below, and each of them exists because the previous
+ * revision broke it (findings AP-1, AP-2, SEC-13):</p>
+ * <ol>
+ *   <li><b>Order.</b> {@code authorizeHttpRequests} is first-match-wins, so the self-service
+ *       matchers for students, parents and teachers are declared <i>before</i> the administrative
+ *       matchers that share their prefix. A STUDENT reaching {@code /students/profile} used to be
+ *       shadowed by the {@code /students/**} ADMIN rule and answered 403.</li>
+ *   <li><b>Fail closed.</b> Everything that is not listed is denied. The catch-all used to be
+ *       {@code anyRequest().authenticated()}, which silently granted the fifteen route groups that
+ *       no matcher named.</li>
+ *   <li><b>No wider than the method layer.</b> Each administrative group admits exactly the union of
+ *       roles its controllers' {@code @PreAuthorize} annotations mention, plus SUPERADMIN as the
+ *       platform owner. The URL layer must not exclude a role that a method-level rule grants —
+ *       that is how the ACCOUNTANT role became unreachable (SEC-06).</li>
+ * </ol>
+ *
+ * <p>Authorisation here is coarse perimeter only. Per-record tenant isolation is a separate
+ * concern tracked in {@code docs/audit/SECURITY_AUDIT.md} and implemented by the tenant-isolation
+ * work package; a correct URL rule is not proof that a request is allowed to see the row.</p>
+ */
 @Configuration
 @EnableWebSecurity
 @EnableMethodSecurity
 public class SecurityConfig {
 
+    private static final String API = "/api/v1";
+
+    private static final String[] PLATFORM_MANAGEMENT = {
+        API + "/schools/**", API + "/users/**", API + "/employees/**", API + "/students/**",
+        API + "/student-admissions/**", API + "/academic-years/**"
+    };
+
+    private static final String[] SCHOOL_SETUP = {
+        API + "/classrooms/**", API + "/sections/**", API + "/subjects/**",
+        API + "/teacher-assignments/**", API + "/grading-schemes/**", API + "/communications/**"
+    };
+
+    private static final String[] ACADEMIC_OPERATIONS = {
+        API + "/exams/**", API + "/attendance/**", API + "/timetables/**"
+    };
+
+    private static final String[] FINANCIAL = {
+        API + "/fees/**", API + "/fee-structures/**", API + "/fee-payments/**",
+        API + "/invoices/**", API + "/receipts/**", API + "/student-fees/**",
+        API + "/financial-transactions/**", API + "/financial-reports/**",
+        API + "/financial-dashboard/**", API + "/payment-gateway/**"
+    };
+
+    /** Read surfaces that parents and students also consume; each method gates itself. */
+    private static final String[] SHARED_READS = {
+        API + "/results/**", API + "/student-exams/**", API + "/announcements/**",
+        API + "/notifications/**", API + "/school-calendar/**", API + "/parent-students/**"
+    };
+
+    private static final String[] SELF_SERVICE = {
+        API + "/auth/change-password",
+        API + "/users/me", API + "/users/me/**"
+    };
+
     @Bean
-    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter, CorsConfigurationSource corsConfigurationSource) throws Exception {
+    public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter,
+                                          CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
-            .csrf(csrf -> csrf.disable())
+            .csrf(AbstractHttpConfigurer::disable)
+            .formLogin(AbstractHttpConfigurer::disable)
+            .httpBasic(AbstractHttpConfigurer::disable)
+            .logout(AbstractHttpConfigurer::disable)
             .sessionManagement(sm -> sm.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
+            .exceptionHandling(ex -> ex
+                .authenticationEntryPoint((request, response, authException) ->
+                        writeJson(response, HttpStatus.UNAUTHORIZED, "Unauthorized"))
+                .accessDeniedHandler((request, response, deniedException) ->
+                        writeJson(response, HttpStatus.FORBIDDEN, "Forbidden")))
             .authorizeHttpRequests(auth -> auth
+                // Error and async dispatches must reach the container's error handling; they are
+                // protected by the decision made for the originating REQUEST.
+                .dispatcherTypeMatchers(DispatcherType.ERROR, DispatcherType.ASYNC, DispatcherType.FORWARD).permitAll()
+
                 // Allow OPTIONS requests for CORS preflight
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
-                .requestMatchers(
-                    "/actuator/**",
-                    "/swagger-ui.html",
-                    "/swagger-ui/**",
-                    "/v3/api-docs/**",
-                    "/api/v1/ping",
-                    "/api/v1/auth/**",
-                    "/api/v1/test/password"
-                ).permitAll()
-                // SUPERADMIN - Full system access
-                .requestMatchers("/api/v1/schools/**").hasAnyAuthority("SUPERADMIN", "ADMIN")
-                .requestMatchers("/api/v1/employees/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/students/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/classrooms/**", "/api/v1/classes/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/subjects/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/academic-years/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/fees/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
-                .requestMatchers("/api/v1/notifications/**").hasAnyAuthority("ADMIN", "SUPERADMIN", "TEACHER")
-                .requestMatchers("/api/v1/announcements/**").hasAnyAuthority("ADMIN", "SUPERADMIN", "TEACHER")
-                
-                // Teacher role endpoints
-                .requestMatchers("/api/v1/teachers/profile", "/api/v1/teachers/classes", "/api/v1/teachers/students").hasAuthority("TEACHER")
-                .requestMatchers("/api/v1/attendance/**", "/api/v1/timetables/**").hasAnyAuthority("TEACHER", "ADMIN", "SUPERADMIN")
-                
-                // Student role endpoints
-                .requestMatchers("/api/v1/students/profile", "/api/v1/students/my-classes", "/api/v1/students/my-subjects").hasAuthority("STUDENT")
-                .requestMatchers("/api/v1/students/my-attendance", "/api/v1/students/my-results", "/api/v1/students/my-fees").hasAuthority("STUDENT")
-                
-                // Parent role endpoints
-                .requestMatchers("/api/v1/parents/profile", "/api/v1/parents/children").hasAuthority("PARENT")
-                
-                // User profile endpoints
-                .requestMatchers("/api/v1/users/me", "/api/v1/users/me/**").authenticated()
-                .anyRequest().authenticated()
+
+                // ── Anonymous surface: login, liveness and the health probes only ──
+                .requestMatchers(HttpMethod.POST, API + "/auth/login").permitAll()
+                .requestMatchers(HttpMethod.GET, API + "/ping").permitAll()
+                .requestMatchers(HttpMethod.GET,
+                        "/actuator/health", "/actuator/health/**").permitAll()
+                .requestMatchers("/actuator/**").hasAnyAuthority("ADMIN", "SUPERADMIN")
+
+                // ── Self-service: declared before the administrative matchers on the same prefix ──
+                .requestMatchers(SELF_SERVICE).authenticated()
+                .requestMatchers(API + "/students/profile", API + "/students/my-*").hasAuthority("STUDENT")
+                .requestMatchers(API + "/parents/profile", API + "/parents/notifications",
+                        API + "/parents/children/**").hasAuthority("PARENT")
+                .requestMatchers(API + "/teachers/**").hasAuthority("TEACHER")
+
+                // ── Administrative perimeter ──
+                .requestMatchers(PLATFORM_MANAGEMENT).hasAnyAuthority("ADMIN", "SUPERADMIN")
+                .requestMatchers(SCHOOL_SETUP).hasAnyAuthority("ADMIN", "SUPERADMIN", "TEACHER")
+                .requestMatchers(ACADEMIC_OPERATIONS).hasAnyAuthority("ADMIN", "SUPERADMIN", "TEACHER")
+                .requestMatchers(FINANCIAL).hasAnyAuthority("ADMIN", "SUPERADMIN", "ACCOUNTANT", "PARENT")
+                .requestMatchers(SHARED_READS).hasAnyAuthority(
+                        "ADMIN", "SUPERADMIN", "TEACHER", "STUDENT", "PARENT")
+
+                // ── Provisioning endpoints that live under /auth but are not login ──
+                .requestMatchers(API + "/auth/self-register").hasAnyAuthority("ADMIN", "SUPERADMIN")
+
+                .anyRequest().denyAll()
             )
             .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
         return http.build();
+    }
+
+    private static void writeJson(HttpServletResponse response, HttpStatus status, String error)
+            throws IOException {
+        response.setStatus(status.value());
+        response.setContentType(MediaType.APPLICATION_JSON_VALUE);
+        response.getWriter().write("{\"error\":\"" + error + "\"}");
     }
 
     @Bean

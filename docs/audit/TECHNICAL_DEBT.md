@@ -104,10 +104,10 @@ Ordered by (risk removed ÷ effort), with the dependency edges that matter.
 |---|---|---|---|---|
 | 1 | Fail-closed configuration + `prod` profile + remove insecure defaults | SEC-01*, SEC-02, SEC-03, OPS-11, OPS-13 | owner credential rotation | M |
 | 2 | Delete credential logging, response-leak and dead endpoints | SEC-07, SEC-08, BKL-05, BKL-06, BKL-07 | — | S |
-| 3 | Close escalation/destruction holes: roles, inherited CRUD, self-register | SEC-04, SEC-05, SEC-09, SEC-12, SEC-13 | 1 | M |
+| 3 | Close escalation/destruction holes: roles, inherited CRUD, self-register | SEC-04, SEC-05, SEC-09, SEC-12, SEC-13, BKL-08 | 1 | M |
 | 4 | Test harness + CI gate (build, unit, integration, coverage) | OPS-01, OPS-14, OPS-12 | 2 | L |
 | 5 | Tenant invariant: `TenantContext`, mandatory tenant params, ownership guard | TEN-01…07, SEC-06 | 3, 4 | L |
-| 6 | Schema baseline via Flyway + constraints + indexes | OPS-07, DB-01…06, BKL-08 | 4 | L |
+| 6 | Schema baseline via Flyway + constraints + indexes | OPS-07, DB-01…06 | 4 | L |
 | 7 | Compose v2 + Makefile + non-root images + working nginx proxy | OPS-08/09/10, SEC-14 | — | M |
 | 8 | Financial integrity: transactions, state machine, linkage, real metrics | FIN-01…08 | 5, 6 | XL |
 | 9 | Academic correctness: `%`, grades, conflicts, ids, scaffolding | ACD-01…12 | 5, 6 | L |
@@ -119,6 +119,23 @@ Ordered by (risk removed ÷ effort), with the dependency edges that matter.
 
 \* SEC-01's repository half (placeholders + fail-fast) is code work; the rotation itself is an owner action outside this repo.
 
+## 2.1 Packages 1–3 after M1 — planned versus actually closed
+
+M1 was scoped as package 1, package 2 and the low-risk half of package 3. It landed:
+
+| Planned | Landed | Evidence |
+|---|---|---|
+| 1 · Fail-closed config, `prod` profile, insecure defaults | **yes**, on the repository side | `StartupSecurityValidator`, the `application-dev`/`application-prod` split, `${…}` placeholders everywhere; owner credential rotation still outstanding |
+| 2 · Credential logging, response leaks, dead packaged utilities | **yes** — SEC-07, SEC-08, BKL-05, BKL-07 | the four `util/Password*` files and the committed `.class` are gone; 36 tests execute; the probe table in BASELINE_STATUS §13.4 |
+| 3 · Escalation/destruction holes | **partial by design** — SEC-04, SEC-09, SEC-13, SEC-16 closed; **SEC-05 and SEC-12 left open** | SEC-05 needs the single ownership guard from package 5: patching six controllers by hand would create six copies of a rule the mandate asks to express once. SEC-12 belongs with the financial package. |
+| 4 · Test harness + CI gate | **started early, not finished** | backend unit tests, `ci.yml` and JaCoCo exist; Testcontainers, Vitest/RTL, Playwright and the Postman repair are M3 |
+| 5 · Tenant invariant | **not started** | next branch, `fix/gms-tenant-isolation` |
+
+The planning error worth keeping: this backlog assumed the ordering constraint that bites is *between code packages*.
+It is not — it is *between code and owner action*. Nothing in packages 1–3 can be claimed for the live system until the
+credential is rotated, the new secrets are injected on the host, and the CI checks are marked required, and the host
+itself is currently unreachable enough that even the claim "the deployed system is the one we audited" is unproven.
+
 ## 3. What must not be touched yet
 
 * `School`/`Student`/`FeePayment`/`Invoice`/`Receipt` entity fields, until **OPS-07** provides a migration path — there is currently no way to change a column safely.
@@ -126,6 +143,13 @@ Ordered by (risk removed ÷ effort), with the dependency edges that matter.
 * `docker-compose` `update` → `validate` flip until a baseline migration exists, or local startup breaks.
 * The 9 duplicated pages' markup until their data contracts (**FE-01**) are fixed, or a refactor silently changes what each page displays with no test to notice.
 * `.github/workflows/deploy-backend.yml` triggers, until a test job exists to guard them — narrowing the trigger without a gate just hides the risk.
+  **Status after M1: this constraint was lifted deliberately, and the reason is recorded here rather than buried in a diff.** M1 added `.github/workflows/ci.yml`
+  (backend `mvn verify` + frontend lint/build on every PR and every push to `master`) and narrowed the deploy `paths:` to backend/runtime inputs. That is a gate
+  *authored*, and it has now **executed** — the first `ci.yml` run on PR #10 returned `Backend build and tests=success`
+  and `Frontend lint and build=success` on ubuntu-latest — but it is not yet *enforced*: branch protection lists
+  `required_status_checks: []`, so a green CI is not what stops a merge today. What the narrowing does change is one
+  specific real hazard — a documentation-only commit to `master` used to SSH into production. Enforcing the checks is
+  the owner action in BASELINE_STATUS §11 item 5.
 
 ## 4. Debt quantification
 
