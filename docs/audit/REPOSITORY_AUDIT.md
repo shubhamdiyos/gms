@@ -280,7 +280,20 @@ a repository-wide grep showing no `SUPERADMIN_PASSWORD` without the `APP_` prefi
 **BKL-02 (P1)** ~28 controllers serialize raw JPA entities (full list in the API audit), while `application.properties:38` sets `open-in-view=false` and relations are `FetchType.LAZY` (`Student.java:26-38`; `Employee.java:30,89,94`). The derived `@JsonProperty getSchoolName()` / `getCreatedByName()` getters (`User.java:140-143`, `BaseAuditEntity.java:50-53`) force proxy initialisation after the transaction has committed → `LazyInitializationException`/500 on list endpoints. Unidirectional EAGER pairs (`Timetable.slots`, `User.roles`) are the only ones that survive.
 **BKL-03 (P1)** No pagination: `Page`/`Pageable` appear in no controller (`AbstractCRUDController.java:5` imports `Pageable` and never uses it); ~20 unbounded `findAll()`-style reads, largest at `StudentFeeServiceImpl.java:143`, `AnnouncementServiceImpl.java:127-181`.
 **BKL-04 (P2)** No mapper library; `BeanUtils.copyProperties` with growing hand-maintained ignore lists (`StudentServiceImpl.java:127`, `UserServiceImpl.java:109-113`) and **no exclusions at all** at `EmployeeServiceImpl.java:71` and `ParentServiceImpl.java:107` — mass-assignment surface. A 12-argument `StudentResponse` constructor is duplicated in three impls.
-**BKL-05 (P2)** Dead and misleading code: `DomainException` is never thrown by any service; `ParentStudentServiceImpl.java:12` imports `AbstractCRUDService` and never extends it; `SubjectServiceImpl.java:102` throws `UnsupportedOperationException` from a mapped endpoint; `PasswordVerificationTest.class` (a compiled binary) and three `main()` password utilities sit in `src/main/java/com/gms/util/`.
+**BKL-05 (P1)** Dead and misleading code: `DomainException` is never thrown by any service;
+`ParentStudentServiceImpl.java:12` imports `AbstractCRUDService` and never extends it; `SubjectServiceImpl.java:102`
+throws `UnsupportedOperationException` from a mapped endpoint. In addition, **three `main()` password utilities and one
+compiled binary sit inside `src/main/java`, so they are packaged into the production jar** and each one hardcodes the
+bootstrap administrator's default password: `util/PasswordEncoderTest.java:10`,
+`util/PasswordVerificationTest.java:6` (which `System.out.println`s it), `util/PasswordTestUtil.java:59`, plus the
+committed class file `src/main/java/com/gms/util/PasswordVerificationTest.class`. These are not tests — `src/test` does
+not exist (OPS-14) — they are shipped code that re-publishes SEC-03's default credential to anyone holding the jar.
+*Remediation:* delete all four files in M1; if BCrypt spot-checks are genuinely wanted, they belong under
+`src/test/java` with no real credential.
+*Verification:* `git ls-files | grep -E '\.class$'` returns nothing; `grep -rn` for the default password matches only
+`SuperAdminBootstrapProperties` (removed in M1) and `application.properties` (removed in M1); `unzip -l` of the built
+jar lists no `Test`/`Util` password classes.
+
 **BKL-06 (P2)** Inconsistent empties: several list endpoints return 204 while others return `[]` (`ParentController.java:59-61`, `ClassroomController.java:59`).
 
 ## 10. Frontend findings

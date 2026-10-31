@@ -131,16 +131,22 @@ Ordered by (risk removed ÷ effort), with the dependency edges that matter.
 
 | Metric | Value |
 |---|---|
-| Backend Java files / LOC | 284 / 17,997 |
-| Frontend source files / LOC | 51 / 11,119 |
-| Controllers | 36 (~230 mappings) |
+| Backend Java files / LOC | **283 / 17,997** (measured `find` + `wc -l`, 2026-11-01) |
+| Frontend source files / LOC | **48 / 11,119** — of which 45 are JS/JSX (11,009 LOC) |
+| Controllers | 36 (230 mapping annotations: 128 GET, 44 POST, 30 PUT, 23 DELETE, 5 PATCH) |
 | Entities / repositories / service impls | 37 / 35 / 34 |
 | RTK Query endpoints | 71 (34 queries, 37 mutations) |
-| Test classes / methods | **0 / 0** |
-| Migrations | **0** `.sql` files, no migration dependency |
-| `@Transactional` in financial services | 0 of 11 |
+| Test classes / methods | **0 / 0** — `src/test` does not exist; `mvn test` prints `No tests to run` and exits green |
+| Migrations | **0** `.sql` files, no migration dependency; the app cannot start on a fresh database |
+| Schema facts (measured on a disposable DB) | 38 tables, 26 with `school_id`, **12 without**, 123 FKs, 14 unique constraints, **0 secondary indexes** — see BASELINE_STATUS §6 |
+| `@Transactional` in financial services | **0 of 10** fee/exam/result service impls; `AttendanceServiceImpl` alone carries 8 |
 | Controllers with no method security | 6 |
 | Controllers with no matching path rule | 20 of 36 |
 | P0 findings open | 9 |
-| Postman request coverage | ~19% |
+| Postman request coverage | **45 requests / 230 mappings ≈ 19%** |
+| Health endpoint | `/actuator/health` = `DOWN` in every environment without SMTP (OPS-17) — breaks the Compose healthcheck |
 | Markdown files that are genuine documentation | 6 of 59 |
+
+Every figure above is reproducible from the commands in [BASELINE_STATUS.md](BASELINE_STATUS.md) §2, §6 and §9; that
+file is the source of truth if these two documents ever disagree.
+
