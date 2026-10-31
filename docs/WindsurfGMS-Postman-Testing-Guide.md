@@ -1,122 +1,134 @@
 # WindsurfGMS Postman Testing Guide
 
+> **Status note (2026-11-01).** This guide previously asserted that tenant isolation was
+> enforced and that cross-school requests returned `403`. Repository audit findings
+> [TEN-01…TEN-07](audit/REPOSITORY_AUDIT.md) and attack path **AP-3** in
+> [SECURITY_AUDIT.md](audit/SECURITY_AUDIT.md) show that claim is **not** true today: the
+> endpoints inherited from `AbstractCRUDController` are tenant-unchecked. Scenarios below
+> are therefore written as *verification* steps with known-failing expectations, not as
+> statements of current behaviour. See §"Known failures".
+
 ## 🎯 Overview
 
-This guide provides comprehensive instructions for testing the WindsurfGMS School Management System API using Postman. The collection includes all necessary endpoints organized by functional areas with proper authentication and security testing.
+This guide provides instructions for testing the GMS School Management System API using
+Postman. The collection covers roughly 19% of the live controller surface (finding
+**DOC-05**); the remainder is exercised by the automated cross-tenant tests specified in
+the *Verification method* lines of findings **TEN-01…TEN-07** in
+[REPOSITORY_AUDIT.md](audit/REPOSITORY_AUDIT.md).
 
-## 🔄 Recent Security Enhancements
+## 📁 Collection files
 
-### Multi-Tenant Security Implementation
-The system now enforces strict school-bounded tenant isolation:
-- **Admin users** can only access their own school data
-- **Superadmin users** follow the same tenant isolation principles
-- **Cross-school access attempts** are rejected with HTTP 403 Forbidden
+| File | Contents |
+| --- | --- |
+| `../../WindsurfGMS-Postman-Collection-Part1.json` | Auth, schools, users, employees |
+| `../../WindsurfGMS-Postman-Collection-Part2.json` | Academic, assessment, finance, communication |
 
-### Key Security Features:
-1. **School Listing**: Users only see their own school in the list
-2. **School Details**: Users can only access details of their own school
-3. **School Updates**: Users can only update their own school
-4. **Access Control**: Unauthorized access attempts are properly rejected
+Both files reference secrets only through Postman variables — no literal credential is
+stored in them (finding **DOC-02**).
 
-## 📋 Testing Workflow
+## 🔐 Prerequisites: credentials come from the environment
 
-### 1. Authentication & Setup
-1. Import both Postman collection files:
-   - `WindsurfGMS-Postman-Collection-Part1.json`
-   - `WindsurfGMS-Postman-Collection-Part2.json`
-2. Set up environment variables:
-   - `base_url`: http://localhost:8080
-3. Run authentication tests:
-   - **Superadmin Login** (Username: `superadmin`, Password: `SuperAdmin123!`)
+Never hardcode a password in a request body, in this guide, or in a collection file.
+Create a Postman environment with these variables and fill them from your local `.env`:
 
-### 2. School Management Testing
-1. **List My Schools**: Verify only your own school is listed
-2. **Get School by ID**: Access your own school details
-3. **Try Accessing Another School**: Should fail with HTTP 403
-4. **Create New School**: Create a new school with admin email `imshubhy@gmail.com`
-5. **Update School**: Update your own school information
+| Variable | Value source | Notes |
+| --- | --- | --- |
+| `base_url` | `http://localhost:8080` | or the deployed origin |
+| `superadmin_username` | `APP_SUPERADMIN_USERNAME` | bootstrap default is being removed (**SEC-03**) |
+| `superadmin_password` | `APP_SUPERADMIN_PASSWORD` | never committed |
+| `admin_username` | a school admin you created yourself | |
+| `admin_password` | same | |
+| `second_school_admin_*` | a *different* tenant's admin | required for cross-tenant scenarios |
+| `jwt_token` | set by the login test's post-request script | |
 
-### 3. User & Employee Management
-1. List and manage users within your school
-2. Create and manage employees within your school
+The initial SuperAdmin is created by `SuperAdminBootstrapRunner`; its properties and the
+forced first-login password change are documented in
+[authenticationQuickReference.md](../gms_backend/memory-bank/authenticationQuickReference.md).
 
-### 4. Academic Management
-1. Manage subjects, classrooms, and students within your school
-2. Verify proper tenant isolation across all academic entities
+## 📋 Testing workflow
 
-### 5. Assessment & Financial Management
-1. Create and manage exams, results within your school
-2. Handle fee structures and payments within your school
+### 1. Authentication and setup
+1. Import both collection files.
+2. Select the environment from the table above.
+3. Run **Superadmin Login** (`POST {{base_url}}/api/v1/auth/login`) with
+   `{{superadmin_username}}` / `{{superadmin_password}}`.
+4. Confirm the response carries `token` and `expiresIn`, and that the script stored
+   `{{jwt_token}}`.
 
-## 🔐 Security Testing Scenarios
+### 2. School management
+1. `GET /schools` — a SuperAdmin sees every school; a school ADMIN must see exactly one.
+2. `GET /schools/{ownId}` — `200`.
+3. `GET /schools/{otherId}` — must not disclose the other tenant.
+4. `POST /schools/create` — use `{{admin_email}}` (your own address) for the new tenant's
+   administrator.
+5. `PUT /schools/update` — only the caller's own school.
 
-### Scenario 1: Admin User Access Control
-1. Login as admin user (username: `skumar`, password: `skumar@123`)
-2. List schools - should only show one school (their own)
-3. Try accessing school ID 1 - should fail with HTTP 403
-4. Access their own school (ID 2) - should succeed
+### 3. Users and employees
+Manage users and employees inside the caller's own school only.
 
-### Scenario 2: Superadmin User Access Control
-1. Login as superadmin user
-2. List schools - should show their own school only
-3. Try accessing other schools directly - should fail with HTTP 403
+### 4. Academic management
+Subjects, classrooms, students — verify isolation for each entity family.
 
-### Scenario 3: Cross-School Data Access Prevention
-1. Login as any user
-2. Attempt to access entities from other schools
-3. Verify all requests are properly rejected
+### 5. Assessment and finance
+Exams, results, fee structures, invoices, payments — the paths covered by findings
+**FIN-01…FIN-08**.
 
-## 🧪 Test Data Management
+## 🛡️ Cross-tenant security scenarios
 
-### Default Credentials:
-- **Superadmin**: 
-  - Username: `superadmin`
-  - Password: `SuperAdmin123!`
-  - Email: `superadmin@gms.local`
-- **Admin Users**: 
-  - Auto-generated during school creation
-  - Default admin email: `imshubhy@gmail.com`
-  - Default password pattern: `[username]@123`
+Run each scenario as **School A's ADMIN** against a resource owned by **School B**.
 
-### Environment Variables:
-- `{{base_url}}`: API base URL (default: http://localhost:8080)
-- `{{jwt_token}}`: Authentication token (auto-set after login)
-- `{{school_id}}`: Current user's school ID (auto-set after login)
-- `{{user_id}}`, `{{employee_id}}`, etc.: Entity IDs (auto-set during creation)
+| # | Request | Required outcome | Status on `master` |
+| --- | --- | --- | --- |
+| S1 | `GET /students` as A, then `GET /students/{B.id}` | `404` (no disclosure) | ❌ **fails** — inherited endpoint, no tenant predicate |
+| S2 | `PUT /students/update` with `B.id` | `403`/`404` | ⚠️ depends on service check |
+| S3 | `DELETE /students/{B.id}` | `404` | ❌ **fails** — `AbstractCRUDController.deleteById` |
+| S4 | `DELETE /schools/{B.id}` as an ADMIN | `403` | ❌ **fails** — **AP-3**, any ADMIN can delete another tenant |
+| S5 | `GET /fee-payments/student/{B.stuId}` | `404` | ❌ **fails** — **AP-4** |
+| S6 | `GET /results` filtered to B's student | `404`/empty | ❌ **fails** |
+| S7 | A PARENT reads another student's profile | `403` | ❌ **fails** (path rule ordering, **SEC-06**) |
+| S8 | `POST /users/create` requesting `roles:["SUPERADMIN"]` | rejected | ❌ **fails** — **AP-2** escalation |
 
-## 📊 Expected Results
+Also verify the *positive* cases so fixes do not break legitimate access: a STUDENT can
+read `GET /students/profile` for themselves, a PARENT can read their linked children, a
+TEACHER can read their assigned classroom.
 
-### Security Compliance:
-✅ Users can only access their own school data
-✅ Cross-school access attempts are rejected
-✅ Proper HTTP status codes for all scenarios
-✅ JWT token properly validates user permissions
+## 🧪 Test data management
 
-### Performance:
-✅ API responses within acceptable time limits
-✅ Database queries optimized for tenant isolation
-✅ Efficient resource utilization
+- Provision data **during the run** (school → admin → student) and capture IDs into
+  variables; the collections already do this.
+- Do not reuse a shared long-lived dataset — a test that mutates another test's rows makes
+  cross-tenant failures look like flakiness.
+- Admin accounts created through `POST /schools/create` currently receive a password
+  derived from the username (**ACD-12**). That generator is scheduled for removal; until
+  then, treat every account created that way as *publicly guessable* and use it only
+  against a disposable database.
+
+## 📊 Interpreting results
+
+`200` on any ❌ row above is a **confirmed tenant-isolation defect**, not a passing test.
+Record the finding ID from [REPOSITORY_AUDIT.md](audit/REPOSITORY_AUDIT.md) in the test run
+notes and re-run after the security remediation branch merges.
+
+### Environment variables
+- `{{base_url}}` — API origin
+- `{{jwt_token}}` — set automatically after login
+- `{{school_id}}`, `{{user_id}}`, `{{employee_id}}` — captured during creation
 
 ## 🛠️ Troubleshooting
 
-### Common Issues:
-1. **Authentication Failures**: Verify credentials and ensure user exists
-2. **Access Denied Errors**: Confirm user has proper permissions for requested operation
-3. **Entity Not Found**: Check that entity exists and belongs to user's school
+1. **`401` on login** — confirm the account exists; there is no public self-service
+   provisioning for privileged roles (**SEC-09**).
+2. **`403` on a portal route as STUDENT/PARENT** — expected today; caused by
+   `SecurityConfig` matcher ordering (**SEC-06**), not by your token.
+3. **`500` with a stack trace body** — the global exception handler leaks internals
+   (**SEC-08**); capture the response, it is evidence.
+4. **Empty `getMy*` responses** — several student/parent portal endpoints are stubs
+   (**ACD-09**).
 
-### Debugging Tips:
-1. Check JWT token contents to verify school ID
-2. Verify database records match expected tenant boundaries
-3. Review application logs for detailed error information
+## 📈 Best practices
 
-## 📈 Testing Best Practices
-
-1. **Sequential Testing**: Follow the organized workflow for proper setup
-2. **Data Isolation**: Each test run should use unique test data
-3. **Security Validation**: Always verify access controls are enforced
-4. **Error Handling**: Test both success and failure scenarios
-5. **Documentation**: Keep test results and findings documented
-
-## 🎉 Conclusion
-
-This updated Postman collection and testing guide ensure comprehensive validation of the WindsurfGMS security enhancements. The multi-tenant architecture now properly isolates school data while maintaining all existing functionality.
+1. Run the collection against a **disposable** database only.
+2. Never point a collection at production Neon data (**mandate §25.1–2**).
+3. Add a new request for every endpoint you change; the collection is the contract smoke
+   test until OpenAPI generation lands (**BKL-09**).
+4. Keep results, not secrets, in committed files.

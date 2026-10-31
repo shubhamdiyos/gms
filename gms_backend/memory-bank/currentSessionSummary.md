@@ -217,7 +217,7 @@
 **✅ School Creation Testing**:
 - SuperAdmin can access the school creation endpoint
 - New school created with correct details
-- Admin user automatically created with specified email ("imshubhy@gmail.com")
+- Admin user automatically created with specified email ("<admin-email>")
 - Employee record created for admin user
 - ADMIN role assigned to admin user
 - All multi-tenant security validations working correctly

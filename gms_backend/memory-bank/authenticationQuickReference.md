@@ -43,7 +43,7 @@ Integer empId = (domainUser.getEmployee() != null) ? domainUser.getEmployee().ge
 ```bash
 curl -X POST http://localhost:8080/api/v1/auth/login \
   -H "Content-Type: application/json" \
-  -d '{"username":"superadmin","password":"SuperAdmin123!"}'
+  -d '{"username":"superadmin","password":"<APP_SUPERADMIN_PASSWORD>"}'
 ```
 
 ### 2. School Creation
@@ -61,7 +61,7 @@ curl -X POST http://localhost:8080/api/v1/schools/create \
     "establishedYear":2020,
     "boardAffiliation":"CBSE",
     "adminFullName":"Shubham Kumar",
-    "adminEmail":"imshubhy@gmail.com"
+    "adminEmail":"<admin-email>"
   }'
 ```
 
@@ -91,10 +91,10 @@ SELECT id, username, employee_id, school_id FROM users WHERE username = 'superad
 SELECT * FROM schools WHERE school_code = 'TS001';
 
 -- Check admin user
-SELECT * FROM users WHERE email = 'imshubhy@gmail.com';
+SELECT * FROM users WHERE email = '<admin-email>';
 
 -- Check employee record
-SELECT * FROM employees WHERE email = 'imshubhy@gmail.com';
+SELECT * FROM employees WHERE email = '<admin-email>';
 ```
 
 ## 🚨 Common Issues & Solutions

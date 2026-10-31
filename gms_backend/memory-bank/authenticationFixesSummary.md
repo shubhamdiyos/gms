@@ -56,7 +56,7 @@ Ensured that all authentication flows comply with the multi-tenant architecture 
 ### School Creation Testing
 1. ✅ SuperAdmin can access the school creation endpoint
 2. ✅ New school created with correct details
-3. ✅ Admin user automatically created with specified email ("imshubhy@gmail.com")
+3. ✅ Admin user automatically created with specified email ("<admin-email>")
 4. ✅ Employee record created for admin user
 5. ✅ ADMIN role assigned to admin user
 6. ✅ All multi-tenant security validations working correctly

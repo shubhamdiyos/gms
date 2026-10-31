@@ -31,4 +31,4 @@
 - Align all existing implementations with the reference patterns to ensure consistency
 
 **Test Credentials (local/dev)**
-- SUPERADMIN: email `superadmin@gms.local`, password `ChangeMe123!`
+- SUPERADMIN: configured through `APP_SUPERADMIN_USERNAME` / `APP_SUPERADMIN_PASSWORD`; values are never committed (finding DOC-02).

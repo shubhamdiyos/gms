@@ -9,7 +9,7 @@ This document summarizes the updates made to the WindsurfGMS Postman collection 
 - Renamed "List All Schools" endpoint to "List My Schools" to accurately reflect functionality
 - Added "Try Accessing Another School (Should Fail)" test case to demonstrate security restrictions
 - Updated login credentials to match working superadmin credentials
-- Updated admin email for school creation to use "imshubhy@gmail.com" as specified
+- Updated admin email for school creation to use "<admin-email>" as specified
 - Enhanced login test scripts to properly handle JWT token extraction
 
 ### 2. WindsurfGMS-Postman-Testing-Guide.md
@@ -28,8 +28,8 @@ This document summarizes the updates made to the WindsurfGMS Postman collection 
    - Added specific HTTP 403 response validation
 
 2. **Updated Test Data**
-   - Superadmin credentials: Username `superadmin`, Password `SuperAdmin123!`
-   - Admin email for school creation: `imshubhy@gmail.com`
+   - Superadmin credentials: Username `superadmin`, Password `<APP_SUPERADMIN_PASSWORD>`
+   - Admin email for school creation: `<admin-email>`
    - Proper JWT token handling and school ID extraction
 
 3. **Enhanced Documentation**

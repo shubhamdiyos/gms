@@ -2,7 +2,7 @@
 
 ## 🗑️ EMAIL DELETION COMPLETED (August 25, 2024)
 
-### 📧 Target Email: imshubhy@gmail.com
+### 📧 Target Email: <admin-email>
 
 **Deletion Status**: ✅ SUCCESSFULLY COMPLETED
 
@@ -42,7 +42,7 @@
 
 1. **Transaction Started**: Safe deletion process initiated
 2. **User Roles Deleted**: Removed `ADMIN` role for user ID 31
-3. **User Record Deleted**: Removed user with email `imshubhy@gmail.com`
+3. **User Record Deleted**: Removed user with email `<admin-email>`
 4. **Employee Record Deleted**: Removed associated employee record
 5. **Transaction Committed**: All changes permanently applied
 
@@ -56,7 +56,7 @@
 ## 📈 Post-Deletion Verification
 
 ### ✅ Deletion Confirmed:
-- **Email Search Result**: 0 records found for `imshubhy@gmail.com`
+- **Email Search Result**: 0 records found for `<admin-email>`
 - **User Count**: Reduced from 14 to 13 users
 - **Employee Count**: Remains at 14 employees
 - **Database Integrity**: All foreign key constraints maintained
