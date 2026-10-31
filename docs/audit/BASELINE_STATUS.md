@@ -347,6 +347,36 @@ These are outside the repository and cannot be performed by an agent.
 5. **Confirm the target branch protection state** on GitHub: the mandate requires feature branches and PRs with green
    checks, but the only workflow that exists today deploys on push.
 
+### 11.1 Re-measured, and now ordered (Infra-M0, 2026-11-01)
+
+Item 5 is answered by measurement rather than recollection: `required_status_checks.contexts = []`,
+`strict = false`, `enforce_admins.enabled = false`, while reviews are configured
+(`required_approving_review_count = 1`, `require_last_push_approval = true`). Two GitHub Environments exist
+(`Production`, `Preview`) with **no** protection rules and `can_admins_bypass: true`, and no workflow references
+either. So the gate is advisory in both directions, and PR #10 was merged with an admin override.
+
+The list above is unordered, and one ordering now matters enough to be stated as a rule:
+
+1. Rotate the exposed Neon credential (item 1). Nothing else is safe until this is done.
+2. Make the two CI checks required and turn on `enforce_admins` (item 5's substance) — repository settings, owner-only.
+3. Provision `SECURITY_JWT_SECRET` and `APP_SUPERADMIN_*` as runtime configuration, not repository secrets
+   (item 2), and confirm the runtime's env-file path (item 3).
+4. Authorise the schema-only prod export for the Flyway baseline (item 4).
+5. **Only after 1–4 and after Infra-M2/Infra-M3 land:** restore SSH to the host and add `EC2_SSH_KNOWN_HOSTS`.
+   Doing this early is actively harmful — the missing known-hosts secret is presently the only thing preventing a
+   merge to `master` from SSHing an unverified build into production, because `deploy-backend.yml` has no build step,
+   no `environment:` gate and no required check upstream of it. See
+   [INFRASTRUCTURE_AUDIT.md §6.7](../infrastructure/INFRASTRUCTURE_AUDIT.md).
+
+Two further owner decisions are now unavoidable and are **not** engineering tasks, because both involve spend or an
+account and mandate §2 forbids either without approval:
+
+- **A domain name** (~$10–15/year) so the API origin can hold a publicly trusted certificate. Without it, INF-01
+  cannot be closed with zero-cost tooling, and "HTTPS enforced" cannot honestly be claimed.
+- **One off-host backup destination.** At the measured data size this is under $1/month, but a backup that lives
+  only on the host is not a backup, and choosing a vendor, an account and a key is the owner's call
+  ([ADR-009](../infrastructure/INFRASTRUCTURE_DECISIONS.md)).
+
 ---
 
 ## 12. Entry criteria for Milestone 1
@@ -446,10 +476,13 @@ The EC2 host remains unreachable (`ssh: connect to host … port 22: Connection 
 observed in production**. `ci.yml` has now executed — its first run, on PR #10, reported
 `Backend build and tests=success, Frontend lint and build=success` on a clean `ubuntu-latest` runner, which is the
 strongest form of evidence §13.1 could ask for, because §13.1's local result and the CI result are now the same claim
-measured twice on different machines. Still unverified: the prod profile has never booted, `deploy-backend.yml` has
-never run (it needs the owner's `EC2_SSH_*` and `EC2_SSH_KNOWN_HOSTS` secrets), and no check is marked required, so CI
-reports rather than enforces. The honest reading of this branch remains "the code awaiting deployment is measurably
-safer than the code deployed"; §27 forbids more than that.
+measured twice on different machines. Re-measured in Infra-M0: the merge commit `7a75d39` also ran CI green in 50 s,
+and **`deploy-backend.yml` did run** on that same push (run 41245769175) — it was refused by its own host-key guard,
+so the accurate statement is that the deploy pipeline has never *reached* the host, not that it has never executed.
+`EC2_HOST`, `EC2_USER` and `EC2_SSH_KEY` are already provisioned; `EC2_SSH_KNOWN_HOSTS` is not. Still unverified: the
+prod profile has never booted, and no check is marked required, so CI reports rather than enforces
+(`required_status_checks: []`, `enforce_admins: false` — re-fetched 2026-11-01). The honest reading of this branch
+remains "the code awaiting deployment is measurably safer than the code deployed"; §27 forbids more than that.
 
 Also unverified by choice: the frontend gates in `ci.yml` are **advisory**. `npm run lint` fails on 47 pre-existing
 errors (FE-14) and there are no frontend tests yet (F3), so only `npm ci` and `npm run build` can block a merge today.

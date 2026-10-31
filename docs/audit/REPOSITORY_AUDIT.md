@@ -395,6 +395,10 @@ with a cost — a lint regression can reach `master` — taken deliberately inst
 **OPS-03 (P1) — SSH host-key verification disabled** at `:47`, `:60`, `:87` (`StrictHostKeyChecking=no`), and `webfactory/ssh-agent@v0.9.0` is unpinned to a SHA. Mandate §14/§25 rule 8 forbids the former.
 
 **OPS-04 (P1) — Secrets and hostname echoed despite a "sanitized" label.** `set -euxo pipefail` at `:35,45,59,86` expands `ssh "$EC2_USER@$EC2_HOST"` into the run log, defeating the masking at `:37`.
+> **Revalidated in Infra-M0 and downgraded.** Run 41245769175's actual log shows `EC2_HOST: ***` and
+> `+ ssh … ***@***` — GitHub masks secret *values*, including inside the `set -x` trace, so nothing was disclosed.
+> The residual issue is only the deliberate `${EC2_HOST:0:10}` prefix at `:67`. The real host-disclosure exposure is
+> the committed origin in `gms_frontend/vercel.json:5`, recorded as INF-01/ADR-013 rather than here.
 
 **OPS-05 (P1) — `cancel-in-progress: true` on an SSH deploy** (`:15-17`) can kill a run mid-script and leave EC2 half-updated; deploy jobs must use `false`.
 
@@ -480,7 +484,11 @@ rewriting, is the remediation.
 
 ## 13. Missing features (relative to mandate §4.3 and §6)
 
-Server-side pagination, sorting and filtering; OpenAPI generation; centralised tenant resolution and ownership assertions; row-level security evaluation; refresh tokens and a revocation store; password reset (no endpoint exists); role-change propagation policy; idempotency keys on financial writes; payment verification or an honest manual path; invoice↔payment↔receipt linkage; refunds; late fees and due-date processing; attendance percentage; grade derivation from the scheme; draft/publish result workflow; admission-number sequencing per tenant; audit trail (no audit table; `created_by` only); soft delete as a consistent concept; data retention/deletion policy; backup/restore automation; structured JSON logging with correlation IDs (a `TraceIdFilter` exists but is not wired into the chain or the log pattern); error tracking; readiness/liveness separation; non-root containers; HTTPS; test suites of any kind; PR quality gates.
+Server-side pagination, sorting and filtering; OpenAPI generation; centralised tenant resolution and ownership assertions; row-level security evaluation; refresh tokens and a revocation store; password reset (no endpoint exists); role-change propagation policy; idempotency keys on financial writes; payment verification or an honest manual path; invoice↔payment↔receipt linkage; refunds; late fees and due-date processing; attendance percentage; grade derivation from the scheme; draft/publish result workflow; admission-number sequencing per tenant; audit trail (no audit table; `created_by` only); soft delete as a consistent concept; data retention/deletion policy; backup/restore automation; structured JSON logging with correlation IDs (the `TraceIdFilter` **is** registered — a `@Component` at
+`Ordered.HIGHEST_PRECEDENCE`, `TraceIdFilter.java:16-18` — and it does populate MDC (`:26`) and set `X-Trace-Id`
+(`:28`), but no `logging.pattern` references `%X{…}`, so the id reaches the response header and never the log
+line; see INF-15); error tracking; readiness/liveness separation; non-root containers; HTTPS; test suites of any
+kind; PR quality gates.
 
 ## 14. Technical debt summary and remediation order
 
@@ -518,8 +526,10 @@ verdict, and every row there is backed by an executed command rather than an exp
 
 Mandate §3: *"Do not mark a vulnerability as fixed merely because code has been changed."* Each row therefore states
 the **status vocabulary** and the **evidence that earned it**, and nothing is claimed beyond what was executed. All
-evidence below is against a **local** dev-profile boot on a disposable PostgreSQL 16 container. Nothing in this table
-means the deployed system changed: the EC2 host is unreachable (§17), so no M1 change has run in production.
+evidence below is against a **local** dev-profile boot on a disposable PostgreSQL 16 container, except the two
+deploy-workflow rows, whose evidence is a **CI run on the production path**. Nothing in this table means the
+deployed system changed: run 41245769175 was *refused* by the host-key guard and the EC2 host is unreachable (§17),
+so no M1 change has run in production — which is the intended outcome of that guard, not an accident.
 
 Status vocabulary — **Verified** = observed at runtime or asserted by an executed test · **Changed** = code is correct
 in `HEAD` but the behaviour was not observed · **Open** = untouched by this branch · **Owner** = requires an action
@@ -549,22 +559,27 @@ outside the repository.
 | OPS-11 debug logging in every profile | **Verified** | Base and prod default to INFO (`application.properties:95-98`); DEBUG is only what `application-dev.properties` opts into, and `StartupSecurityValidator` refuses to boot with `com.gms` at DEBUG/TRACE outside `dev`. |
 | OPS-14 no test suite | **Changed** | 36 backend tests now execute under `mvn test` and JaCoCo writes a report; `mvn -DskipTests` is no longer the only command that works. Frontend still has zero tests (FE-14) and no Playwright/Testcontainers coverage — that is M3. |
 | FE Quick-Login default credential button | **Verified** | Removed from `Login.jsx`, along with the blank `defaultValues`; the "Clear Storage & Logout" escape hatch is retained. |
-| Deploy workflow triggered by documentation edits | **Changed** | `deploy-backend.yml` `paths:` narrowed to backend/runtime inputs and `ci.yml` ignores docs. **Not** verified in CI: the workflow needs owner-provisioned secrets (§17), so no run has executed. |
-| SSH host-key verification disabled in deploy | **Changed** | `SSH_OPTS` now pins `StrictHostKeyChecking=yes` with a `known_hosts` file, and a new step fails the job when `EC2_SSH_KNOWN_HOSTS` is unset — the deploy cannot silently downgrade to a blind trust-on-first-use. **Not** verified in CI for the same reason. |
+| Deploy workflow triggered by documentation edits | **Verified** | `deploy-backend.yml` `paths:` narrowed to backend/runtime inputs and `ci.yml` ignores docs. The workflow **executed** on the merge commit (run 41245769175, 2026-10-31T21:54:46Z) — a `master` push touching `gms_backend/src/**` did trigger it, which is the observable half of the trigger contract. The negative case (a docs-only push not triggering) has not yet been exercised. |
+| SSH host-key verification disabled in deploy | **Verified** | `SSH_OPTS` pins `StrictHostKeyChecking=yes` with a `known_hosts` file, and the job fails when `EC2_SSH_KNOWN_HOSTS` is unset. Run 41245769175 log: `##[error]secret EC2_SSH_KNOWN_HOSTS is not set … Deploy is refused rather than run with host-key checking disabled`. This is the only control in this table with a **production-path** runtime proof rather than a local one. |
 | Dead password utilities packaged in the jar | **Verified** | `util/PasswordEncoderTest.java`, `util/PasswordVerificationTest.java`, `util/PasswordTestUtil.java`, the committed `PasswordVerificationTest.class` and the top-level `JwtDecoder.java` are deleted; the tracked-file list contains no `.class` entry. |
 
 ## 17. What M1 could not verify, and why
 
-1. **The deployed backend is unreachable.** Both attempts against the recorded EC2 host fail with
-   `ssh: connect to host … port 22: Connection timed out`. Every status above is therefore *local*. Mandate §25.13 and
-   §27 apply literally: this branch is not evidence that production is safer, only that the code awaiting deployment is.
-2. **`ci.yml` has executed and passed; `deploy-backend.yml` has not.** The first run of the CI workflow on PR #10
-   returned `Backend build and tests=success, Frontend lint and build=success` on `ubuntu-latest` — so `mvn -B verify`
-   against JDK 21 and `npm ci`/`npm run build` are now proven on a clean runner, not just on this machine. What that
-   does **not** establish: the checks are advisory (branch protection lists `required_status_checks: []`), the two
-   frontend steps configured as `continue-on-error` did not have to prove anything, and the deploy workflow — the one
-   that SSHes into production, and the reason the `EC2_SSH_*` and `EC2_SSH_KNOWN_HOSTS` secrets matter — has still
-   never run. Making those two checks required is the owner action (§11 item 5 of BASELINE_STATUS).
+1. **The deployed backend is unreachable.** Three attempts now fail the same way — two from this machine and one
+   from a GitHub runner (`ssh: connect to host … port 22: Connection timed out`, recorded in run 41245769175 at
+   2026-10-31T21:55:01Z). The runner observation matters: it is not a local-network artefact. Every status above is
+   therefore *local*. Mandate §25.13 and §27 apply literally: this branch is not evidence that production is safer,
+   only that the code awaiting deployment is.
+2. **`ci.yml` has executed and passed; `deploy-backend.yml` has executed and refused.** The first CI run on PR #10
+   returned `Backend build and tests=success, Frontend lint and build=success` on `ubuntu-latest`, and the merge
+   commit re-ran green in 50 s — so `mvn -B verify` against JDK 21 and `npm ci`/`npm run build` are proven on a
+   clean runner, not just on this machine. The deploy workflow also ran and was stopped by its own host-key guard
+   (§16), so the accurate statement is: **the pipeline that SSHes into production has never reached the host.**
+   What remains unestablished: the CI checks are advisory (`required_status_checks: []`, `enforce_admins: false`,
+   re-fetched in Infra-M0), the two frontend steps configured as `continue-on-error` did not have to prove anything,
+   and neither workflow's `environment:` gate exists even though `Production` and `Preview` environments do.
+   `EC2_HOST`/`EC2_USER`/`EC2_SSH_KEY` are provisioned; `EC2_SSH_KNOWN_HOSTS`, `SECURITY_JWT_SECRET` and
+   `APP_SUPERADMIN_*` are not (`gh secret list`).
 3. **Prod profile never booted.** `application-prod.properties` (`ddl-auto=validate`, Flyway enabled,
    `baseline-on-migrate=false`) is written but unexercised, and deliberately so: booting it needs the Neon credential
    the owner has not rotated, and §25.2 forbids connecting to production without explicit authorisation.
@@ -572,3 +587,30 @@ outside the repository.
    tenancy invariant (TEN-01…07) is the next package, because fixing SEC-05 and the ownership guards without a
    `TenantContext` would mean writing the same guard twelve times.
 
+
+## 18. Infra-M0 — what the infrastructure audit changed here
+
+The second MASTER ENGINEERING MANDATE (Production-Grade Infrastructure, Container Architecture, DevOps & CI/CD)
+opened a separate findings namespace so this file stays the application's record and the platform gets its own:
+
+- **[docs/infrastructure/INFRASTRUCTURE_AUDIT.md](../infrastructure/INFRASTRUCTURE_AUDIT.md)** — 22 `INF-*` findings
+  with executed evidence, and the §17 revalidation of every claim carried forward from this document.
+- **[docs/infrastructure/PRODUCTION_READINESS_MATRIX.md](../infrastructure/PRODUCTION_READINESS_MATRIX.md)** — the §14
+  scorecard, ten areas, five statuses.
+- **[docs/infrastructure/INFRASTRUCTURE_DECISIONS.md](../infrastructure/INFRASTRUCTURE_DECISIONS.md)** — fourteen ADRs,
+  including the four that need an owner decision before any money or account is involved.
+
+Four corrections to this file came out of that pass, and they are recorded here rather than silently patched:
+
+| Item in this file | Correction | Where |
+|---|---|---|
+| §13 "`TraceIdFilter` exists but is not wired into the chain" | **Wrong.** It is a `@Component` at `Ordered.HIGHEST_PRECEDENCE` and does populate MDC; the true defect is that no `logging.pattern` emits `%X{traceId}`. §13 reworded. | INF-15 |
+| OPS-04 "hostname echoed in logs, defeating the masking" | **Downgraded.** The failing run's log shows `EC2_HOST: ***` and `***@***`; GitHub masks secret values inside `set -x` traces. Annotated at §11. | INF-01 |
+| OPS-03 host-key verification | **Closed in code *and* proven executed** — the guard refused a production deploy on its first run. §16 rows promoted from *Changed* to *Verified*. | audit §6.2 |
+| §17 "the deploy workflow has never run; it needs owner-provisioned secrets" | **Partly wrong.** It ran on the merge commit, and `EC2_HOST`/`EC2_USER`/`EC2_SSH_KEY` **do** exist. Only `EC2_SSH_KNOWN_HOSTS` is absent. | audit §6.2 |
+
+The consequence that reorders the programme is stated once, at the end of
+[INFRASTRUCTURE_AUDIT.md §9](../infrastructure/INFRASTRUCTURE_AUDIT.md): the missing known-hosts secret is currently
+the only thing standing between a merge to `master` and an ungated production deploy. Restoring SSH reachability
+**before** the CI gate and the deployment pipeline are rebuilt converts a latent risk into an active one, so the
+owner action list in BASELINE_STATUS §11 is now ordered, not merely enumerated.

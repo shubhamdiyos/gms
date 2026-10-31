@@ -150,6 +150,16 @@ itself is currently unreachable enough that even the claim "the deployed system 
   `required_status_checks: []`, so a green CI is not what stops a merge today. What the narrowing does change is one
   specific real hazard — a documentation-only commit to `master` used to SSH into production. Enforcing the checks is
   the owner action in BASELINE_STATUS §11 item 5.
+* **`EC2_SSH_KNOWN_HOSTS` must stay unset, and the EC2 host must stay unreachable, until Infra-M2 and Infra-M3 land.**
+  This is the one item on this list that is a *safety* constraint rather than a sequencing preference: the deploy
+  workflow now executes on every `master` push and is stopped only by that missing secret
+  (run 41245769175, recorded in [INFRASTRUCTURE_AUDIT.md §6.2](../infrastructure/INFRASTRUCTURE_AUDIT.md)). Adding
+  the secret, or restoring port 22, hands merge-to-`master` an ungated production deploy with no build step upstream.
+* Platform debt has its own register and is not repeated here: findings `INF-01…22` live in
+  **[docs/infrastructure/INFRASTRUCTURE_AUDIT.md](../infrastructure/INFRASTRUCTURE_AUDIT.md)**, their status in
+  **[PRODUCTION_READINESS_MATRIX.md](../infrastructure/PRODUCTION_READINESS_MATRIX.md)**, and the reasoning behind each
+  chosen approach in **[INFRASTRUCTURE_DECISIONS.md](../infrastructure/INFRASTRUCTURE_DECISIONS.md)**. This file keeps
+  the application's debt; cross-references between the two are by finding id.
 
 ## 4. Debt quantification
 
