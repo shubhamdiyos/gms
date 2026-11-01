@@ -377,14 +377,27 @@ met by an override costs the protection its meaning and gains nothing.
 record the refusal); a deploy run shows an explicit `waiting` → approved transition attributable to a named
 reviewer; the token for a deploy run is read-only (`gh api` on the job's permissions).
 
-**One trap to test before switching anything on.** A required status check whose workflow does **not** run is not
-a pass — it is `Expected — Waiting for status to be reported`, and the PR cannot merge. `ci.yml` filters with
-`paths-ignore` and the new gate filters with `paths`, so naming either workflow's jobs as required without changing
-the filtering reintroduces stalls on every PR that touches only docs. The cheap fix is a status-completion job that
-always runs and reports a single context; the alternative is dropping the filters. **This is a prediction from the
-trigger definitions, not an observation** — no required check is configured yet, so nothing has stalled. The first
-action after INF-23's gate reaches `master` is to open a documentation-only PR and record whether
-`Workflow validation` reports or stays absent.
+**The trap is no longer a prediction — it is measured.** A required status check whose workflow does **not** run is
+not a pass; it is `Expected — Waiting for status to be reported`, and the PR cannot merge. Tested on PR #15 (4 files,
+all under `docs/**`): `gh run list --branch docs/record-inf23-gate-merge` returns **no runs at all**, and
+`gh pr checks 15` shows only the two Vercel contexts from the attached GitHub App. Neither `ci.yml` nor
+`validate-workflows.yml` started anything — correct behaviour for both filters, fatal if either job were named in
+`required_status_checks.contexts`.
+
+So the remediation order is now forced, not chosen. Adding the four existing jobs as required checks would stall
+every documentation PR in the programme, which is the most common PR type in Phase 0. The options, in the order they
+should be tried:
+
+1. **A filter-free completion job** — one small workflow with no `paths:`/`paths-ignore:` that always runs and
+   reports a single context, made the required check. Costs ~15 s of runner time per PR and keeps the filters.
+2. **Drop the filters** so `ci.yml` runs on every PR including docs-only ones — honest but wasteful: the backend job
+   is ~50 s plus Maven resolution on changes that cannot affect it.
+3. **Required checks with `strict: false`** and the filters left in place, accepting that a docs-only PR merges on
+   Vercel's word alone. Weakest: it makes the gate bind only the PRs that already look risky.
+
+**This needs the owner's settings change either way** — `contexts=[]` today, so none of the three is configured and
+nothing has ever stalled. It is recorded here so the choice is made with the measurement in hand rather than
+discovered when a documentation PR hangs.
 
 ---
 
@@ -392,7 +405,7 @@ action after INF-23's gate reaches `master` is to open a documentation-only PR a
 
 **Evidence.** `application-prod.properties` exists and is written correctly (`ddl-auto=validate`,
 `flyway.baseline-on-migrate=false`, no defaults), but it has never been executed: booting it requires the Neon
-credential that is still unrotated (SEC-01) and mandate §25 forbids connecting to production without
+credential that is still unrotated (SEC-01) and first mandate §25 forbids connecting to production without
 authorisation. `docker-compose.yml:39` sets `SPRING_PROFILES_ACTIVE` with a `dev` default, so the *only* container
 configuration in the repository boots the relaxed profile. GitHub's `Preview` environment has no jobs and no
 protection rules.
@@ -402,7 +415,7 @@ protection rules.
 at boot, which converts "deploy" into "outage" until the baseline exists.
 
 **Remediation.** Create a compose-based staging stack on the existing host (or a second container set with its
-own volume) fed by a **masked sample dataset** (mandate §25.16 forbids fabricated data in production dashboards;
+own volume) fed by a **masked sample dataset** (first mandate §25 item 16 forbids fabricated data in production dashboards;
 a staging-only fixture is not a dashboard); boot `prod` there; require a green staging boot before the deploy
 gate clears. A second paid instance is not assumed affordable (§5 of the mandate says so explicitly), so the
 plan is one host, two stacks, isolated by network and port — recorded in [ADR-008](INFRASTRUCTURE_DECISIONS.md).
@@ -501,19 +514,21 @@ cover the gate's own edits.
 the branch cannot merge; restoring it turns green. The job must be marked required alongside the two CI checks
 (INF-10) or it inherits the same advisory weakness.
 
-**Status — implemented, and the verification above has now been executed** (PR #14, branch
-`ci/workflow-self-validation`, 2026-11-01). `.github/workflows/validate-workflows.yml` triggers on
+**Status — FIXED at the capability level.** Merged to `master` as `13bc2ed` (PR #14, 2026-11-01T07:14:21Z) and it
+validated the branch it landed on: run 41283981839 is a `push` to `master` on that merge commit with **both jobs
+green**, which is the exact thing `6198d86` could not do. `.github/workflows/validate-workflows.yml` triggers on
 `pull_request` + `push: master` with `paths: ['.github/**']` — precisely the set `ci.yml` excludes — and runs
 actionlint plus four structural guards (`permissions:` in every file, every action SHA-pinned, `ci.yml`'s two
 triggers intact, this file's own trigger intact) and one warning (any `secrets.EC2_*` reference).
 
-Three commits on that branch produced three observations:
+Four commits on that branch produced four observations:
 
 | Commit | Run | Result |
 |---|---|---|
 | `0deee38` add the gate | 41283050527 | **green** — and it *ran*, which `6198d86` could not achieve |
 | `f82f39f` rename `ci.yml`'s `pull_request:` to `pull_request_typo:` | 41283176919 | **red** in both jobs: actionlint `unknown Webhook event "pull_request_typo"` + the guard's `ci.yml no longer triggers on pull_request` |
 | `639f391` revert | 41283277168 | **green** |
+| `2b6a593` final head (docs only) | 41283837991 | **green** — 6 s and 32 s |
 
 A fourth data point came out of the break unasked: run 41283173874 (`push`, **0 jobs**, failure) is GitHub's own
 parse-failure record for the malformed file. So a *syntactically invalid* workflow does surface as a red run even
@@ -529,8 +544,8 @@ One platform behaviour measured rather than assumed, and it matters for INF-10: 
 (`a190c44`, no `.github/**` file touched) **still started the gate** — run 41283615154. For `pull_request`, GitHub
 evaluates a path filter against the whole base→head diff, not the newest commit, so a PR that once touched a
 workflow re-runs the gate on every push. Correct for this gate. It also means a PR whose *only* change is `docs/**`
-will never run it — which is the stall scenario described in INF-10's verification note if these contexts are made
-required without changing the filters.
+will never run it — measured on PR #15, which started no Actions run whatsoever, and turned into the forced remediation
+order recorded under INF-10 above.
 
 ---
 
@@ -717,8 +732,8 @@ the reverse direction (a consumed variable with no documented name) is asserted 
 Recorded because "checked and clear" is a result, and it prevents a later pass from re-flagging them.
 
 * Mock fallback: `apiSlice.js:16` and `authService.js:5` both gate on
-  `import.meta.env.VITE_MOCK_AUTH === 'true'`, so an unset variable is *off*. §25's "do not silently fall back to
-  mock APIs in production" holds by construction.
+  `import.meta.env.VITE_MOCK_AUTH === 'true'`, so an unset variable is *off*. The first mandate's §25 rule ("do not
+  silently fall back to mock APIs in production") holds by construction.
 * API origin fallback: `apiSlice.js:5-14` returns `/api/v1` when `import.meta.env.PROD`, and only falls back to
   `http://localhost:8080/api/v1` in a development build. A production bundle cannot point at localhost.
 
@@ -863,6 +878,8 @@ These are not M0 results, so they are kept separate rather than retro-fitted int
 | actionlint 1.7.12 against both workflows | **exit 0** locally (binary downloaded, not installed system-wide) and **exit 0** in CI on run 41283277168 |
 | Every action reference SHA-pinned | **9 of 9** — 6 in `ci.yml` (this PR), 3 in `validate-workflows.yml`; the guard enumerates them by `grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]'` |
 | Each pinned SHA against its upstream tag | **verified before pinning**: `11d5960`=checkout v4.4.0, `cf277c6`=setup-java v4.9.1, `ea165f8`=upload-artifact v4.6.2, `49933ea`=setup-node v4.4.0, `3d3c42e`=checkout v7.0.1, `914e7df`=actionlint v1.7.12 |
+| A documentation-only PR after the gate reached `master` | **no Actions run at all** — measured on PR #15 (4 files, all `docs/**`): `gh run list --branch docs/record-inf23-gate-merge` is empty and `gh pr checks 15` shows only the Vercel app's two contexts. Correct for both path filters, and the reason neither filter can be left in place while its jobs are marked required (INF-10) |
+| CI on `master` after `gms_frontend/vercel.json` was deleted | **run 41283928312, success** on merge commit `964acad`. Notable because it contradicts an assumption carried into the retirement: `vercel.json` is not in `ci.yml`'s `paths-ignore`, so deleting a frontend config file *is* a CI-relevant change, and the frontend job passing is the evidence that nothing depended on it |
 
 ### 7.1 Image build result
 
@@ -965,17 +982,21 @@ re-checked against the working tree or a live measurement on 2026-11-01, in the 
 | Makefile uses obsolete `docker-compose` | **OPEN** | 16 of 17 recipes; `make build` → `Error 1`, `make up` → exit 2 on this host (INF-12) |
 | Vercel routed API calls to the retired EC2 host over HTTP | **RETIRED (by deletion)** | `gms_frontend/vercel.json` deleted on this branch. Before deleting it, the target was probed: DNS still resolves to `65.0.109.47`, TCP connect to `:8080` times out after 8 s — the rewrite could not carry traffic, so removing it breaks no working path |
 | Old EC2 SSH deployment workflow | **RETIRED (by deletion)** | `.github/workflows/deploy-backend.yml` deleted; `gh run list` confirms its last attempt (41245769175) never reached the host |
-| CI does not validate its own workflow files | **OPEN** | the defect is real and measured, not inferred: `6198d86` edited `ci.yml` and started no run anywhere (INF-23). The remediation is built and its acceptance test executed — PR #14's gate went red on a deliberately broken trigger and green on the revert — but it is not merged, and it stays OPEN until it is. It then becomes a *control* only when INF-10 names those jobs as required checks |
+| CI does not validate its own workflow files | **FIXED (capability) — enforcement still INF-10** | the defect was measured, not inferred: `6198d86` edited `ci.yml` and started no run anywhere. `validate-workflows.yml` is on `master` as `13bc2ed` and validated that very commit on push (41283981839, both jobs green); its acceptance test was executed on the PR, red on a deliberately broken trigger (41283176919) and green on the revert (41283277168) |
 | Lint and test checks advisory rather than enforced | **OPEN** | `required_status_checks.contexts=[]`, `enforce_admins=false`, lint step `continue-on-error: true` (INF-10) |
 | No Flyway migration foundation | **OPEN** | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` property is inert (OPS-07) |
 | No independently verified off-host backup/restore | **OPEN** | zero dumps and zero restores exist anywhere; now re-targeted at managed Neon (ADR-009) |
 | No verified production health check | **SUPERSEDED** | there is no production to check — the only target that ever had one is closed. Re-states itself as a Phase 6 gate: external HTTPS + health verification against the OCI origin |
 | No verified production deployment | **SUPERSEDED** | same cause. The rollback/deploy acceptance tests from Infra-M3 carry forward unchanged and now apply to OCI |
 
-Nothing in that table is marked FIXED on the strength of a code change, and two items moved classification for a
-reason worth stating plainly: the EC2 rows are **RETIRED**, which is not the same as **FIXED** — the exposures they
-described were deleted along with a host that had already stopped answering, and the discipline they were warning
-about still has to be built for the new platform.
+Exactly one row is **FIXED**, and it is not fixed on the strength of a code change: the gate is merged, and the
+acceptance test written into the finding was executed before the merge and observed again on `master` afterwards.
+That is the distinction the first mandate's §3 draws — *changed*
+versus *demonstrated* — and the row still carries its qualifier,
+because a signal nothing consumes is not yet a control. Two other rows moved classification for a reason worth
+stating plainly: the EC2 rows are **RETIRED**, which is not the same as **FIXED** — the exposures they described were
+deleted along with a host that had already stopped answering, and the discipline they were warning about still has to
+be built for the new platform.
 
 ## 11. What I can execute directly, and the genuine human blockers
 
@@ -992,7 +1013,7 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 **The blockers are therefore exactly four, and all four are human-only for a named reason:**
 
-1. **Neon account** — creation needs email verification (mandate §8.1 permits stopping here and nowhere earlier).
+1. **Neon account** — creation needs email verification (third mandate §8.1 permits stopping here and nowhere earlier).
    After that, an API key or `neonctl auth` session lets me create `gms-production` and the least-privilege role.
 2. **OCI API credentials** — an API signing key pair plus `tenancy/user/fingerprint/region` in `~/.oci/config`, or
    a console session I can drive. The private key must never enter chat or git (§9.3, §14); it is written locally by
@@ -1004,8 +1025,18 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 **The protection problem, stated once.** `required_approving_review_count = 1` with
 `require_last_push_approval = true` cannot be satisfied on a single-account repository, because GitHub refuses an
-author's own approval. Every PR so far has therefore needed an `--admin` override, which mandate §2 forbids and
-§43 of the new mandate implicitly contradicts by asking me to manage the PR lifecycle myself. The two are only
-reconcilable by changing the rule: make `Backend build and tests` and `Frontend lint and build` **required** with
-`strict` and `enforce_admins: true`, and set the review count to `0`. That converts a decoration into a gate that
-binds the owner too — and it is the only repository-settings change in the programme I cannot justify making alone.
+author's own approval. Every PR so far has therefore needed an `--admin` override. Four now carry one: #10
+(2026-10-31), #11 (`483a41c`, 2026-11-01T04:42:25Z), #13 (`964acad`, 07:13:33Z) and #14 (`13bc2ed`, 07:14:21Z) —
+the last two merged minutes apart, which is what a stack looks like when the reviewer is also the author. The
+mandate contradicts itself in a **single section**: §2 says both "Never bypass branch protection, required reviews,
+CI checks" and "Do not ask me to manually review or merge every routine engineering PR. You should manage the PR
+lifecycle yourself where repository permissions and protections allow it". The clause is conditional — *where
+protections allow* — and this configuration does not allow it, so the two readings are only reconcilable by
+changing the rule. The contradiction sits in one section, not across two mandates (an earlier draft of this
+paragraph cited "§43"; the current mandate has 23 sections).
+
+What reconciles them: make `Backend build and tests`, `Frontend lint and build` and the two
+`Workflow validation` jobs **required** with `strict` and `enforce_admins: true`, and set the review count to `0`.
+That converts a decoration into a gate that binds the owner too — and it is the only repository-settings change in
+the programme I cannot justify making alone, because reading the merge history above shows an override is already
+routine.

@@ -5,6 +5,25 @@ would lose it. Written on 2026-11-01 under the third MASTER ENGINEERING MANDATE 
 reconciliation matrix and forbids duplicate documentation — so this file is the **only** place that classifies the
 docs, and every other file stays responsible for its own subject.
 
+**Citation key.** Three mandates have contributed to these documents and their section numbers collide, so a bare `§`
+is ambiguous. The convention: **an unqualified `mandate §n` means the mandate that register was written under** — for
+`INFRASTRUCTURE_AUDIT.md`, `INFRASTRUCTURE_DECISIONS.md` and `PRODUCTION_READINESS_MATRIX.md` that is the second one
+(864 lines, `# 1. YOUR ROLE` … `# 19. FINAL PRINCIPLE`, the author of every `INF-*` id); for `REPOSITORY_AUDIT.md`,
+`SECURITY_AUDIT.md` and `BASELINE_STATUS.md` it is the first (1,762 lines, `# 1. PRODUCT VISION` …
+`# 27. REQUIRED FINAL REPORT`, author of `SEC-*` and the M1 record). Anything cited from the current execution
+mandate (1,551 lines) is written **`third mandate §n`**.
+
+The convention is not a guess about the existing text — every unqualified `mandate §n` in the three infrastructure
+registers was checked against the actual headings of the 864-line mandate: §2 non-negotiable constraints (zero-cost),
+§4.5 compose architecture, §5 environments, §7 deployment, §9 persistence and the "never store production data only
+in an ephemeral container" line, §11 hardening, §12 disaster recovery and operations, §13 infrastructure testing,
+§17 current project findings — all match what the registers cite them for. Five citations did **not** belong to that
+mandate and are now qualified: three `§25` references that are the first mandate's *Critical Operational
+Restrictions*, `§8.1` for the Neon account (third mandate), and the workflow-validation stage — `§6.1 stage 1` of the
+Infra mandate, which is `third mandate §12` ("Workflow self-validation"). Collisions worth knowing about: backup and
+DR is Infra §12 but third-mandate §15; CI/CD is Infra §6 but third-mandate §12; cost policy is Infra §2 but
+third-mandate §20.
+
 66 Markdown files were scanned (`docs/**`, `gms_backend/memory-bank/**`, root and `gms_frontend/README.md`,
 `.github/pull_request_template.md`). Two internal links were broken; both are fixed and listed in §3.
 
@@ -79,7 +98,7 @@ PY
 
 ## 4. Not yet written
 
-Mandate §4 lists these documents as required, and §19 Phase 7 is the phase that says "Document deployment and
+The third mandate's §4 lists these documents as required, and its §19 Phase 7 says "Document deployment and
 recovery runbooks". They do not exist yet, and they will be written by the milestone that makes them true, not
 before — a runbook for a pipeline that does not exist would be fiction:
 

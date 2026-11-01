@@ -359,6 +359,15 @@ override. On a single-account repository the configured rule (`required_approvin
 `require_last_push_approval = true`) can never be satisfied, because GitHub refuses an author's own approval;
 Infra-M2 has to choose a protection shape that is satisfiable rather than rely on repeated bypasses.
 
+**It has now happened four times, in four consecutive PRs.** #13 (EC2 retirement, `964acad`, 2026-11-01T07:13:33Z)
+and #14 (the workflow-validation gate, `13bc2ed`, 07:14:21Z) both hit `REVIEW_REQUIRED` and both went in on the
+owner's standing instruction to manage the PR lifecycle rather than queue it for a reviewer who cannot approve their
+own work. Two merges ninety seconds apart is the clearest evidence yet that this rule is not a gate: it is a
+formality that is met by `--admin` every single time. No required check was bypassed — #13's CI jobs and #14's two
+`Workflow validation` jobs were green before each merge — so what is being overridden is review, not verification.
+The change that would make the override unnecessary is recorded in
+[INFRASTRUCTURE_AUDIT.md §11](../infrastructure/INFRASTRUCTURE_AUDIT.md) and is one settings call away.
+
 The list above is unordered, and one ordering now matters enough to be stated as a rule:
 
 1. Rotate the exposed Neon credential (item 1). Nothing else is safe until this is done.
