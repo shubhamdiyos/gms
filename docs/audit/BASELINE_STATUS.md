@@ -353,7 +353,11 @@ Item 5 is answered by measurement rather than recollection: `required_status_che
 `strict = false`, `enforce_admins.enabled = false`, while reviews are configured
 (`required_approving_review_count = 1`, `require_last_push_approval = true`). Two GitHub Environments exist
 (`Production`, `Preview`) with **no** protection rules and `can_admins_bypass: true`, and no workflow references
-either. So the gate is advisory in both directions, and PR #10 was merged with an admin override.
+either. So the gate is advisory in both directions, and PR #10 was merged with an admin override — as was PR #11
+(the infrastructure audit, `483a41c`, 2026-11-01), this time after the blocker was reported and the owner chose the
+override. On a single-account repository the configured rule (`required_approving_review_count = 1` with
+`require_last_push_approval = true`) can never be satisfied, because GitHub refuses an author's own approval;
+Infra-M2 has to choose a protection shape that is satisfiable rather than rely on repeated bypasses.
 
 The list above is unordered, and one ordering now matters enough to be stated as a rule:
 

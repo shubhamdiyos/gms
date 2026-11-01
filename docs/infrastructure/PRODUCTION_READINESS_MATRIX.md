@@ -72,7 +72,7 @@ Each item names the command or artefact that produced the status. An item with n
 | Backend compile + test executes | `VERIFIED` | three `ci.yml` runs concluded `success`; job name `Backend build and tests`, `mvn -B verify` |
 | Workflow validation (mandate §6.1 stage 1) | `NOT_IMPLEMENTED` | `.github/**` is in both `ci.yml` `paths-ignore` lists, so no workflow can check a change to a workflow — measured: `6198d86` edits `ci.yml` and starts no run (INF-23) |
 | Frontend lint + production build executes | `VERIFIED` | same runs; `npm ci`, lint advisory (47 errors/22 files measured), `npm run build` |
-| Checks are *required* | `NOT_IMPLEMENTED` | `contexts=[]`, `strict=false`, `enforce_admins=false`; PR #10 merged with `--admin` |
+| Checks are *required* | `NOT_IMPLEMENTED` | `contexts=[]`, `strict=false`, `enforce_admins=false`; PR #10 and PR #11 both merged with `--admin` — the review rule cannot be satisfied by a single-account author |
 | Workflow-token least privilege | `PARTIALLY_IMPLEMENTED` | `ci.yml:32` declares `permissions: {contents: read}`; `deploy-backend.yml` declares none |
 | Secret scanning | `NOT_IMPLEMENTED` | no workflow, no `gitleaks`, no push-protection config in repo |
 | Dependency / image vulnerability scanning | `NOT_IMPLEMENTED` | no Trivy/grype/OSV step; no `.github/dependabot.yml`; no `CODEOWNERS` |
