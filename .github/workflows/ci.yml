@@ -7,7 +7,7 @@ name: CI
 # checked by `validate-workflows.yml` instead.
 
 on:
-  pull_request_typo:
+  pull_request:
     paths-ignore:
       - 'docs/**'
       - '*.md'
