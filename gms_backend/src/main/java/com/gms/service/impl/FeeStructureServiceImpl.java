@@ -8,6 +8,7 @@ import com.gms.model.response.FeeStructureResponse;
 import com.gms.repository.FeeStructureRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.FeeStructureService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -31,13 +32,13 @@ public class FeeStructureServiceImpl implements FeeStructureService {
     }
 
     @Override
-    public ResponseEntity<FeeStructureResponse> createFeeStructure(FeeStructureRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FeeStructureResponse> createFeeStructure(FeeStructureRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create fee structure
@@ -63,18 +64,18 @@ public class FeeStructureServiceImpl implements FeeStructureService {
     }
 
     @Override
-    public ResponseEntity<FeeStructureResponse> updateFeeStructure(Integer id, FeeStructureRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FeeStructureResponse> updateFeeStructure(Integer id, FeeStructureRequest request) {
         // Validate fee structure exists
         FeeStructure feeStructure = feeStructureRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee structure not found"));
 
         // Validate school
-        if (!feeStructure.getSchool().getId().equals(schoolId)) {
+        if (!feeStructure.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update fee structure
@@ -97,18 +98,18 @@ public class FeeStructureServiceImpl implements FeeStructureService {
     }
 
     @Override
-    public ResponseEntity<?> deleteFeeStructure(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteFeeStructure(Integer id) {
         // Validate fee structure exists
         FeeStructure feeStructure = feeStructureRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee structure not found"));
 
         // Validate school
-        if (!feeStructure.getSchool().getId().equals(schoolId)) {
+        if (!feeStructure.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting active to false
@@ -120,17 +121,17 @@ public class FeeStructureServiceImpl implements FeeStructureService {
     }
 
     @Override
-    public ResponseEntity<List<FeeStructure>> getAllFeeStructures(Integer schoolId) {
-        List<FeeStructure> feeStructures = feeStructureRepository.findBySchoolIdAndIsActive(schoolId, true);
+    public ResponseEntity<List<FeeStructure>> getAllFeeStructures() {
+        List<FeeStructure> feeStructures = feeStructureRepository.findBySchoolIdAndIsActive(TenantContext.schoolId(), true);
         return ResponseEntity.ok(feeStructures);
     }
 
     @Override
-    public ResponseEntity<FeeStructure> getFeeStructureById(Integer id, Integer schoolId) {
+    public ResponseEntity<FeeStructure> getFeeStructureById(Integer id) {
         FeeStructure feeStructure = feeStructureRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee structure not found"));
 
-        if (!feeStructure.getSchool().getId().equals(schoolId)) {
+        if (!feeStructure.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -138,8 +139,8 @@ public class FeeStructureServiceImpl implements FeeStructureService {
     }
 
     @Override
-    public ResponseEntity<List<FeeStructure>> getFeeStructuresByAcademicYear(Integer schoolId, String academicYear) {
-        List<FeeStructure> feeStructures = feeStructureRepository.findBySchoolIdAndAcademicYearAndIsActive(schoolId, academicYear, true);
+    public ResponseEntity<List<FeeStructure>> getFeeStructuresByAcademicYear(String academicYear) {
+        List<FeeStructure> feeStructures = feeStructureRepository.findBySchoolIdAndAcademicYearAndIsActive(TenantContext.schoolId(), academicYear, true);
         return ResponseEntity.ok(feeStructures);
     }
 

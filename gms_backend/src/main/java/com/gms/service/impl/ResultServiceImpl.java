@@ -10,6 +10,7 @@ import com.gms.repository.ResultRepository;
 import com.gms.repository.StudentExamRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.ResultService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -39,9 +40,9 @@ public class ResultServiceImpl implements ResultService {
     }
 
     @Override
-    public ResponseEntity<ResultResponse> recordResult(ResultRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<ResultResponse> recordResult(ResultRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate student exam exists
@@ -49,7 +50,7 @@ public class ResultServiceImpl implements ResultService {
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Check if result already exists
@@ -82,18 +83,18 @@ public class ResultServiceImpl implements ResultService {
     }
 
     @Override
-    public ResponseEntity<ResultResponse> updateResult(Integer id, ResultRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<ResultResponse> updateResult(Integer id, ResultRequest request) {
         // Validate result exists
         Result result = resultRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Result not found"));
 
         // Validate school
-        if (!result.getStudentExam().getStudent().getSchoolId().equals(schoolId)) {
+        if (!result.getStudentExam().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Calculate percentage
@@ -117,18 +118,18 @@ public class ResultServiceImpl implements ResultService {
     }
 
     @Override
-    public ResponseEntity<?> deleteResult(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteResult(Integer id) {
         // Validate result exists
         Result result = resultRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Result not found"));
 
         // Validate school
-        if (!result.getStudentExam().getStudent().getSchoolId().equals(schoolId)) {
+        if (!result.getStudentExam().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete
@@ -140,13 +141,13 @@ public class ResultServiceImpl implements ResultService {
     }
 
     @Override
-    public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId, Integer schoolId) {
+    public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId) {
         // Validate student exam exists
         StudentExam studentExam = studentExamRepository.findById(studentExamId)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
 
         // Validate school
-        if (!studentExam.getStudent().getSchoolId().equals(schoolId)) {
+        if (!studentExam.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -157,7 +158,7 @@ public class ResultServiceImpl implements ResultService {
     }
 
     @Override
-    public ResponseEntity<List<Result>> getResultsForStudent(Integer studentId, Integer schoolId) {
+    public ResponseEntity<List<Result>> getResultsForStudent(Integer studentId) {
         // Validate student exists and belongs to school
         // In a complete implementation, we would validate student and school
 

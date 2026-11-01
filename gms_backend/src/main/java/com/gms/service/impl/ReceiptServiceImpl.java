@@ -8,6 +8,7 @@ import com.gms.model.response.ReceiptResponse;
 import com.gms.repository.ReceiptRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.ReceiptService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -32,13 +33,13 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public ResponseEntity<ReceiptResponse> createReceipt(ReceiptRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<ReceiptResponse> createReceipt(ReceiptRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create receipt
@@ -61,18 +62,18 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public ResponseEntity<ReceiptResponse> updateReceipt(Integer id, ReceiptRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<ReceiptResponse> updateReceipt(Integer id, ReceiptRequest request) {
         // Validate receipt exists
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
         // Validate school
-        if (!receipt.getSchool().getId().equals(schoolId)) {
+        if (!receipt.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update receipt
@@ -92,18 +93,18 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public ResponseEntity<?> deleteReceipt(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteReceipt(Integer id) {
         // Validate receipt exists
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
         // Validate school
-        if (!receipt.getSchool().getId().equals(schoolId)) {
+        if (!receipt.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
@@ -115,17 +116,17 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public ResponseEntity<List<Receipt>> getAllReceipts(Integer schoolId) {
-        List<Receipt> receipts = receiptRepository.findBySchoolIdAndStatus(schoolId, "ISSUED");
+    public ResponseEntity<List<Receipt>> getAllReceipts() {
+        List<Receipt> receipts = receiptRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "ISSUED");
         return ResponseEntity.ok(receipts);
     }
 
     @Override
-    public ResponseEntity<Receipt> getReceiptById(Integer id, Integer schoolId) {
+    public ResponseEntity<Receipt> getReceiptById(Integer id) {
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
-        if (!receipt.getSchool().getId().equals(schoolId)) {
+        if (!receipt.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -133,15 +134,15 @@ public class ReceiptServiceImpl implements ReceiptService {
     }
 
     @Override
-    public ResponseEntity<List<Receipt>> getReceiptsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<Receipt> receipts = receiptRepository.findBySchoolIdAndReceiptDateBetween(schoolId, startDate, endDate);
+    public ResponseEntity<List<Receipt>> getReceiptsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<Receipt> receipts = receiptRepository.findBySchoolIdAndReceiptDateBetween(TenantContext.schoolId(), startDate, endDate);
         return ResponseEntity.ok(receipts);
     }
 
     @Override
-    public ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId, Integer schoolId) {
+    public ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId) {
         List<Receipt> receipts = receiptRepository.findByStudentId(studentId);
-        // Filter by schoolId if needed
+        // Filter by the tenant's school if needed
         return ResponseEntity.ok(receipts);
     }
 

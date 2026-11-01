@@ -3,9 +3,9 @@ package com.gms.controller;
 import com.gms.model.entity.Parent;
 import com.gms.model.request.ParentRequest;
 import com.gms.model.response.*;
+import com.gms.security.TenantContext;
 import com.gms.service.ParentService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -39,33 +39,33 @@ public class ParentController {
     @PostMapping("/create")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ParentResponse> create(@Valid @RequestBody ParentRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return parentService.create(request, empId, schoolId);
+        return parentService.create(request);
     }
 
     @PutMapping("/update")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ParentResponse> update(@Valid @RequestBody ParentRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return parentService.update(request, empId, schoolId);
+        return parentService.update(request);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<Parent>> getAll() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Parent> parents = parentService.findBySchool(schoolId);
+        List<Parent> parents = parentService.findBySchool();
         if (parents.isEmpty()) {
             return ResponseEntity.noContent().build();
         }
@@ -75,19 +75,19 @@ public class ParentController {
     @PatchMapping("/toggle")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return parentService.toggleParent(id, isActive, schoolId, empId);
+        return parentService.toggleParent(id, isActive);
     }
 
     // Parent-specific role endpoints
     @GetMapping("/profile")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<ParentResponse> getParentProfile() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         ParentResponse response = parentService.getParentProfile(username);
         return ResponseEntity.ok(response);
     }
@@ -95,7 +95,7 @@ public class ParentController {
     @GetMapping("/children")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<StudentResponse>> getChildren() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<StudentResponse> response = parentService.getChildren(username);
         return ResponseEntity.ok(response);
     }
@@ -103,7 +103,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/attendance")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<AttendanceResponse>> getChildAttendance(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<AttendanceResponse> attendance = parentService.getChildAttendance(username, studentId);
         return ResponseEntity.ok(attendance);
     }
@@ -111,7 +111,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/results")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<ResultResponse>> getChildResults(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<ResultResponse> results = parentService.getChildResults(username, studentId);
         return ResponseEntity.ok(results);
     }
@@ -119,7 +119,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/fees")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<StudentFeeResponse>> getChildFees(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<StudentFeeResponse> fees = parentService.getChildFees(username, studentId);
         return ResponseEntity.ok(fees);
     }
@@ -127,7 +127,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/timetable")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<TimetableResponse>> getChildTimetable(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<TimetableResponse> timetable = parentService.getChildTimetable(username, studentId);
         return ResponseEntity.ok(timetable);
     }
@@ -135,7 +135,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/announcements")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<AnnouncementResponse>> getChildAnnouncements(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<AnnouncementResponse> announcements = parentService.getChildAnnouncements(username, studentId);
         return ResponseEntity.ok(announcements);
     }
@@ -143,7 +143,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/subjects")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<SubjectResponse>> getChildSubjects(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<SubjectResponse> subjects = parentService.getChildSubjects(username, studentId);
         return ResponseEntity.ok(subjects);
     }
@@ -151,7 +151,7 @@ public class ParentController {
     @GetMapping("/notifications")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<NotificationResponse>> getParentNotifications() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<NotificationResponse> notifications = parentService.getParentNotifications(username);
         return ResponseEntity.ok(notifications);
     }
@@ -159,7 +159,7 @@ public class ParentController {
     @GetMapping("/children/{studentId}/teachers")
     @PreAuthorize("hasAuthority('PARENT')")
     public ResponseEntity<List<EmployeeResponse>> getChildTeachers(@PathVariable Integer studentId) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<EmployeeResponse> teachers = parentService.getChildTeachers(username, studentId);
         return ResponseEntity.ok(teachers);
     }

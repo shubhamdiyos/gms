@@ -3,9 +3,9 @@ package com.gms.controller;
 import com.gms.model.entity.User;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.UserService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -33,16 +33,12 @@ public class UserController {
 
     @PostMapping("/create")
     public ResponseEntity<UserResponse> create(@Valid @RequestBody UserRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return userService.create(request, empId, schoolId);
+        return userService.create(request);
     }
 
     @PutMapping("/update")
     public ResponseEntity<UserResponse> update(@Valid @RequestBody UserRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return userService.update(request, empId, schoolId);
+        return userService.update(request);
     }
 
     /**
@@ -53,8 +49,7 @@ public class UserController {
      */
     @GetMapping
     public ResponseEntity<List<UserResponse>> getAll() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        List<UserResponse> users = userService.findBySchool(schoolId).stream()
+        List<UserResponse> users = userService.findBySchool().stream()
                 .map(userService::toResponse)
                 .toList();
         if (users.isEmpty()) {
@@ -65,12 +60,12 @@ public class UserController {
 
     @GetMapping("/{id}")
     public ResponseEntity<UserResponse> getById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
         try {
-            return ResponseEntity.ok(userService.getById(id, schoolId));
+            return ResponseEntity.ok(userService.getById(id));
         } catch (com.gms.exception.NotFoundException ex) {
             return ResponseEntity.status(404).build();
         }
@@ -86,11 +81,11 @@ public class UserController {
      */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        if (!userService.deleteWithinSchool(id, schoolId)) {
+        if (!userService.deleteWithinSchool(id)) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();
@@ -98,7 +93,7 @@ public class UserController {
 
     @GetMapping("/me")
     public ResponseEntity<UserResponse> me() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }
@@ -109,7 +104,7 @@ public class UserController {
 
     @PutMapping("/me")
     public ResponseEntity<UserResponse> updateMe(@Valid @RequestBody UserRequest request) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }

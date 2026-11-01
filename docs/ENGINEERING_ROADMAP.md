@@ -271,8 +271,8 @@ reachable by inheritance.
 
 | # | Work | Closes |
 |---|---|---|
-| C-1 | Delete `AbstractCRUDController` / `AbstractCRUDService` and make every extendee declare its own endpoints (`ADR-023`). Measured live surface on 2026-11-01: 6 controllers extend it; `GET /{id}` is inherited-and-unguarded on 3 (`Parent`, `Student`, `Employee` — `Subject:64`, `Classroom:64`, `School:81` override it); `DELETE /{id}` is inherited-and-unguarded on **all 6**, because `EmployeeController:68` maps `/toggle`, which does not shadow `/{id}`; the comment at `EmployeeController.java:65-67` records that a hand-written `getById` was *deleted* precisely because the base class supplied one. That comment is the case for deleting the base class rather than guarding it. **Done 2026-11-01 on the branch**: both classes deleted, 25 service impls and all 36 controllers detached, the two frontend-called deletes re-declared tenant-scoped, three tenancy holes closed (`ParentServiceImpl.findBySchool` returned every platform's parents; `UserService.getById`/`deleteById` had no tenant predicate; `SchoolService.getById` did not exist). Measured: 33-test suite green, live script 29/29, control red on exactly 2 assertions, full suite 78/78 | `SEC-05` |
-| C-2 | One tenant resolution path: the `schoolId` claim parsed once per request into a request-scoped context; services and repositories take it from there instead of a parameter that a caller may forget | `TEN-01…07`, debt #5 |
+| C-1 | Delete `AbstractCRUDController` / `AbstractCRUDService` and make every extendee declare its own endpoints (`ADR-023`). Measured live surface on 2026-11-01: 6 controllers extend it; `GET /{id}` is inherited-and-unguarded on 3 (`Parent`, `Student`, `Employee` — `Subject:64`, `Classroom:64`, `School:81` override it); `DELETE /{id}` is inherited-and-unguarded on **all 6**, because `EmployeeController:68` maps `/toggle`, which does not shadow `/{id}`; the comment at `EmployeeController.java:65-67` records that a hand-written `getById` was *deleted* precisely because the base class supplied one. That comment is the case for deleting the base class rather than guarding it. **Done 2026-11-01 on the branch**: both classes deleted, 25 service impls and all 36 controllers detached, the two frontend-called deletes re-declared tenant-scoped, three tenancy holes closed (`ParentServiceImpl.findBySchool` returned every platform's parents; `UserService.getById`/`deleteById` had no tenant predicate; `SchoolService.getById` did not exist). Measured: 33-test suite green, live script 29/29, control red on exactly 2 assertions, full suite 79/79 | `SEC-05` |
+| C-2 | One tenant resolution path: the `schoolId` claim parsed once per request into a request-scoped context; services and repositories take it from there instead of a parameter that a caller may forget. **Done 2026-11-01 on the branch**: `SecurityUtil` deleted — it re-parsed and re-verified the JWT signature on every one of 325 call sites across 41 files — and replaced by `security/TenantContext`, a request-scoped holder the filter fills from the claims it has already verified and clears in a `finally` so a pooled thread cannot carry one caller's tenant forward. 35 service interfaces and 31 implementations rewritten: 221 methods took a `schoolId`/`empId`/`creatorEmpId`/`updaterEmpId`/`employeeId` argument and no longer do; 201 now-dead controller locals removed. Two regressions found by review and repaired: the transformation rewrote the string literal `"schoolId"` inside three `BeanUtils.copyProperties` ignore-lists, and it silently turned `AuthController.selfRegister`'s `findByEmployee_Id(employee.getId())` into the caller's own employee — the self-registration uniqueness check would have read an empty tenant. A cross-tenant refusal was answered 400 on the write path and 403 on the read path; `TenantAccessDeniedException` makes both 403. Measured: 86-test suite green, `verify-c1-tenancy.sh` 29/29, new `verify-c2-tenant-context.sh` 32/32, control red on exactly the "verified once" assertion | `TEN-01…07`, debt #5 |
 | C-3 | School-scoped repository methods for the 6 repositories that have none (`ExamSubject`, `Parent`, `Result`, `StudentExam`, `Timetable`, `TimetableSlot`) and for the 10 entities with no direct school link, via their owning aggregate | `TEN-*`, `DB-03` |
 | C-4 | Put the ownership check where the JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list | `SEC-06` |
 | C-5 | `@PreAuthorize` on every mutating endpoint; deny-by-default verified by a mapping scan that fails the build on an unannotated handler | `SEC-04`, `OPS-*` |
@@ -315,6 +315,58 @@ whole-application one. Two client-error paths the live run exposed were fixed he
 method mismatch answered **500** instead of 405, and a referenced-row delete answered **500** instead of 409. The
 third 500 — every method-level `@PreAuthorize` refusal answering 500 instead of 403 — was also fixed, and it was not
 specific to this card.
+
+**`C-2` results, 2026-11-01, on `feat/stage2-flyway-baseline`.** The card's own criterion is a property of the
+code, so it is measured two ways: a test and a live run.
+
+**The test.** `TenantContextTest` is a `@WebMvcTest` that stubs the token provider and asserts
+`verify(tokenProvider, times(1)).parseClaims(anyString())` — the claims are parsed once per request, not once per
+tenant lookup. The assertion has teeth: a deliberate second `parseClaims` call in the filter turned the suite red on
+exactly that one test, and the call was removed. Three more tests assert that the tenant reaches the service from
+the claims, that the context is empty once the request has finished, and that an unauthenticated request leaves no
+tenant behind. `TenantParameterArchTest` reads the bytecode of every type in `com.gms.service` and fails if any
+method still declares a parameter named `schoolId`, `empId`, `employeeId`, `creatorEmpId`, `updaterEmpId` or
+`tenantId` — the invariant that a future method cannot quietly take the tenant back as an argument. **86 tests
+green** (79 before this card, 7 new).
+
+**The live run.** `scripts/verify-c2-tenant-context.sh`, 32 checks, 0 failures, against a real database and two real
+schools. It proves that the tenant a write lands in is the one in the token and that the caller has no way to name a
+different one; that each administrator's school-scoped list holds rows from exactly one school and never the other
+school's; that the audit trail is written from the token's employee — the `users.created_by` column holds the
+caller's own account, because `UserServiceImpl` resolves the creator through the context and no longer accepts it as
+an argument; that a cross-service check still refuses another school's row; that a token that does not verify is
+refused; and that the platform owner, who is not a tenant, keeps its reach. The row-level checks read the database
+directly through `docker exec`, and report **SKIP** rather than PASS when no database handle is configured.
+`scripts/verify-c1-tenancy.sh` was re-run against the same build: **29 checks, 0 failures**.
+
+**Two regressions were found by review and repaired before the commit.** The transformation rewrote the *string
+literal* `"schoolId"` inside three `BeanUtils.copyProperties` ignore-lists into `"TenantContext.schoolId()"`, which
+names no bean property — the ignore list would have stopped ignoring it. And it rewrote
+`AuthController.selfRegister`'s `findByEmployee_Id(employee.getId())` into the context's employee id: the
+self-registration uniqueness check asks about the employee *being registered*, who is not the caller, and on an
+unauthenticated endpoint the context is empty, so the check would have silently passed. `UserService.existsByEmployee_Id`
+now takes a parameter named for what it is — `subjectEmployeeId` — and the architectural test allows it precisely
+because it is not the caller's identity.
+
+**One behaviour changed, deliberately.** `ParentServiceImpl.getChildFees` called
+`studentFeeService.getStudentFeesByStudent(studentId, null)`, and the callee compared `student.getSchoolId().equals(null)`
+— always false, so the parent's fee list was always empty. The tenant now comes from the context, the check compares
+the student's school with the caller's, and the lookup is school-scoped in SQL. This is a fix, not a regression, and it
+is recorded here because it changes what a parent sees.
+
+**One inconsistency was closed.** A cross-tenant refusal was answered **400** on the write path (`IllegalArgumentException`
+through the global handler) and **403** on the read path (the controllers catch it explicitly). 23 refusals now throw
+`TenantAccessDeniedException`, which extends `AccessDeniedException`, so both answer 403. `SchoolController.getById`
+needed an explicit `AccessDeniedException` catch because its `catch (Exception)` would otherwise have turned the
+refusal into a 404.
+
+**What `C-2` does not close.** `C-2` gives every service one way to learn the tenant; it does not give every
+*query* a school predicate. The queries that still span schools are listed in `C-3`: `resultRepository.findByStudentExam_Student_Id`,
+`studentExamRepository.findByStudentId`, `feePaymentRepository.findByStudentFee_Student_Id`,
+`invoiceRepository.findByStudentId`, `receiptRepository.findByStudentId`, `attendanceRepository.findByStudent_IdAndDateBetween`,
+`timetableRepository.findByClassroom_Id`, `teacherAssignmentRepository.findByTeacher_Id`, `parentRepository.findByStudentsId`,
+and `userRepository.findByRole`. `TEN-01` is therefore **partly** closed: the tenant is now unambiguous and cannot be
+named wrongly, but eight of the fifteen endpoints it names still need a school-scoped query.
 
 ### Stage 4 — The MVP vertical slice
 
@@ -429,7 +481,7 @@ system, the remaining `DOC-*`).
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1` done on `feat/stage2-flyway-baseline`: both base classes deleted, 33-test inheritance suite + live cross-tenant script (29 checks) green, deliberate-failure control red on exactly the guarded assertions. `C-2…C-8` open | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1` and `C-2` done on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter (86-test suite green, live scripts 29/29 and 32/32, control red on exactly the "verified once" assertion). `C-3…C-8` open | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | Open | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
@@ -441,6 +493,6 @@ merge itself: `master` requires one approving review with last-push approval, th
 and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
 branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
 still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
-receives. Stage 3 has started — `C-1` is implemented and measured on the same unmerged branch — and nothing above
+receives. Stage 3 has started — `C-1` and `C-2` are implemented and measured on the same unmerged branch — and nothing above
 Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
 disagree, the proof wins and this table is wrong.

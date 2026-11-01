@@ -132,6 +132,22 @@ class GlobalExceptionHandlerTest {
     }
 
     /**
+     * A request that named another school's row is refused, not malformed. The services threw
+     * {@code IllegalArgumentException} for this, which the handler answers with 400 — so the same
+     * refusal answered 403 on the read path and 400 on the write path. Measured live on
+     * 2026-11-01, {@code POST /api/v1/students/create} naming another school's classroom answered
+     * 400 before {@link TenantAccessDeniedException} existed.
+     */
+    @Test
+    void aRowInAnotherSchoolIsForbiddenNotABadRequest() {
+        ResponseEntity<Map<String, Object>> response = handler.handleAccessDenied(
+                new TenantAccessDeniedException("Classroom does not belong to current school"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).containsEntry("error", "Forbidden");
+    }
+
+    /**
      * An id that is not an integer is a malformed request, not a server fault. Measured live on
      * 2026-11-01, {@code PUT /api/v1/subjects/update/} answered 500 before this handler existed.
      */

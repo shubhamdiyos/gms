@@ -13,6 +13,7 @@ import com.gms.model.response.StudentResponse;
 import com.gms.model.response.TimetableSlotResponse;
 import com.gms.repository.AttendanceRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -43,15 +44,15 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Override
     @Transactional
-    public ResponseEntity<AttendanceResponse> recordAttendance(AttendanceRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<AttendanceResponse> recordAttendance(AttendanceRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         // Validate student exists and belongs to the school
         Student student = studentService.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId)) {
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -79,7 +80,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         attendance.setRemarks(request.getRemarks());
         
         // Set creator/updated by
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
         attendance.setCreatedBy(creator);
         attendance.setUpdatedBy(creator);
@@ -90,8 +91,8 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Override
     @Transactional
-    public ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
@@ -121,7 +122,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                 attendance.setRemarks(item.getRemarks());
                 
                 // Set creator/updated by
-                User creator = userService.findByEmployee_Id(empId)
+                User creator = userService.findByEmployee_Id()
                         .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
                 attendance.setCreatedBy(creator);
                 attendance.setUpdatedBy(creator);
@@ -135,22 +136,22 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Override
     @Transactional
-    public ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
         
-        if (!attendance.getStudent().getSchoolId().equals(schoolId)) {
+        if (!attendance.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate student exists and belongs to the school
         Student student = studentService.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId)) {
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -169,7 +170,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         attendance.setRemarks(request.getRemarks());
         
         // Set updated by
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         attendance.setUpdatedBy(updater);
 
@@ -179,15 +180,15 @@ public class AttendanceServiceImpl implements AttendanceService {
 
     @Override
     @Transactional
-    public ResponseEntity<?> deleteAttendance(Integer attendanceId, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<?> deleteAttendance(Integer attendanceId) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
         
-        if (!attendance.getStudent().getSchoolId().equals(schoolId)) {
+        if (!attendance.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -211,8 +212,8 @@ public class AttendanceServiceImpl implements AttendanceService {
     
     @Override
     @Transactional(readOnly = true)
-    public List<AttendanceResponse> getAttendanceByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<Attendance> attendances = attendanceRepository.findBySchoolIdAndDateBetween(schoolId, startDate, endDate);
+    public List<AttendanceResponse> getAttendanceByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<Attendance> attendances = attendanceRepository.findBySchoolIdAndDateBetween(TenantContext.schoolId(), startDate, endDate);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
     

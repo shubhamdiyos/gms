@@ -1,6 +1,7 @@
 package com.gms.service.impl;
 
 import com.gms.enums.AdmissionStatus;
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Classroom;
 import com.gms.model.entity.Parent;
 import com.gms.model.entity.School;
@@ -12,6 +13,7 @@ import com.gms.repository.ParentRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.StudentAdmissionRepository;
 import com.gms.repository.StudentRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.StudentAdmissionService;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
@@ -44,8 +46,8 @@ public class StudentAdmissionServiceImpl implements StudentAdmissionService {
     private PasswordEncoder passwordEncoder;
 
     @Override
-    public ResponseEntity<?> applyForAdmission(StudentAdmissionRequest studentAdmissionRequest, Integer schoolId) {
-        School school = schoolRepository.findById(schoolId)
+    public ResponseEntity<?> applyForAdmission(StudentAdmissionRequest studentAdmissionRequest) {
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         StudentAdmission studentAdmission = new StudentAdmission();
@@ -55,8 +57,8 @@ public class StudentAdmissionServiceImpl implements StudentAdmissionService {
         if (studentAdmissionRequest.getClassId() != null) {
             Classroom classroom = classroomRepository.findById(studentAdmissionRequest.getClassId())
                     .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-            if (!classroom.getSchoolId().equals(schoolId)) {
-                throw new IllegalArgumentException("Classroom does not belong to the specified school");
+            if (!classroom.getSchoolId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Classroom does not belong to the specified school");
             }
             studentAdmission.setClassroom(classroom);
         }
@@ -81,11 +83,11 @@ public class StudentAdmissionServiceImpl implements StudentAdmissionService {
     }
 
     @Override
-    public ResponseEntity<?> approveAdmission(Integer admissionId, Integer schoolId) {
+    public ResponseEntity<?> approveAdmission(Integer admissionId) {
         StudentAdmission studentAdmission = studentAdmissionRepository.findById(admissionId)
                 .orElseThrow(() -> new EntityNotFoundException("Admission not found"));
 
-        if (!studentAdmission.getSchool().getId().equals(schoolId)) {
+        if (!studentAdmission.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("You are not authorized to approve this admission");
         }
 
@@ -142,11 +144,11 @@ public class StudentAdmissionServiceImpl implements StudentAdmissionService {
     }
 
     @Override
-    public ResponseEntity<?> rejectAdmission(Integer admissionId, Integer schoolId) {
+    public ResponseEntity<?> rejectAdmission(Integer admissionId) {
         StudentAdmission studentAdmission = studentAdmissionRepository.findById(admissionId)
                 .orElseThrow(() -> new EntityNotFoundException("Admission not found"));
 
-        if (!studentAdmission.getSchool().getId().equals(schoolId)) {
+        if (!studentAdmission.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("You are not authorized to reject this admission");
         }
 

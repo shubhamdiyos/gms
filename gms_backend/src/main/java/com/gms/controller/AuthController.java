@@ -7,11 +7,11 @@ import com.gms.model.request.ChangePasswordRequest;
 import com.gms.model.request.SelfRegisterRequest;
 import com.gms.model.response.AuthTokenResponse;
 import com.gms.security.JwtTokenProvider;
+import com.gms.security.TenantContext;
 import com.gms.service.EmployeeService;
 import com.gms.service.LoginAttemptService;
 import com.gms.service.UserService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import com.gms.util.PasswordValidator;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
@@ -104,7 +104,7 @@ public class AuthController {
 
     @PostMapping("/change-password")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }
@@ -141,7 +141,7 @@ public class AuthController {
         if (userService.existsByUsername(request.getUsername())) {
             return ResponseEntity.status(409).build();
         }
-        if (userService.findByEmployee_Id(employee.getId()).isPresent()) {
+        if (userService.existsByEmployee_Id(employee.getId())) {
             return ResponseEntity.status(409).build();
         }
 

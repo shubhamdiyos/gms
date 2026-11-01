@@ -3,9 +3,9 @@ package com.gms.controller;
 import com.gms.model.entity.Employee;
 import com.gms.model.request.EmployeeRequest;
 import com.gms.model.response.EmployeeResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.EmployeeService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -36,33 +36,33 @@ public class EmployeeController {
     @PostMapping("/create")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<EmployeeResponse> create(@Valid @RequestBody EmployeeRequest request) {
-        Integer creatorEmpId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer creatorEmpId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (creatorEmpId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return employeeService.create(request, creatorEmpId, schoolId);
+        return employeeService.create(request);
     }
 
     @PutMapping("/update")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<EmployeeResponse> update(@Valid @RequestBody EmployeeRequest request) {
-        Integer updaterEmpId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer updaterEmpId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (updaterEmpId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return employeeService.update(request, updaterEmpId, schoolId);
+        return employeeService.update(request);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<Employee>> getAll() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        java.util.List<Employee> list = employeeService.listBySchool(schoolId);
+        java.util.List<Employee> list = employeeService.listBySchool();
         return ResponseEntity.ok(list);
     }
 
@@ -76,12 +76,12 @@ public class EmployeeController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<Employee> getById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
         try {
-            return ResponseEntity.ok(employeeService.getById(id, schoolId));
+            return ResponseEntity.ok(employeeService.getById(id));
         } catch (jakarta.persistence.EntityNotFoundException ex) {
             return ResponseEntity.status(404).build();
         } catch (IllegalArgumentException ex) {
@@ -92,11 +92,11 @@ public class EmployeeController {
     @DeleteMapping("/toggle")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
-        Integer updaterEmpId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer updaterEmpId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (updaterEmpId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return employeeService.toggleEmployee(id, isActive, updaterEmpId, schoolId);
+        return employeeService.toggleEmployee(id, isActive);
     }
 }

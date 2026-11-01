@@ -9,6 +9,7 @@ import com.gms.repository.ParentRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.StudentRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.ParentStudentService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -38,18 +39,18 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<?> assignStudentsToParent(ParentStudentRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> assignStudentsToParent(ParentStudentRequest request) {
         // Validate parent exists
         Parent parent = parentRepository.findById(request.getParentId())
                 .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
 
         // Validate school
-        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(schoolId)) {
+        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("Parent does not belong to this school");
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Validate all students exist and belong to the same school
@@ -57,7 +58,7 @@ public class ParentStudentServiceImpl implements ParentStudentService {
             Student student = studentRepository.findById(studentId)
                     .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-            if (!student.getSchoolId().equals(schoolId)) {
+            if (!student.getSchoolId().equals(TenantContext.schoolId())) {
                 return ResponseEntity.status(403).body("Student does not belong to this school");
             }
         }
@@ -75,13 +76,13 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<?> removeStudentFromParent(Integer parentId, Integer studentId, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> removeStudentFromParent(Integer parentId, Integer studentId) {
         // Validate parent exists
         Parent parent = parentRepository.findById(parentId)
                 .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
 
         // Validate school
-        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(schoolId)) {
+        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("Parent does not belong to this school");
         }
 
@@ -90,12 +91,12 @@ public class ParentStudentServiceImpl implements ParentStudentService {
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
         // Validate student belongs to the same school
-        if (!student.getSchoolId().equals(schoolId)) {
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("Student does not belong to this school");
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Remove student from parent
@@ -106,13 +107,13 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<List<Student>> getStudentsForParent(Integer parentId, Integer schoolId) {
+    public ResponseEntity<List<Student>> getStudentsForParent(Integer parentId) {
         // Validate parent exists
         Parent parent = parentRepository.findById(parentId)
                 .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
 
         // Validate school
-        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(schoolId)) {
+        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -120,13 +121,13 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<List<Parent>> getParentsForStudent(Integer studentId, Integer schoolId) {
+    public ResponseEntity<List<Parent>> getParentsForStudent(Integer studentId) {
         // Validate student exists
         Student student = studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
         // Validate school
-        if (!student.getSchoolId().equals(schoolId)) {
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 

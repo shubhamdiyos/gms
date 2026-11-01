@@ -3,8 +3,8 @@ package com.gms.controller;
 
 import com.gms.model.request.TimetableRequest;
 import com.gms.model.response.TimetableResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.TimetableService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -38,7 +38,7 @@ public class TimetableController {
     @GetMapping("/teacher/me")
     @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<TimetableResponse> getTimetableForCurrentTeacher() {
-        Integer teacherId = SecurityUtil.getEmpIdFromToken();
+        Integer teacherId = TenantContext.employeeId();
         if (teacherId == null) {
             throw new IllegalStateException("Employee ID not found in token");
         }
@@ -50,7 +50,7 @@ public class TimetableController {
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<TimetableResponse> getTimetableForCurrentStudent() {
         // Get student ID from the security context
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         // In a complete implementation, we would retrieve the student based on the username
         // For now, we'll throw an exception as this requires additional implementation
         throw new UnsupportedOperationException("Getting student timetable requires additional implementation to retrieve student from username");

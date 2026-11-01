@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Designation;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
@@ -11,9 +12,9 @@ import com.gms.repository.DesignationRepository;
 import com.gms.repository.EmployeeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.EmailService;
 import com.gms.service.SchoolService;
-import com.gms.util.SecurityUtil;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
@@ -57,8 +58,8 @@ public class SchoolServiceImpl implements SchoolService {
 
     @Override
     @Transactional
-    public ResponseEntity<SchoolResponse> create(SchoolRequest request, Integer empId, Integer schoolId) {
-        if (empId == null) {
+    public ResponseEntity<SchoolResponse> create(SchoolRequest request) {
+        if (TenantContext.employeeId() == null) {
             return ResponseEntity.badRequest().build();
         }
         
@@ -70,7 +71,7 @@ public class SchoolServiceImpl implements SchoolService {
             return ResponseEntity.badRequest().build();
         }
 
-        School school = createSchoolFromRequest(request, new School(), empId, schoolId);
+        School school = createSchoolFromRequest(request, new School());
         School saved = schoolRepository.save(school);
         
         // Seed Designations (minimal example)
@@ -98,7 +99,7 @@ public class SchoolServiceImpl implements SchoolService {
         userRepository.save(admin);
         log.info("[SetupSchool] admin user saved id={} username={}", admin.getId(), admin.getUsername());
 
-        // Create and link Employee for Admin so empId is available in JWT
+        // Create and link Employee for Admin so TenantContext.employeeId() is available in JWT
         log.info("[SetupSchool] creating admin employee");
         com.gms.model.entity.Employee emp = new com.gms.model.entity.Employee();
         emp.setSchool(saved);
@@ -132,8 +133,8 @@ public class SchoolServiceImpl implements SchoolService {
     }
 
     @Override
-    public School createSchoolFromRequest(SchoolRequest request, School school, Integer empId, Integer schoolId) {
-        if (empId == null) {
+    public School createSchoolFromRequest(SchoolRequest request, School school) {
+        if (TenantContext.employeeId() == null) {
             throw new IllegalArgumentException("Employee ID cannot be null");
         }
 
@@ -163,10 +164,10 @@ public class SchoolServiceImpl implements SchoolService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<School> findBySchool(Integer schoolId) {
+    public List<School> findBySchool() {
         // Fix: Only return the school that belongs to the requesting user's school
         // Using repository method for better performance
-        return schoolRepository.findByIdAndStatusOne(schoolId)
+        return schoolRepository.findByIdAndStatusOne(TenantContext.schoolId())
                 .map(Collections::singletonList)
                 .orElse(Collections.emptyList());
     }
@@ -179,13 +180,11 @@ public class SchoolServiceImpl implements SchoolService {
 
     @Override
     @Transactional(readOnly = true)
-    public School getById(Integer id, Integer schoolId) {
+    public School getById(Integer id) {
         // A school administrator may read only its own school; the platform owner may read any,
         // because the same caller can already list every school and update or toggle any of them.
-        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
-        boolean platformOwner = roles != null && roles.contains("SUPERADMIN");
-        if (!platformOwner && !id.equals(schoolId)) {
-            throw new IllegalArgumentException("Access denied: You can only access your own school");
+        if (!TenantContext.isPlatformOwner() && !id.equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Access denied: You can only access your own school");
         }
 
         School school = schoolRepository.findByIdAndStatusOne(id)
@@ -199,7 +198,7 @@ public class SchoolServiceImpl implements SchoolService {
     }
 
     @Override
-    public ResponseEntity<SchoolResponse> update(SchoolRequest request, Integer updaterEmpId, Integer schoolId) {
+    public ResponseEntity<SchoolResponse> update(SchoolRequest request) {
         // Validate required fields
         if (request.getId() == null) {
             return ResponseEntity.badRequest().build();
@@ -211,9 +210,8 @@ public class SchoolServiceImpl implements SchoolService {
         
         // Check if user has permission to update this school
         // SuperAdmin can update any school, others can only update their own
-        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
-        if (roles != null && !roles.contains("SUPERADMIN")) {
-            if (!school.getId().equals(schoolId)) {
+        if (!TenantContext.isPlatformOwner()) {
+            if (!school.getId().equals(TenantContext.schoolId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
         }
@@ -234,12 +232,11 @@ public class SchoolServiceImpl implements SchoolService {
     }
 
     @Override
-    public ResponseEntity<?> toggleSchool(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleSchool(Integer id, Boolean isActive) {
         // Check if user has permission to toggle this school
         // SuperAdmin can toggle any school, others can only toggle their own
-        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
-        if (roles != null && !roles.contains("SUPERADMIN")) {
-            if (!id.equals(schoolId)) {
+        if (!TenantContext.isPlatformOwner()) {
+            if (!id.equals(TenantContext.schoolId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
         }

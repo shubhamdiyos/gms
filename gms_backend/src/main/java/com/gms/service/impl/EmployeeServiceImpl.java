@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
@@ -7,6 +8,7 @@ import com.gms.model.request.EmployeeRequest;
 import com.gms.model.response.EmployeeResponse;
 import com.gms.repository.EmployeeRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.BeanUtils;
@@ -32,12 +34,12 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
-    public ResponseEntity<EmployeeResponse> create(EmployeeRequest request, Integer creatorEmpId, Integer schoolId) {
-        if (creatorEmpId == null || schoolId == null) {
+    public ResponseEntity<EmployeeResponse> create(EmployeeRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        Employee employee = createEmployeeFromRequest(request, new Employee(), creatorEmpId, schoolId);
+        Employee employee = createEmployeeFromRequest(request, new Employee());
         Employee saved = employeeRepository.save(employee);
         
         EmployeeResponse response = new EmployeeResponse();
@@ -51,20 +53,20 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
-    public Employee createEmployeeFromRequest(EmployeeRequest request, Employee employee, Integer creatorEmpId, Integer schoolId) {
-        if (creatorEmpId == null || schoolId == null) {
+    public Employee createEmployeeFromRequest(EmployeeRequest request, Employee employee) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
         if (employeeRepository.existsByEmail(request.getEmail())) {
             throw new IllegalArgumentException("Employee email already in use");
         }
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
-        User creatorUser = userService.findByEmployee_Id(creatorEmpId)
+        User creatorUser = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
-        if (creatorUser.getSchool() == null || !creatorUser.getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Creator does not belong to the target school");
+        if (creatorUser.getSchool() == null || !creatorUser.getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Creator does not belong to the target school");
         }
 
         BeanUtils.copyProperties(request, employee);
@@ -79,16 +81,16 @@ public class EmployeeServiceImpl implements EmployeeService {
 
     @Override
     @Transactional(readOnly = true)
-    public java.util.List<Employee> listBySchool(Integer schoolId) {
-        return employeeRepository.findAllBySchool_IdAndEmployeeStatusNot(schoolId, "0");
+    public java.util.List<Employee> listBySchool() {
+        return employeeRepository.findAllBySchool_IdAndEmployeeStatusNot(TenantContext.schoolId(), "0");
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Employee getById(Integer id, Integer schoolId) {
+    public Employee getById(Integer id) {
         Employee e = employeeRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Employee not found"));
-        if (!e.getSchoolId().equals(schoolId) || "0".equals(e.getEmployeeStatus())) {
-            throw new IllegalArgumentException("Employee does not belong to current school");
+        if (!e.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(e.getEmployeeStatus())) {
+            throw new TenantAccessDeniedException("Employee does not belong to current school");
         }
         return e;
     }
@@ -100,14 +102,14 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
-    public ResponseEntity<EmployeeResponse> update(EmployeeRequest request, Integer updaterEmpId, Integer schoolId) {
+    public ResponseEntity<EmployeeResponse> update(EmployeeRequest request) {
         if (request.getId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Employee e = employeeRepository.findById(request.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
-        if (!e.getSchoolId().equals(schoolId) || "0".equals(e.getEmployeeStatus())) {
+        if (!e.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(e.getEmployeeStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
         if (request.getFirstName() != null) e.setFirstName(request.getFirstName());
@@ -130,11 +132,11 @@ public class EmployeeServiceImpl implements EmployeeService {
     }
 
     @Override
-    public ResponseEntity<?> toggleEmployee(Integer id, Boolean isActive, Integer updaterEmpId, Integer schoolId) {
+    public ResponseEntity<?> toggleEmployee(Integer id, Boolean isActive) {
         Employee existing = employeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
 
-        if (!existing.getSchool().getId().equals(schoolId)) {
+        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 

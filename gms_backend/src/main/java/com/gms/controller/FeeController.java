@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.Fee;
 import com.gms.model.request.FeeRequest;
 import com.gms.model.response.FeeResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.FeeService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -29,54 +29,44 @@ public class FeeController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<FeeResponse> createFee(@Valid @RequestBody FeeRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return feeService.createFee(request, schoolId, empId);
+        return feeService.createFee(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<FeeResponse> updateFee(@PathVariable Integer id,
                                                 @Valid @RequestBody FeeRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return feeService.updateFee(id, request, schoolId, empId);
+        return feeService.updateFee(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteFee(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return feeService.deleteFee(id, schoolId, empId);
+        return feeService.deleteFee(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Fee>> getAllFees() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feeService.getAllFees(schoolId);
+        return feeService.getAllFees();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Fee> getFeeById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feeService.getFeeById(id, schoolId);
+        return feeService.getFeeById(id);
     }
 
     @GetMapping("/academic-year")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Fee>> getFeesByAcademicYear(@RequestParam String academicYear) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feeService.getFeesByAcademicYear(schoolId, academicYear);
+        return feeService.getFeesByAcademicYear(academicYear);
     }
 
     @GetMapping("/total-amount")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<BigDecimal> getTotalFeeAmountBySchoolIdAndAcademicYear(@RequestParam String academicYear) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        BigDecimal totalAmount = feeService.getTotalFeeAmountBySchoolIdAndAcademicYear(schoolId, academicYear);
+        BigDecimal totalAmount = feeService.getTotalFeeAmountBySchoolIdAndAcademicYear(academicYear);
         return ResponseEntity.ok(totalAmount);
     }
 }

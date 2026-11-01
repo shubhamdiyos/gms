@@ -1,13 +1,14 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.*;
 import com.gms.enums.RoleEnum;
 import com.gms.exception.NotFoundException;
 import com.gms.model.request.ParentRequest;
 import com.gms.model.response.*;
 import com.gms.repository.ParentRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
-import com.gms.util.SecurityUtil;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.BeanUtils;
@@ -64,19 +65,19 @@ public class ParentServiceImpl implements ParentService {
     }
 
     @Override
-    public ResponseEntity<ParentResponse> create(ParentRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<ParentResponse> create(ParentRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
         
         Parent parent = new Parent();
         Parent savedParent = parentRepository.save(parent);
-        createUserForParent(savedParent, schoolId);
+        createUserForParent(savedParent);
         return ResponseEntity.ok(toResponse(savedParent));
     }
 
-    public ParentResponse createParentFromRequest(ParentRequest request, Parent parent, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ParentResponse createParentFromRequest(ParentRequest request, Parent parent) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
         
@@ -84,23 +85,23 @@ public class ParentServiceImpl implements ParentService {
         return toResponse(parent);
     }
 
-    public ResponseEntity<ParentResponse> update(ParentRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<ParentResponse> update(ParentRequest request) {
         // Parent update is handled differently, returning not implemented
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
     }
 
-    public ResponseEntity<?> toggleParent(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleParent(Integer id, Boolean isActive) {
         // Parent doesn't have a status field, returning not implemented
         return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
     }
 
     @Override
-    public List<Parent> findBySchool(Integer schoolId) {
-        return parentRepository.findBySchoolId(schoolId);
+    public List<Parent> findBySchool() {
+        return parentRepository.findBySchoolId(TenantContext.schoolId());
     }
 
     @Override
-    public ResponseEntity<ParentResponse> createParent(ParentRequest parentRequest, Integer schoolId) {
+    public ResponseEntity<ParentResponse> createParent(ParentRequest parentRequest) {
         Parent parent = new Parent();
         BeanUtils.copyProperties(parentRequest, parent);
 
@@ -119,14 +120,14 @@ public class ParentServiceImpl implements ParentService {
 
         Parent savedParent = parentRepository.save(parent);
 
-        createUserForParent(savedParent, schoolId);
+        createUserForParent(savedParent);
 
         return ResponseEntity.ok(toResponse(savedParent));
     }
 
     @Override
     public List<StudentResponse> getMyChildren() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         User user = userService.findByUsername(username)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 
@@ -185,7 +186,7 @@ public class ParentServiceImpl implements ParentService {
         Parent parent = validateParentAndChild(username, studentId);
         
         // Get all results for this student across all exams
-        ResponseEntity<List<Result>> resultResponse = resultService.getResultsForStudent(studentId, null);
+        ResponseEntity<List<Result>> resultResponse = resultService.getResultsForStudent(studentId);
         if (resultResponse.getBody() != null) {
             return resultResponse.getBody().stream()
                     .map(this::mapResultToResponse)
@@ -200,7 +201,7 @@ public class ParentServiceImpl implements ParentService {
         Parent parent = validateParentAndChild(username, studentId);
         
         // Get fees for the student
-        ResponseEntity<List<StudentFee>> feeResponse = studentFeeService.getStudentFeesByStudent(studentId, null);
+        ResponseEntity<List<StudentFee>> feeResponse = studentFeeService.getStudentFeesByStudent(studentId);
         if (feeResponse.getBody() != null) {
             return feeResponse.getBody().stream()
                     .map(this::mapStudentFeeToResponse)
@@ -273,13 +274,13 @@ public class ParentServiceImpl implements ParentService {
                 .anyMatch(student -> student.getId().equals(studentId));
         
         if (!isParentOfStudent) {
-            throw new IllegalArgumentException("You are not authorized to access this student's information");
+            throw new TenantAccessDeniedException("You are not authorized to access this student's information");
         }
 
         return parent;
     }
 
-    private void createUserForParent(Parent parent, Integer schoolId) {
+    private void createUserForParent(Parent parent) {
         if (userService.existsByEmail(parent.getEmail())) {
             throw new IllegalStateException("A user with this email already exists.");
         }

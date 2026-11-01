@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.*;
 import com.gms.enums.RoleEnum;
 import com.gms.exception.NotFoundException;
@@ -15,8 +16,8 @@ import com.gms.model.response.EmployeeResponse;
 import com.gms.model.response.AnnouncementResponse;
 import com.gms.model.response.NotificationResponse;
 import com.gms.repository.StudentRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
-import com.gms.util.SecurityUtil;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.HttpStatus;
@@ -65,12 +66,12 @@ public class StudentServiceImpl implements StudentService {
     }
 
     @Override
-    public ResponseEntity<StudentResponse> create(StudentRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<StudentResponse> create(StudentRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        Student student = createStudentFromRequest(request, new Student(), empId, schoolId);
+        Student student = createStudentFromRequest(request, new Student());
         Student savedStudent = studentRepository.save(student);
 
         // Create a corresponding User for the Student
@@ -100,26 +101,26 @@ public class StudentServiceImpl implements StudentService {
     }
 
     @Override
-    public Student createStudentFromRequest(StudentRequest request, Student student, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public Student createStudentFromRequest(StudentRequest request, Student student) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         Classroom classroom = classroomService.findById(request.getClassId())
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-        if (!classroom.getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Classroom does not belong to current school");
+        if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Classroom does not belong to current school");
         }
 
         Section section = null;
         if (request.getSectionId() != null) {
             section = sectionService.findById(request.getSectionId())
                     .orElseThrow(() -> new EntityNotFoundException("Section not found"));
-            if (!section.getSchoolId().equals(schoolId)) {
-                throw new IllegalArgumentException("Section does not belong to current school");
+            if (!section.getSchoolId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Section does not belong to current school");
             }
         }
 
@@ -129,7 +130,7 @@ public class StudentServiceImpl implements StudentService {
         student.setSection(section);
 
         // Generate a simple unique studentId within the school: STD###
-        String generatedId = generateStudentId(schoolId);
+        String generatedId = generateStudentId();
         student.setStudentId(generatedId);
         student.setStatus("1");
 
@@ -138,16 +139,16 @@ public class StudentServiceImpl implements StudentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Student> findBySchool(Integer schoolId) {
-        return studentRepository.findAllBySchool_IdAndStatusNot(schoolId, "0");
+    public List<Student> findBySchool() {
+        return studentRepository.findAllBySchool_IdAndStatusNot(TenantContext.schoolId(), "0");
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Student getById(Integer id, Integer schoolId) {
+    public Student getById(Integer id) {
         Student student = studentRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId) || "0".equals(student.getStatus())) {
-            throw new IllegalArgumentException("Student does not belong to current school");
+        if (!student.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(student.getStatus())) {
+            throw new TenantAccessDeniedException("Student does not belong to current school");
         }
         return student;
     }
@@ -159,13 +160,13 @@ public class StudentServiceImpl implements StudentService {
     }
 
     @Override
-    public ResponseEntity<StudentResponse> update(StudentRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<StudentResponse> update(StudentRequest request) {
         if (request.getId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Student student = studentRepository.findById(request.getId()).orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId) || "0".equals(student.getStatus())) {
+        if (!student.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(student.getStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
         
@@ -179,16 +180,16 @@ public class StudentServiceImpl implements StudentService {
         if (request.getClassId() != null) {
             Classroom classroom = classroomService.findById(request.getClassId())
                     .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-            if (!classroom.getSchool().getId().equals(schoolId)) {
-                throw new IllegalArgumentException("Classroom does not belong to current school");
+            if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Classroom does not belong to current school");
             }
             student.setClassroom(classroom);
         }
         if (request.getSectionId() != null) {
             Section section = sectionService.findById(request.getSectionId())
                     .orElseThrow(() -> new EntityNotFoundException("Section not found"));
-            if (!section.getSchoolId().equals(schoolId)) {
-                throw new IllegalArgumentException("Section does not belong to current school");
+            if (!section.getSchoolId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Section does not belong to current school");
             }
             student.setSection(section);
         } else {
@@ -201,11 +202,11 @@ public class StudentServiceImpl implements StudentService {
     }
 
     @Override
-    public ResponseEntity<?> toggleStudent(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleStudent(Integer id, Boolean isActive) {
         Student existing = studentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        if (!existing.getSchool().getId().equals(schoolId)) {
+        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -218,7 +219,7 @@ public class StudentServiceImpl implements StudentService {
     @Override
     @Transactional(readOnly = true)
     public StudentResponse getMyProfile() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         User user = userService.findByUsername(username)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 
@@ -230,14 +231,14 @@ public class StudentServiceImpl implements StudentService {
         return toResponse(student);
     }
 
-    private String generateStudentId(Integer schoolId) {
+    private String generateStudentId() {
         int counter = (int) (studentRepository.count() + 1); // coarse; acceptable for now
         String candidate;
         int attempts = 0;
         do {
             candidate = String.format("STD%03d", counter + attempts);
             attempts++;
-        } while (studentRepository.existsBySchool_IdAndStudentId(schoolId, candidate) && attempts < 10000);
+        } while (studentRepository.existsBySchool_IdAndStudentId(TenantContext.schoolId(), candidate) && attempts < 10000);
         if (attempts >= 10000) throw new IllegalStateException("Unable to generate unique student ID");
         return candidate;
     }
@@ -307,7 +308,7 @@ public class StudentServiceImpl implements StudentService {
 
         // Get subjects for the student's classroom using service
         // Temporarily simplified - will be enhanced when proper service methods are available
-        List<Subject> subjects = subjectService.findBySchool(student.getSchoolId());
+        List<Subject> subjects = subjectService.findBySchool();
         return subjects.stream()
                 .map(this::toSubjectResponse)
                 .collect(Collectors.toList());

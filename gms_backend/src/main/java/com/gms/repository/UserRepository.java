@@ -33,6 +33,13 @@ public interface UserRepository extends JpaRepository<User, Integer> {
      * Find user by employee ID
      */
     Optional<User> findByEmployee_Id(Integer employeeId);
+
+    /**
+     * Check if an employee already has an account. Unlike the tenant-scoped lookup, the employee here
+     * is the subject of the question rather than the caller: self-registration asks about the
+     * employee being registered, who is not the caller.
+     */
+    boolean existsByEmployee_Id(Integer employeeId);
     
     /**
      * Check if email exists

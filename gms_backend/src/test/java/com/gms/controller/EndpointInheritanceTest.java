@@ -21,7 +21,6 @@ import com.gms.service.ParentService;
 import com.gms.service.SchoolService;
 import com.gms.service.StudentService;
 import com.gms.service.SubjectService;
-import com.gms.util.SecurityUtil;
 import io.jsonwebtoken.Claims;
 import java.util.ArrayList;
 import java.util.Collection;
@@ -71,7 +70,7 @@ import org.springframework.web.servlet.mvc.method.annotation.RequestMappingHandl
         SubjectController.class,
         ClassroomController.class,
         SchoolController.class})
-@Import({SecurityConfig.class, CorsConfig.class, SecurityUtil.class})
+@Import({SecurityConfig.class, CorsConfig.class})
 class EndpointInheritanceTest {
 
     private static final String BEARER = "Bearer test-token";
@@ -188,7 +187,7 @@ class EndpointInheritanceTest {
     @Test
     void aSchoolAdministratorCannotReadAnotherSchoolsStudent() throws Exception {
         authenticate("admin", Set.of("ADMIN"));
-        when(studentService.getById(2, 1))
+        when(studentService.getById(2))
                 .thenThrow(new IllegalArgumentException("Student does not belong to current school"));
 
         mockMvc.perform(get("/api/v1/students/2").header("Authorization", BEARER))
@@ -198,7 +197,7 @@ class EndpointInheritanceTest {
     @Test
     void aSchoolAdministratorCanReadItsOwnStudent() throws Exception {
         authenticate("admin", Set.of("ADMIN"));
-        when(studentService.getById(1, 1)).thenReturn(new Student());
+        when(studentService.getById(1)).thenReturn(new Student());
 
         mockMvc.perform(get("/api/v1/students/1").header("Authorization", BEARER))
                 .andExpect(status().isOk());
@@ -214,13 +213,13 @@ class EndpointInheritanceTest {
         mockMvc.perform(delete("/api/v1/subjects/1").header("Authorization", BEARER))
                 .andExpect(status().isForbidden());
 
-        verify(subjectService, never()).deleteWithinSchool(1, 1);
+        verify(subjectService, never()).deleteWithinSchool(1);
     }
 
     @Test
     void anAdministratorCannotDeleteAnotherSchoolsSubject() throws Exception {
         authenticate("admin", Set.of("ADMIN"));
-        when(subjectService.deleteWithinSchool(2, 1)).thenReturn(false);
+        when(subjectService.deleteWithinSchool(2)).thenReturn(false);
 
         mockMvc.perform(delete("/api/v1/subjects/2").header("Authorization", BEARER))
                 .andExpect(status().isNotFound());
@@ -229,7 +228,7 @@ class EndpointInheritanceTest {
     @Test
     void anAdministratorCanDeleteItsOwnSubject() throws Exception {
         authenticate("admin", Set.of("ADMIN"));
-        when(subjectService.deleteWithinSchool(1, 1)).thenReturn(true);
+        when(subjectService.deleteWithinSchool(1)).thenReturn(true);
 
         mockMvc.perform(delete("/api/v1/subjects/1").header("Authorization", BEARER))
                 .andExpect(status().isNoContent());
@@ -239,15 +238,19 @@ class EndpointInheritanceTest {
 
     /**
      * Makes the JWT filter resolve a caller with the given authorities, in school 1.
+     *
+     * <p>The tenant and the authorities are read from the claims the filter has already verified, so the
+     * stub is on {@code claims.get(...)} — the same place the production path reads them. Before the
+     * tenant context, the filter and the controllers each parsed the token separately and the test had
+     * to stub both.</p>
      */
     private void authenticate(String username, Set<String> roles) {
         Claims claims = Mockito.mock(Claims.class);
         lenient().when(claims.getSubject()).thenReturn(username);
+        lenient().when(claims.get("schoolId")).thenReturn(1);
+        lenient().when(claims.get("empId")).thenReturn(1);
+        lenient().when(claims.get("roles")).thenReturn(new ArrayList<>(roles));
         lenient().when(tokenProvider.parseClaims(anyString())).thenReturn(claims);
-        lenient().when(tokenProvider.getSchoolId(anyString())).thenReturn(1);
-        lenient().when(tokenProvider.getEmployeeId(anyString())).thenReturn(1);
-        lenient().when(tokenProvider.getRoles(anyString())).thenReturn(roles);
-        lenient().when(tokenProvider.getUsername(anyString())).thenReturn(username);
         lenient().when(userDetailsService.loadUserByUsername(username))
                 .thenReturn(new Caller(username, roles));
     }

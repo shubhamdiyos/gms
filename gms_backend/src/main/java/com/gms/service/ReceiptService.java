@@ -10,17 +10,17 @@ import java.util.List;
 
 public interface ReceiptService {
 
-    ResponseEntity<ReceiptResponse> createReceipt(ReceiptRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<ReceiptResponse> createReceipt(ReceiptRequest request);
 
-    ResponseEntity<ReceiptResponse> updateReceipt(Integer id, ReceiptRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<ReceiptResponse> updateReceipt(Integer id, ReceiptRequest request);
 
-    ResponseEntity<?> deleteReceipt(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteReceipt(Integer id);
 
-    ResponseEntity<List<Receipt>> getAllReceipts(Integer schoolId);
+    ResponseEntity<List<Receipt>> getAllReceipts();
 
-    ResponseEntity<Receipt> getReceiptById(Integer id, Integer schoolId);
+    ResponseEntity<Receipt> getReceiptById(Integer id);
 
-    ResponseEntity<List<Receipt>> getReceiptsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<Receipt>> getReceiptsByDateRange(LocalDate startDate, LocalDate endDate);
 
-    ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId, Integer schoolId);
+    ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId);
 }

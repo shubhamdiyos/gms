@@ -10,17 +10,17 @@ import java.util.List;
 
 public interface InvoiceService {
 
-    ResponseEntity<InvoiceResponse> createInvoice(InvoiceRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<InvoiceResponse> createInvoice(InvoiceRequest request);
 
-    ResponseEntity<InvoiceResponse> updateInvoice(Integer id, InvoiceRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<InvoiceResponse> updateInvoice(Integer id, InvoiceRequest request);
 
-    ResponseEntity<?> deleteInvoice(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteInvoice(Integer id);
 
-    ResponseEntity<List<Invoice>> getAllInvoices(Integer schoolId);
+    ResponseEntity<List<Invoice>> getAllInvoices();
 
-    ResponseEntity<Invoice> getInvoiceById(Integer id, Integer schoolId);
+    ResponseEntity<Invoice> getInvoiceById(Integer id);
 
-    ResponseEntity<List<Invoice>> getInvoicesByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<Invoice>> getInvoicesByDateRange(LocalDate startDate, LocalDate endDate);
 
-    ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId, Integer schoolId);
+    ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId);
 }

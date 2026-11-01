@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.SchoolCalendar;
 import com.gms.model.request.SchoolCalendarRequest;
 import com.gms.model.response.SchoolCalendarResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.SchoolCalendarService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -25,40 +25,32 @@ public class SchoolCalendarController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<SchoolCalendarResponse> createCalendarEvent(@Valid @RequestBody SchoolCalendarRequest calendarRequest) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return schoolCalendarService.createCalendarEvent(calendarRequest, schoolId, empId);
+        return schoolCalendarService.createCalendarEvent(calendarRequest);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<SchoolCalendarResponse> updateCalendarEvent(@PathVariable Integer id,
                                                                     @Valid @RequestBody SchoolCalendarRequest calendarRequest) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return schoolCalendarService.updateCalendarEvent(id, calendarRequest, schoolId, empId);
+        return schoolCalendarService.updateCalendarEvent(id, calendarRequest);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteCalendarEvent(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return schoolCalendarService.deleteCalendarEvent(id, schoolId, empId);
+        return schoolCalendarService.deleteCalendarEvent(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<SchoolCalendar>> getAllCalendarEvents() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return schoolCalendarService.getAllCalendarEvents(schoolId);
+        return schoolCalendarService.getAllCalendarEvents();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<SchoolCalendar> getCalendarEventById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return schoolCalendarService.getCalendarEventById(id, schoolId);
+        return schoolCalendarService.getCalendarEventById(id);
     }
 
     @GetMapping("/range")
@@ -66,15 +58,13 @@ public class SchoolCalendarController {
     public ResponseEntity<List<SchoolCalendar>> getCalendarEventsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return schoolCalendarService.getCalendarEventsByDateRange(schoolId, startDate, endDate);
+        return schoolCalendarService.getCalendarEventsByDateRange(startDate, endDate);
     }
 
     @GetMapping("/academic-year")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<SchoolCalendar>> getCalendarEventsByAcademicYear(
             @RequestParam String academicYear) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return schoolCalendarService.getCalendarEventsByAcademicYear(schoolId, academicYear);
+        return schoolCalendarService.getCalendarEventsByAcademicYear(academicYear);
     }
 }

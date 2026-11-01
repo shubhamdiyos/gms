@@ -3,9 +3,9 @@ package com.gms.controller;
 import com.gms.model.response.EmployeeResponse;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.model.response.StudentResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.TeacherService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -27,21 +27,21 @@ public class TeacherController {
 
     @GetMapping("/profile")
     public ResponseEntity<EmployeeResponse> getTeacherProfile() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         EmployeeResponse response = teacherService.getTeacherProfile(username);
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/classes")
     public ResponseEntity<List<ClassroomResponse>> getAssignedClasses() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<ClassroomResponse> response = teacherService.getAssignedClasses(username);
         return ResponseEntity.ok(response);
     }
 
     @GetMapping("/students")
     public ResponseEntity<List<StudentResponse>> getAssignedStudents() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<StudentResponse> response = teacherService.getAssignedStudents(username);
         return ResponseEntity.ok(response);
     }

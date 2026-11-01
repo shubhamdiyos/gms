@@ -9,9 +9,11 @@ import com.gms.model.entity.School;
 import com.gms.model.entity.User;
 import com.gms.model.request.UserRequest;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.SchoolService;
 import java.util.Optional;
 import java.util.Set;
+import org.junit.jupiter.api.AfterEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -50,6 +52,19 @@ class UserServiceImplRoleGuardTest {
         return request;
     }
 
+    @AfterEach
+    void clearTheTenant() {
+        TenantContext.clear();
+    }
+
+    /**
+     * The caller is the tenant: employee 7 of school 1, holding the roles the request may not
+     * exceed.
+     */
+    private void givenCaller(Set<String> roles) {
+        TenantContext.set(new TenantContext.Principal("creator", 1, 7, roles));
+    }
+
     private void givenTargetSchoolAndCreator() {
         School school = new School();
         school.setId(1);
@@ -62,34 +77,38 @@ class UserServiceImplRoleGuardTest {
 
     @Test
     void acceptsRolesInsideTheKnownVocabulary() {
+        givenCaller(Set.of("ADMIN"));
         givenTargetSchoolAndCreator();
 
-        User created = service.createUserFromRequest(request(Set.of("ADMIN", "TEACHER")), new User(), 7, 1);
+        User created = service.createUserFromRequest(request(Set.of("ADMIN", "TEACHER")), new User());
 
         assertThat(created.getRoles()).containsExactlyInAnyOrder("ADMIN", "TEACHER");
     }
 
     @Test
     void rejectsARoleThatIsNotInTheVocabulary() {
+        givenCaller(Set.of("ADMIN"));
         givenTargetSchoolAndCreator();
 
-        assertThatThrownBy(() -> service.createUserFromRequest(request(Set.of("ROOT")), new User(), 7, 1))
+        assertThatThrownBy(() -> service.createUserFromRequest(request(Set.of("ROOT")), new User()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Unknown role code");
     }
 
     @Test
     void cannotGrantSuperadminWithoutHoldingIt() {
+        givenCaller(Set.of("ADMIN"));
         givenTargetSchoolAndCreator();
 
         assertThatThrownBy(() ->
-                service.createUserFromRequest(request(Set.of("SUPERADMIN")), new User(), 7, 1))
+                service.createUserFromRequest(request(Set.of("SUPERADMIN")), new User()))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Only a SUPERADMIN may grant the SUPERADMIN role");
     }
 
     @Test
     void updateAppliesTheSameGuard() {
+        givenCaller(Set.of("ADMIN"));
         School school = new School();
         school.setId(1);
         User existing = new User();
@@ -104,7 +123,7 @@ class UserServiceImplRoleGuardTest {
         UserRequest request = request(Set.of("SUPERADMIN"));
         request.setId(5);
 
-        assertThatThrownBy(() -> service.update(request, 7, 1))
+        assertThatThrownBy(() -> service.update(request))
                 .isInstanceOf(IllegalArgumentException.class)
                 .hasMessageContaining("Only a SUPERADMIN may grant the SUPERADMIN role");
         assertThat(existing.getRoles()).containsExactly("TEACHER");

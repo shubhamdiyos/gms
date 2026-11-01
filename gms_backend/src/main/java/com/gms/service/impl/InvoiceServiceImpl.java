@@ -8,6 +8,7 @@ import com.gms.model.response.InvoiceResponse;
 import com.gms.repository.InvoiceRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.InvoiceService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -33,13 +34,13 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public ResponseEntity<InvoiceResponse> createInvoice(InvoiceRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<InvoiceResponse> createInvoice(InvoiceRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create invoice
@@ -66,18 +67,18 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public ResponseEntity<InvoiceResponse> updateInvoice(Integer id, InvoiceRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<InvoiceResponse> updateInvoice(Integer id, InvoiceRequest request) {
         // Validate invoice exists
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
 
         // Validate school
-        if (!invoice.getSchool().getId().equals(schoolId)) {
+        if (!invoice.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update invoice
@@ -101,18 +102,18 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public ResponseEntity<?> deleteInvoice(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteInvoice(Integer id) {
         // Validate invoice exists
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
 
         // Validate school
-        if (!invoice.getSchool().getId().equals(schoolId)) {
+        if (!invoice.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
@@ -124,17 +125,17 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public ResponseEntity<List<Invoice>> getAllInvoices(Integer schoolId) {
-        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndStatus(schoolId, "SENT");
+    public ResponseEntity<List<Invoice>> getAllInvoices() {
+        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "SENT");
         return ResponseEntity.ok(invoices);
     }
 
     @Override
-    public ResponseEntity<Invoice> getInvoiceById(Integer id, Integer schoolId) {
+    public ResponseEntity<Invoice> getInvoiceById(Integer id) {
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
 
-        if (!invoice.getSchool().getId().equals(schoolId)) {
+        if (!invoice.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -142,15 +143,15 @@ public class InvoiceServiceImpl implements InvoiceService {
     }
 
     @Override
-    public ResponseEntity<List<Invoice>> getInvoicesByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndInvoiceDateBetween(schoolId, startDate, endDate);
+    public ResponseEntity<List<Invoice>> getInvoicesByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndInvoiceDateBetween(TenantContext.schoolId(), startDate, endDate);
         return ResponseEntity.ok(invoices);
     }
 
     @Override
-    public ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId, Integer schoolId) {
+    public ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId) {
         List<Invoice> invoices = invoiceRepository.findByStudentId(studentId);
-        // Filter by schoolId if needed
+        // Filter by the tenant's school if needed
         return ResponseEntity.ok(invoices);
     }
 

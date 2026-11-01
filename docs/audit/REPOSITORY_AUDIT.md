@@ -34,6 +34,11 @@ Request lifecycle: `JwtAuthenticationFilter` → path rules in `SecurityConfig` 
 **Layering defect (BKL-01).** Services return `org.springframework.http.ResponseEntity` (`StudentService.java:13-16`, `NotificationServiceImpl.java:132`), so the web tier leaks into the business tier and services fabricate HTTP 403/404/501 instead of throwing domain exceptions. This is why several "errors" are silent (see FIN-03, ACD-05).
 
 **No dependency injection of tenant context.** Tenant is re-derived per call from the raw HTTP header by a static holder (`util/SecurityUtil.java:59-99`) rather than from the already-authenticated `SecurityContext`. It returns `null` outside a request scope (async, scheduled, tests), and every service must remember to compare the passed `schoolId`. Findings TEN-01…TEN-09 are the consequences.
+**Partly closed 2026-11-01 by Stage 3's `C-2`.** `SecurityUtil` is deleted. `JwtAuthenticationFilter` parses the
+claims once and puts the tenant in `security/TenantContext`, a request-scoped holder cleared in a `finally`; 221
+service methods no longer take the tenant as a parameter, and `TenantParameterArchTest` fails the build if one ever
+does again. What remains is `TEN-01`'s other half — the queries that span schools — and that is `C-3`'s work list.
+The evidence is in [BASELINE_STATUS.md §15](BASELINE_STATUS.md).
 
 ## 2. Existing product functionality
 
@@ -290,6 +295,10 @@ Stage 3 C-6](../ENGINEERING_ROADMAP.md).
 
 **TEN-01 — `schoolId` accepted then ignored, with a literal TODO.** `FeePaymentServiceImpl.java:150-152`, `ReceiptServiceImpl.java:145-147`, `InvoiceServiceImpl.java:154-156`, `ResultServiceImpl.java:162-168`, `StudentExamServiceImpl.java:127`, `AttendanceServiceImpl.java:201-211`, `TimetableServiceImpl.java:72-99`, `UserServiceImpl.java:130` all receive the tenant and never filter by it — several carry the comment `// Filter by schoolId if needed`. Repositories back this: `FeePaymentRepository.java:19`, `ReceiptRepository.java:17`, `InvoiceRepository.java:17`, `ResultRepository.java:13,16`, `AttendanceRepository.java:16,18`, `UserRepository.java:70` (`findByRole` spans every school), `TeacherAssignmentRepository.java:21` (`findByAcademicYear` spans every school).
 *Confirmed reachable cross-tenant reads:* `GET /fee-payments/student/{id}` and `/invoices/student/{id}` and `/receipts/student/{id}` (PARENT allowed), `GET /results/student/{id}` (STUDENT allowed), `GET /student-exams/student/{id}`, `GET /attendance/student/{id}`, `/attendance/classroom/{id}`.
+**Partly closed 2026-11-01 by Stage 3's `C-2`.** The tenant is now unambiguous — it comes from the token's claims
+through `TenantContext` and no service method accepts it as an argument, so a caller cannot name a school the
+caller is not in. The *queries* above still span schools and are the remaining half of this finding; they are `C-3`'s
+work list. Measured: [BASELINE_STATUS.md §15.8](BASELINE_STATUS.md).
 
 **TEN-02 — Raw-id loads with no ownership check.** `StudentServiceImpl.java:158`, `ClassroomServiceImpl.java:88`, `SectionServiceImpl.java:159`, `SubjectServiceImpl.java:94`, `EmployeeServiceImpl.java:99`, `ParentServiceImpl.java:309`.
 
@@ -651,6 +660,7 @@ See [§16.2](#162-citation-drift-caused-by-pr-21-and-pr-22) for the measured shi
 | SEC-14 plaintext HTTP, host disclosed | **Open** | Deployment-side (`vercel.json` rewrite, TLS termination); unreachable from here — see §17. |
 | SEC-15 documented names do not bind | **Verified** (dev) | `application.properties` now carries `${SECURITY_JWT_SECRET}`, `${APP_SUPERADMIN_*}`, `${DB_*}` placeholders; `.env.example` and Compose pass the same names; the memory-bank page that told operators to set `SUPERADMIN_PASSWORD` is corrected. Prod-profile boot **not** executed. |
 | SEC-16 inert `hasRole` guards | **Verified** | 13 → 0 (`git grep hasRole(` is empty), converted to the 216-guard `hasAuthority` convention already in the codebase rather than a new mechanism. |
+| TEN-01 tenant accepted then ignored | **Partly closed** (branch, 2026-11-01) | `C-2` removed the mechanism that let it happen: `util/SecurityUtil.java` — which re-parsed and re-verified the JWT signature on each of 325 call sites across 41 files — is deleted, and the tenant now reaches a service through `security/TenantContext`, filled by the filter from the claims it has already verified and cleared in a `finally`. 221 service methods no longer take the tenant as a parameter; `TenantParameterArchTest` fails the build if one does again. Evidence: `TenantContextTest` (5 cases, including a deliberate-failure control that turned the suite red on exactly the "parsed once" assertion), `TenantParameterArchTest` (1 case), `scripts/verify-c2-tenant-context.sh` (32 live checks, 0 failures) and `scripts/verify-c1-tenancy.sh` re-run (29 checks, 0 failures), full suite **86 green**. **Not closed:** the queries that still span schools — `findByStudentExam_Student_Id`, `findByStudentId`, `findByStudentFee_Student_Id`, `findByStudentId` on invoices and receipts, `findByStudent_IdAndDateBetween`, `findByClassroom_Id` on timetables, `findByTeacher_Id`, `findByStudentsId`, `findByRole`. That is `C-3`. |
 | BKL-07 client errors as 500 | **Verified** | New 400/404 handlers plus `@Email`; live probes in BASELINE_STATUS §13.4 and `GlobalExceptionHandlerTest` (4 cases). |
 | BKL-08 bootstrap admin cannot create users | **Open** — new | Discovered while probing BKL-07; deliberately not patched in a security branch because the fix is a schema/audit-trail decision (§13's missing audit trail). |
 | OPS-08 Compose cannot boot from a fresh clone | **Changed** | Obsolete `version:` key removed, `${DB_PASSWORD:?}` now fails loudly, `DB_URL`/credentials/`SPRING_PROFILES_ACTIVE` are passed, healthcheck moved to `/actuator/health/readiness`. Still `env_file: .env` on both services, so a clone without a `.env` still fails at `docker compose config` — the full fix belongs to the M4 Docker package. |

@@ -9,6 +9,7 @@ import com.gms.model.request.ExamSubjectRequest;
 import com.gms.model.response.ExamResponse;
 import com.gms.model.response.ExamSubjectResponse;
 import com.gms.repository.ExamRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -36,13 +37,13 @@ public class ExamServiceImpl implements ExamService {
     }
 
     @Override
-    public ResponseEntity<ExamResponse> createExam(ExamRequest examRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<ExamResponse> createExam(ExamRequest examRequest) {
         // Validate school exists
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create exam
@@ -85,18 +86,18 @@ public class ExamServiceImpl implements ExamService {
     }
 
     @Override
-    public ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest) {
         // Validate exam exists
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
         // Validate school
-        if (!exam.getSchoolId().equals(schoolId)) {
+        if (!exam.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update exam
@@ -116,13 +117,13 @@ public class ExamServiceImpl implements ExamService {
     }
 
     @Override
-    public ResponseEntity<?> deleteExam(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteExam(Integer id) {
         // Validate exam exists
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
         // Validate school
-        if (!exam.getSchoolId().equals(schoolId)) {
+        if (!exam.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -130,7 +131,7 @@ public class ExamServiceImpl implements ExamService {
         exam.setStatus("0");
 
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         exam.setUpdatedBy(updater);
 
@@ -139,17 +140,17 @@ public class ExamServiceImpl implements ExamService {
     }
 
     @Override
-    public ResponseEntity<List<Exam>> getAllExams(Integer schoolId) {
-        List<Exam> exams = examRepository.findBySchool_IdAndStatus(schoolId, "1");
+    public ResponseEntity<List<Exam>> getAllExams() {
+        List<Exam> exams = examRepository.findBySchool_IdAndStatus(TenantContext.schoolId(), "1");
         return ResponseEntity.ok(exams);
     }
 
     @Override
-    public ResponseEntity<Exam> getExamById(Integer id, Integer schoolId) {
+    public ResponseEntity<Exam> getExamById(Integer id) {
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        if (!exam.getSchoolId().equals(schoolId)) {
+        if (!exam.getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -157,8 +158,8 @@ public class ExamServiceImpl implements ExamService {
     }
 
     @Override
-    public ResponseEntity<List<Exam>> getExamsByAcademicYear(Integer schoolId, String academicYear) {
-        List<Exam> exams = examRepository.findBySchool_IdAndAcademicYearAndStatus(schoolId, academicYear, "1");
+    public ResponseEntity<List<Exam>> getExamsByAcademicYear(String academicYear) {
+        List<Exam> exams = examRepository.findBySchool_IdAndAcademicYearAndStatus(TenantContext.schoolId(), academicYear, "1");
         return ResponseEntity.ok(exams);
     }
 

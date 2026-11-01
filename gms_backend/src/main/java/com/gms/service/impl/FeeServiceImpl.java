@@ -6,6 +6,7 @@ import com.gms.model.entity.User;
 import com.gms.model.request.FeeRequest;
 import com.gms.model.response.FeeResponse;
 import com.gms.repository.FeeRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -30,13 +31,13 @@ public class FeeServiceImpl implements FeeService {
     }
 
     @Override
-    public ResponseEntity<FeeResponse> createFee(FeeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FeeResponse> createFee(FeeRequest request) {
         // Validate school exists
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create fee
@@ -60,18 +61,18 @@ public class FeeServiceImpl implements FeeService {
     }
 
     @Override
-    public ResponseEntity<FeeResponse> updateFee(Integer id, FeeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FeeResponse> updateFee(Integer id, FeeRequest request) {
         // Validate fee exists
         Fee fee = feeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee not found"));
 
         // Validate school
-        if (!fee.getSchool().getId().equals(schoolId)) {
+        if (!fee.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update fee
@@ -91,18 +92,18 @@ public class FeeServiceImpl implements FeeService {
     }
 
     @Override
-    public ResponseEntity<?> deleteFee(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteFee(Integer id) {
         // Validate fee exists
         Fee fee = feeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee not found"));
 
         // Validate school
-        if (!fee.getSchool().getId().equals(schoolId)) {
+        if (!fee.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to ARCHIVED
@@ -114,17 +115,17 @@ public class FeeServiceImpl implements FeeService {
     }
 
     @Override
-    public ResponseEntity<List<Fee>> getAllFees(Integer schoolId) {
-        List<Fee> fees = feeRepository.findBySchoolIdAndStatus(schoolId, "ACTIVE");
+    public ResponseEntity<List<Fee>> getAllFees() {
+        List<Fee> fees = feeRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "ACTIVE");
         return ResponseEntity.ok(fees);
     }
 
     @Override
-    public ResponseEntity<Fee> getFeeById(Integer id, Integer schoolId) {
+    public ResponseEntity<Fee> getFeeById(Integer id) {
         Fee fee = feeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee not found"));
 
-        if (!fee.getSchool().getId().equals(schoolId)) {
+        if (!fee.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -132,14 +133,14 @@ public class FeeServiceImpl implements FeeService {
     }
 
     @Override
-    public ResponseEntity<List<Fee>> getFeesByAcademicYear(Integer schoolId, String academicYear) {
-        List<Fee> fees = feeRepository.findBySchoolIdAndAcademicYearAndStatus(schoolId, academicYear, "ACTIVE");
+    public ResponseEntity<List<Fee>> getFeesByAcademicYear(String academicYear) {
+        List<Fee> fees = feeRepository.findBySchoolIdAndAcademicYearAndStatus(TenantContext.schoolId(), academicYear, "ACTIVE");
         return ResponseEntity.ok(fees);
     }
 
     @Override
-    public BigDecimal getTotalFeeAmountBySchoolIdAndAcademicYear(Integer schoolId, String academicYear) {
-        return feeRepository.getTotalFeeAmountBySchoolIdAndAcademicYear(schoolId, academicYear);
+    public BigDecimal getTotalFeeAmountBySchoolIdAndAcademicYear(String academicYear) {
+        return feeRepository.getTotalFeeAmountBySchoolIdAndAcademicYear(TenantContext.schoolId(), academicYear);
     }
 
     private FeeResponse mapToResponse(Fee fee) {

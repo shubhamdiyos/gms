@@ -5,9 +5,9 @@ import com.gms.model.entity.StudentAdmission;
 import com.gms.model.request.StudentRequest;
 import com.gms.model.response.*;
 import com.gms.repository.StudentAdmissionRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.StudentService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -42,33 +42,33 @@ public class StudentController {
     @PostMapping("/create")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<StudentResponse> create(@Valid @RequestBody StudentRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return studentService.create(request, empId, schoolId);
+        return studentService.create(request);
     }
 
     @PutMapping("/update")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<StudentResponse> update(@Valid @RequestBody StudentRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return studentService.update(request, empId, schoolId);
+        return studentService.update(request);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<Student>> getAll() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Student> students = studentService.findBySchool(schoolId);
+        List<Student> students = studentService.findBySchool();
         return ResponseEntity.ok(students);
     }
 
@@ -82,12 +82,12 @@ public class StudentController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<Student> getById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
         try {
-            return ResponseEntity.ok(studentService.getById(id, schoolId));
+            return ResponseEntity.ok(studentService.getById(id));
         } catch (jakarta.persistence.EntityNotFoundException ex) {
             return ResponseEntity.status(404).build();
         } catch (IllegalArgumentException ex) {
@@ -98,7 +98,7 @@ public class StudentController {
     @GetMapping("/admissions")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<StudentAdmission>> getAllAdmissions() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
@@ -108,19 +108,18 @@ public class StudentController {
     @PatchMapping("/toggle")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return studentService.toggleStudent(id, isActive, schoolId, empId);
+        return studentService.toggleStudent(id, isActive);
     }
 
     // Student-specific role endpoints
     @GetMapping("/profile")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<StudentResponse> getStudentProfile() {
-        String username = SecurityUtil.getUsernameFromToken();
         StudentResponse response = studentService.getMyProfile();
         return ResponseEntity.ok(response);
     }
@@ -128,7 +127,7 @@ public class StudentController {
     @GetMapping("/my-classes")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<ClassroomResponse> getMyClass() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         ClassroomResponse classroom = studentService.getMyClassroom(username);
         return ResponseEntity.ok(classroom);
     }
@@ -136,7 +135,7 @@ public class StudentController {
     @GetMapping("/my-subjects")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<SubjectResponse>> getMySubjects() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<SubjectResponse> subjects = studentService.getMySubjects(username);
         return ResponseEntity.ok(subjects);
     }
@@ -144,7 +143,7 @@ public class StudentController {
     @GetMapping("/my-attendance")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<AttendanceResponse>> getMyAttendance() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<AttendanceResponse> attendance = studentService.getMyAttendance(username);
         return ResponseEntity.ok(attendance);
     }
@@ -152,7 +151,7 @@ public class StudentController {
     @GetMapping("/my-results")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<ResultResponse>> getMyResults() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<ResultResponse> results = studentService.getMyResults(username);
         return ResponseEntity.ok(results);
     }
@@ -160,7 +159,7 @@ public class StudentController {
     @GetMapping("/my-fees")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<StudentFeeResponse>> getMyFees() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<StudentFeeResponse> fees = studentService.getMyFees(username);
         return ResponseEntity.ok(fees);
     }
@@ -168,7 +167,7 @@ public class StudentController {
     @GetMapping("/my-timetable")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<TimetableResponse>> getMyTimetable() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<TimetableResponse> timetable = studentService.getMyTimetable(username);
         return ResponseEntity.ok(timetable);
     }
@@ -176,7 +175,7 @@ public class StudentController {
     @GetMapping("/my-teachers")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<EmployeeResponse>> getMyTeachers() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<EmployeeResponse> teachers = studentService.getMyTeachers(username);
         return ResponseEntity.ok(teachers);
     }
@@ -184,7 +183,7 @@ public class StudentController {
     @GetMapping("/my-announcements")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<AnnouncementResponse>> getMyAnnouncements() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<AnnouncementResponse> announcements = studentService.getMyAnnouncements(username);
         return ResponseEntity.ok(announcements);
     }
@@ -192,7 +191,7 @@ public class StudentController {
     @GetMapping("/my-notifications")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<List<NotificationResponse>> getMyNotifications() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         List<NotificationResponse> notifications = studentService.getMyNotifications(username);
         return ResponseEntity.ok(notifications);
     }

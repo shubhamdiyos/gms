@@ -771,6 +771,23 @@ cross-tenant row becomes *impossible* rather than unlikely — has been observed
 there was no application in the loop, no HTTP request, no JWT, and the schema was derived mechanically from the
 entities rather than authored as a Flyway baseline. The two remaining proofs are exactly those absences.
 
+**Implementation status (2026-11-01, Stage 3 `C-2`).** Layer 1 — the claim — is **shipped**: `JwtAuthenticationFilter`
+parses the token once per request and populates `security/TenantContext`, `util/SecurityUtil` (325 call sites in 41
+files, each re-parsing *and re-verifying* the signature) is deleted rather than wrapped, and `TenantParameterArchTest`
+fails the build if any service method accepts the tenant as an argument — the "a caller may forget" path that
+`TEN-01`/`TEN-07` describe is closed by an architecture test rather than by discipline. A request that names another
+school's row is refused with **403** (`TenantAccessDeniedException`), so the read path and the write path now answer
+alike.
+
+Layer 2 — the query discriminator — is **not** shipped, and the honest statement is that layer 1 alone does not
+enforce isolation. The tenant is now available at every call site, but ten repository methods still query across
+schools (`resultRepository.findByStudentExam_Student_Id`, `studentExamRepository.findByStudentId`,
+`feePaymentRepository.findByStudentFee_Student_Id`, `invoiceRepository.findByStudentId`, `receiptRepository.findByStudentId`,
+`attendanceRepository.findByStudent_IdAndDateBetween`, `timetableRepository.findByClassroom_Id`,
+`teacherAssignmentRepository.findByTeacher_Id`, `parentRepository.findByStudentsId`, `userRepository.findByRole`).
+Those are `C-3`'s work list, measured against the branch, not an estimate. Layer 3 — the materialised key with the
+composite foreign key — is `C-7`/`C-8`. One ADR is therefore **not** closed by this card, and the roadmap says so.
+
 ### ADR-021 — A modular monolith enforced by architecture tests, not by moving 282 files
 
 **Status:** **Accepted**. **Date:** 2026-11-01. **Implements:** the mandate's *"establish the modular monolith"* and
@@ -1028,7 +1045,7 @@ missing parameter, type mismatch) is still outstanding and belongs to Stage 4's 
 | 017 | OCI deployment transport | Proposed, deferred until the host exists — which now has a date: Stage 6 | — |
 | 018 | OpenTofu for OCI infra; §9 rules encoded as HCL guards | **Accepted** | — |
 | 019 | Application first, cloud at Stage 6; Stages 1–5 need zero cloud resources | **Accepted**; supersedes the *sequencing* of 015/016, never their targets | nothing until Stage 6 |
-| 020 | Shared schema, `school_id` on every row, composite FK to the parent's `(id, school_id)` | **Accepted**; RLS deferred to a Stage-7 evaluation, deliberately kept addable | — |
+| 020 | Shared schema, `school_id` on every row, composite FK to the parent's `(id, school_id)` | **Accepted**; layer 1 (the claim) **shipped 2026-11-01** with Stage 3 `C-2`; layer 2 (the query discriminator) is `C-3`, layer 3 (the materialised key) is `C-7`/`C-8` — RLS deferred to a Stage-7 evaluation, deliberately kept addable | — |
 | 021 | Modular monolith enforced by ArchUnit over the existing package-by-layer layout | **Accepted**; re-packaging retained as a post-DoD mechanical step | — |
 | 022 | Flyway owns the schema; `ddl-auto=validate` in **every** profile | **Accepted**, amends 006 | — |
-| 023 | Delete `AbstractCRUDController` / `AbstractCRUDService` | **Accepted**; closes `SEC-05` as designed, verified only when Stage 3's suite runs | — |
+| 023 | Delete `AbstractCRUDController` / `AbstractCRUDService` | **Accepted and implemented 2026-11-01**; closes `SEC-05` — 79 tests green, live tenancy run 29/29 | — |

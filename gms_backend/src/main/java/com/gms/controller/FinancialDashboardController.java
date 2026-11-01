@@ -1,8 +1,8 @@
 package com.gms.controller;
 
 import com.gms.model.response.FinancialDashboardResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.FinancialDashboardService;
-import com.gms.util.SecurityUtil;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -24,7 +24,6 @@ public class FinancialDashboardController {
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FinancialDashboardResponse> getFinancialDashboard() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return financialDashboardService.getFinancialDashboardData(schoolId);
+        return financialDashboardService.getFinancialDashboardData();
     }
 }

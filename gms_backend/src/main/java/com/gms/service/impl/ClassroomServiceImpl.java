@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Classroom;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
@@ -8,8 +9,8 @@ import com.gms.model.request.ClassroomRequest;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.repository.ClassroomRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
-import com.gms.util.SecurityUtil;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpStatus;
@@ -37,26 +38,26 @@ public class ClassroomServiceImpl implements ClassroomService {
     }
 
     @Override
-    public ResponseEntity<ClassroomResponse> create(ClassroomRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<ClassroomResponse> create(ClassroomRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        Classroom classroom = createClassroomFromRequest(request, new Classroom(), empId, schoolId);
+        Classroom classroom = createClassroomFromRequest(request, new Classroom());
         Classroom saved = classroomRepository.save(classroom);
         return ResponseEntity.ok(toResponse(saved));
     }
 
     @Override
-    public Classroom createClassroomFromRequest(ClassroomRequest request, Classroom classroom, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public Classroom createClassroomFromRequest(ClassroomRequest request, Classroom classroom) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         boolean exists = classroomRepository.existsBySchool_IdAndNameAndGradeAndSection(
-                schoolId, request.getName(), request.getGrade(), request.getSection());
+                TenantContext.schoolId(), request.getName(), request.getGrade(), request.getSection());
         if (exists) {
             throw new IllegalArgumentException("Classroom already exists with same name/grade/section");
         }
@@ -67,17 +68,17 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Classroom> findBySchool(Integer schoolId) {
-        return classroomRepository.findAllBySchool_IdAndStatusNot(schoolId, "0");
+    public List<Classroom> findBySchool() {
+        return classroomRepository.findAllBySchool_IdAndStatusNot(TenantContext.schoolId(), "0");
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Classroom getById(Integer id, Integer schoolId) {
+    public Classroom getById(Integer id) {
         Classroom classroom = classroomRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-        if (!classroom.getSchoolId().equals(schoolId) || "0".equals(classroom.getStatus())) {
-            throw new IllegalArgumentException("Classroom does not belong to current school");
+        if (!classroom.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(classroom.getStatus())) {
+            throw new TenantAccessDeniedException("Classroom does not belong to current school");
         }
         return classroom;
     }
@@ -90,12 +91,12 @@ public class ClassroomServiceImpl implements ClassroomService {
 
     @Override
     @Transactional
-    public boolean deleteWithinSchool(Integer id, Integer schoolId) {
+    public boolean deleteWithinSchool(Integer id) {
         Classroom classroom = classroomRepository.findById(id).orElse(null);
         if (classroom == null) {
             return false;
         }
-        if (!schoolId.equals(classroom.getSchoolId())) {
+        if (!TenantContext.schoolId().equals(classroom.getSchoolId())) {
             return false;
         }
         classroomRepository.delete(classroom);
@@ -103,14 +104,14 @@ public class ClassroomServiceImpl implements ClassroomService {
     }
 
     @Override
-    public ResponseEntity<ClassroomResponse> update(ClassroomRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<ClassroomResponse> update(ClassroomRequest request) {
         if (request.getId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Classroom classroom = classroomRepository.findById(request.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-        if (!classroom.getSchoolId().equals(schoolId) || "0".equals(classroom.getStatus())) {
+        if (!classroom.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(classroom.getStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -124,7 +125,7 @@ public class ClassroomServiceImpl implements ClassroomService {
                 "school"
         );
 
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         classroom.setSchool(school);
 
@@ -133,17 +134,17 @@ public class ClassroomServiceImpl implements ClassroomService {
     }
 
     @Override
-    public ResponseEntity<?> toggleClassroom(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleClassroom(Integer id, Boolean isActive) {
         Classroom existing = classroomRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
 
-        if (!existing.getSchool().getId().equals(schoolId)) {
+        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
         existing.setStatus(isActive ? "1" : "0");
 
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         existing.setSchool(school);
 
@@ -154,7 +155,7 @@ public class ClassroomServiceImpl implements ClassroomService {
     @Override
     @Transactional(readOnly = true)
     public List<ClassroomResponse> findClassroomsForAuthenticatedTeacher() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return Collections.emptyList();
         }

@@ -11,11 +11,11 @@ import java.util.List;
 import java.util.Optional;
 
 public interface UserService {
-    UserResponse getById(Integer id, Integer schoolId);
-    Page<UserResponse> listBySchool(Integer schoolId, Pageable pageable);
-    List<User> findBySchool(Integer schoolId);
-    ResponseEntity<UserResponse> create(UserRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<UserResponse> update(UserRequest request, Integer empId, Integer schoolId);
+    UserResponse getById(Integer id);
+    Page<UserResponse> listBySchool(Pageable pageable);
+    List<User> findBySchool();
+    ResponseEntity<UserResponse> create(UserRequest request);
+    ResponseEntity<UserResponse> update(UserRequest request);
 
     /**
      * Deletes a user, but only if it belongs to the caller's school.
@@ -26,11 +26,24 @@ public interface UserService {
      *
      * @return true when a row was deleted, false when no such user exists in that school
      */
-    boolean deleteWithinSchool(Integer id, Integer schoolId);
+    boolean deleteWithinSchool(Integer id);
     
     // Additional methods needed for service-to-service communication
     Optional<User> findByUsername(String username);
-    Optional<User> findByEmployee_Id(Integer employeeId);
+
+    /**
+     * The caller's own account, resolved from the tenant in the request context.
+     */
+    Optional<User> findByEmployee_Id();
+
+    /**
+     * Whether an employee already has an account. The employee is the subject of the question, not
+     * the caller: self-registration asks about the employee being registered. The parameter is
+     * named for what it is, because {@code employeeId} means "the caller's own employee" everywhere
+     * else in this package.
+     */
+    boolean existsByEmployee_Id(Integer subjectEmployeeId);
+
     boolean existsByEmail(String email);
     boolean existsByUsername(String username);
     User save(User user);

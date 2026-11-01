@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
 import com.gms.model.entity.Subject;
@@ -10,8 +11,8 @@ import com.gms.repository.SchoolRepository;
 import com.gms.repository.SubjectRepository;
 import com.gms.repository.TeacherAssignmentRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.SubjectService;
-import com.gms.util.SecurityUtil;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.BeanUtils;
 import org.springframework.http.HttpStatus;
@@ -41,29 +42,29 @@ public class SubjectServiceImpl implements SubjectService {
     }
 
     @Override
-    public ResponseEntity<SubjectResponse> create(SubjectRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<SubjectResponse> create(SubjectRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        Subject subject = createSubjectFromRequest(request, new Subject(), empId, schoolId);
+        Subject subject = createSubjectFromRequest(request, new Subject());
         Subject saved = subjectRepository.save(subject);
         return ResponseEntity.ok(toResponse(saved));
     }
 
     @Override
-    public Subject createSubjectFromRequest(SubjectRequest request, Subject subject, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public Subject createSubjectFromRequest(SubjectRequest request, Subject subject) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        if (subjectRepository.existsBySchool_IdAndCode(schoolId, request.getCode())) {
+        if (subjectRepository.existsBySchool_IdAndCode(TenantContext.schoolId(), request.getCode())) {
             throw new IllegalArgumentException("Subject code already exists in this school");
         }
 
         BeanUtils.copyProperties(request, subject, "id", "createdAt", "updatedAt", "version");
 
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         subject.setSchool(school);
 
@@ -72,17 +73,17 @@ public class SubjectServiceImpl implements SubjectService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Subject> findBySchool(Integer schoolId) {
-        return subjectRepository.findAllBySchool_IdAndStatusNot(schoolId, "0");
+    public List<Subject> findBySchool() {
+        return subjectRepository.findAllBySchool_IdAndStatusNot(TenantContext.schoolId(), "0");
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Subject getById(Integer id, Integer schoolId) {
+    public Subject getById(Integer id) {
         Subject subject = subjectRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Subject not found"));
-        if (!subject.getSchoolId().equals(schoolId) || "0".equals(subject.getStatus())) {
-            throw new IllegalArgumentException("Subject does not belong to current school");
+        if (!subject.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(subject.getStatus())) {
+            throw new TenantAccessDeniedException("Subject does not belong to current school");
         }
         return subject;
     }
@@ -95,12 +96,12 @@ public class SubjectServiceImpl implements SubjectService {
 
     @Override
     @Transactional
-    public boolean deleteWithinSchool(Integer id, Integer schoolId) {
+    public boolean deleteWithinSchool(Integer id) {
         Subject subject = subjectRepository.findById(id).orElse(null);
         if (subject == null) {
             return false;
         }
-        if (!schoolId.equals(subject.getSchoolId())) {
+        if (!TenantContext.schoolId().equals(subject.getSchoolId())) {
             return false;
         }
         subjectRepository.delete(subject);
@@ -108,18 +109,18 @@ public class SubjectServiceImpl implements SubjectService {
     }
 
     @Override
-    public ResponseEntity<SubjectResponse> update(SubjectRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<SubjectResponse> update(SubjectRequest request) {
         // For Subject, we need to get the ID from the path parameter, not from request
         // This will be handled by the controller
         throw new UnsupportedOperationException("Update method requires ID parameter from controller");
     }
 
     @Override
-    public ResponseEntity<SubjectResponse> updateSubject(Integer id, SubjectRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<SubjectResponse> updateSubject(Integer id, SubjectRequest request) {
         Subject subject = subjectRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Subject not found"));
 
-        if (!subject.getSchoolId().equals(schoolId) || "0".equals(subject.getStatus())) {
+        if (!subject.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(subject.getStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -133,7 +134,7 @@ public class SubjectServiceImpl implements SubjectService {
                 "school"
         );
 
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         subject.setSchool(school);
 
@@ -142,17 +143,17 @@ public class SubjectServiceImpl implements SubjectService {
     }
 
     @Override
-    public ResponseEntity<?> toggleSubject(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleSubject(Integer id, Boolean isActive) {
         Subject existing = subjectRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Subject not found"));
 
-        if (!existing.getSchool().getId().equals(schoolId)) {
+        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
         existing.setStatus(isActive ? "1" : "0");
 
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         existing.setSchool(school);
 
@@ -163,7 +164,7 @@ public class SubjectServiceImpl implements SubjectService {
     @Override
     @Transactional(readOnly = true)
     public List<SubjectResponse> findSubjectsForAuthenticatedTeacher() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return Collections.emptyList();
         }

@@ -3,11 +3,12 @@ package com.gms.controller;
 import com.gms.model.entity.School;
 import com.gms.model.request.SchoolRequest;
 import com.gms.model.response.SchoolResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.SchoolService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.bind.annotation.RequestMethod;
@@ -38,61 +39,60 @@ public class SchoolController {
     @PostMapping("/create")
     @PreAuthorize("hasAuthority('SUPERADMIN')")
     public ResponseEntity<SchoolResponse> create(@Valid @RequestBody SchoolRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return schoolService.create(request, empId, schoolId);
+        return schoolService.create(request);
     }
 
     @PutMapping("/update")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<SchoolResponse> update(@Valid @RequestBody SchoolRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return schoolService.update(request, empId, schoolId);
+        return schoolService.update(request);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<School>> getAll() {
-        String username = SecurityUtil.getUsernameFromToken();
-        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
-        
-        if (username == null || roles == null) {
+        if (TenantContext.username() == null) {
             return ResponseEntity.status(401).build();
         }
-        
+
         List<School> list;
 
         // SuperAdmin can see all schools, others see only their school
-        if (roles.contains("SUPERADMIN")) {
+        if (TenantContext.isPlatformOwner()) {
             list = schoolService.findAll();
         } else {
-            Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+            Integer schoolId = TenantContext.schoolId();
             if (schoolId == null) {
                 return ResponseEntity.status(401).build();
             }
-            list = schoolService.findBySchool(schoolId);
+            list = schoolService.findBySchool();
         }
-        
+
         return ResponseEntity.ok(list);
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<School> getById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
         try {
-            School school = schoolService.getById(id, schoolId);
+            School school = schoolService.getById(id);
             return ResponseEntity.ok(school);
+        } catch (AccessDeniedException e) {
+            return ResponseEntity.status(403).build();
         } catch (IllegalArgumentException e) {
             return ResponseEntity.status(403).build();
         } catch (Exception e) {
@@ -103,11 +103,11 @@ public class SchoolController {
     @PatchMapping("/toggle")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return schoolService.toggleSchool(id, isActive, schoolId, empId);
+        return schoolService.toggleSchool(id, isActive);
     }
 }

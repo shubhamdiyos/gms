@@ -8,9 +8,9 @@ import com.gms.exception.NotFoundException;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import com.gms.util.PasswordValidator;
-import com.gms.util.SecurityUtil;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -44,18 +44,18 @@ public class UserServiceImpl implements UserService {
     }
 
     @Override
-    public ResponseEntity<UserResponse> create(UserRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<UserResponse> create(UserRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        User user = createUserFromRequest(request, new User(), empId, schoolId);
+        User user = createUserFromRequest(request, new User());
         User saved = this.create(user);
         return ResponseEntity.ok(toResponse(saved));
     }
 
-    public User createUserFromRequest(UserRequest request, User user, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public User createUserFromRequest(UserRequest request, User user) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
@@ -64,10 +64,10 @@ public class UserServiceImpl implements UserService {
         }
 
         // Find school and creator user
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
         
-        User creatorUser = this.findByEmployee_Id(empId)
+        User creatorUser = this.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         org.springframework.beans.BeanUtils.copyProperties(request, user, "schoolId");
@@ -115,12 +115,11 @@ public class UserServiceImpl implements UserService {
     }
 
     private static boolean currentCallerHas(RoleEnum role) {
-        Set<String> callerRoles = SecurityUtil.getRolesFromToken();
-        return callerRoles != null && callerRoles.contains(role.getCode());
+        return TenantContext.roles().contains(role.getCode());
     }
 
     @Override
-    public ResponseEntity<UserResponse> update(UserRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<UserResponse> update(UserRequest request) {
         if (request.getId() == null) {
             throw new IllegalArgumentException("User ID must be provided for update");
         }
@@ -129,11 +128,11 @@ public class UserServiceImpl implements UserService {
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
         
         // Enforce tenant boundary
-        if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId)) {
+        if (user.getSchool() == null || !user.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
-        User updaterUser = this.findByEmployee_Id(empId)
+        User updaterUser = this.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         org.springframework.beans.BeanUtils.copyProperties(
@@ -161,10 +160,10 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional(readOnly = true)
-    public UserResponse getById(Integer id, Integer schoolId) {
+    public UserResponse getById(Integer id) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found with ID: " + id));
-        if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId)) {
+        if (user.getSchool() == null || !user.getSchool().getId().equals(TenantContext.schoolId())) {
             throw new NotFoundException("USER_NOT_FOUND", "User not found with ID: " + id);
         }
         return toResponse(user);
@@ -172,12 +171,12 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional
-    public boolean deleteWithinSchool(Integer id, Integer schoolId) {
+    public boolean deleteWithinSchool(Integer id) {
         User user = userRepository.findById(id).orElse(null);
         if (user == null) {
             return false;
         }
-        if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId)) {
+        if (user.getSchool() == null || !user.getSchool().getId().equals(TenantContext.schoolId())) {
             return false;
         }
         userRepository.delete(user);
@@ -186,14 +185,14 @@ public class UserServiceImpl implements UserService {
 
     @Override
     @Transactional(readOnly = true)
-    public Page<UserResponse> listBySchool(Integer schoolId, Pageable pageable) {
-        Page<User> users = userRepository.findAllBySchool_Id(schoolId, pageable);
+    public Page<UserResponse> listBySchool(Pageable pageable) {
+        Page<User> users = userRepository.findAllBySchool_Id(TenantContext.schoolId(), pageable);
         return users.map(this::toResponse);
     }
 
     @Override
-    public List<User> findBySchool(Integer schoolId) {
-        return userRepository.findBySchool_Id(schoolId);
+    public List<User> findBySchool() {
+        return userRepository.findBySchool_Id(TenantContext.schoolId());
     }
     
     // Additional methods needed for service-to-service communication
@@ -203,10 +202,15 @@ public class UserServiceImpl implements UserService {
     }
     
     @Override
-    public Optional<User> findByEmployee_Id(Integer employeeId) {
-        return userRepository.findByEmployee_Id(employeeId);
+    public Optional<User> findByEmployee_Id() {
+        return userRepository.findByEmployee_Id(TenantContext.employeeId());
     }
-    
+
+    @Override
+    public boolean existsByEmployee_Id(Integer subjectEmployeeId) {
+        return userRepository.existsByEmployee_Id(subjectEmployeeId);
+    }
+
     @Override
     public boolean existsByEmail(String email) {
         return userRepository.existsByEmail(email);

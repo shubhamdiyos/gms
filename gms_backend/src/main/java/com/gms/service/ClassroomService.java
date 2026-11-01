@@ -8,19 +8,19 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 public interface ClassroomService {
-    List<Classroom> findBySchool(Integer schoolId);
-    Classroom getById(Integer id, Integer schoolId);
-    ResponseEntity<ClassroomResponse> create(ClassroomRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<ClassroomResponse> update(ClassroomRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<?> toggleClassroom(Integer id, Boolean isActive, Integer schoolId, Integer empId);
-    Classroom createClassroomFromRequest(ClassroomRequest request, Classroom classroom, Integer empId, Integer schoolId);
+    List<Classroom> findBySchool();
+    Classroom getById(Integer id);
+    ResponseEntity<ClassroomResponse> create(ClassroomRequest request);
+    ResponseEntity<ClassroomResponse> update(ClassroomRequest request);
+    ResponseEntity<?> toggleClassroom(Integer id, Boolean isActive);
+    Classroom createClassroomFromRequest(ClassroomRequest request, Classroom classroom);
 
     /**
      * Deletes a classroom, but only if it belongs to the caller's school.
      *
      * @return true when a row was deleted, false when no such classroom exists in that school
      */
-    boolean deleteWithinSchool(Integer id, Integer schoolId);
+    boolean deleteWithinSchool(Integer id);
     
     // Service-to-service communication method
     java.util.Optional<Classroom> findById(Integer id);

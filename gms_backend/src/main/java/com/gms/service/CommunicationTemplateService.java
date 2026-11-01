@@ -9,25 +9,25 @@ import java.util.List;
 
 public interface CommunicationTemplateService {
 
-    ResponseEntity<CommunicationTemplateResponse> createTemplate(CommunicationTemplateRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<CommunicationTemplateResponse> createTemplate(CommunicationTemplateRequest request);
 
-    ResponseEntity<CommunicationTemplateResponse> updateTemplate(Integer id, CommunicationTemplateRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<CommunicationTemplateResponse> updateTemplate(Integer id, CommunicationTemplateRequest request);
 
-    ResponseEntity<?> deleteTemplate(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteTemplate(Integer id);
 
-    ResponseEntity<List<CommunicationTemplate>> getAllTemplates(Integer schoolId);
+    ResponseEntity<List<CommunicationTemplate>> getAllTemplates();
 
-    ResponseEntity<CommunicationTemplate> getTemplateById(Integer id, Integer schoolId);
+    ResponseEntity<CommunicationTemplate> getTemplateById(Integer id);
 
-    ResponseEntity<List<CommunicationTemplate>> getActiveTemplates(Integer schoolId);
+    ResponseEntity<List<CommunicationTemplate>> getActiveTemplates();
 
-    ResponseEntity<List<CommunicationTemplate>> getTemplatesByCommunicationType(Integer schoolId, String communicationType);
+    ResponseEntity<List<CommunicationTemplate>> getTemplatesByCommunicationType(String communicationType);
 
-    ResponseEntity<List<CommunicationTemplate>> getTemplatesByCategory(Integer schoolId, String category);
+    ResponseEntity<List<CommunicationTemplate>> getTemplatesByCategory(String category);
 
-    ResponseEntity<CommunicationTemplate> getTemplateByCode(Integer schoolId, String templateCode);
+    ResponseEntity<CommunicationTemplate> getTemplateByCode(String templateCode);
 
-    ResponseEntity<List<CommunicationTemplate>> getTemplatesByCategoryAndCommunicationType(Integer schoolId, String category, String communicationType);
+    ResponseEntity<List<CommunicationTemplate>> getTemplatesByCategoryAndCommunicationType(String category, String communicationType);
 
-    ResponseEntity<Long> countActiveTemplates(Integer schoolId);
+    ResponseEntity<Long> countActiveTemplates();
 }

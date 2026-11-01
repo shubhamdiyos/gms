@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface SchoolService {
-    List<School> findBySchool(Integer schoolId);
+    List<School> findBySchool();
 
     /**
      * Every school on the platform.
@@ -20,11 +20,11 @@ public interface SchoolService {
      */
     List<School> findAll();
 
-    School getById(Integer id, Integer schoolId);
-    ResponseEntity<SchoolResponse> create(SchoolRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<SchoolResponse> update(SchoolRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<?> toggleSchool(Integer id, Boolean isActive, Integer schoolId, Integer empId);
-    School createSchoolFromRequest(SchoolRequest request, School school, Integer empId, Integer schoolId);
+    School getById(Integer id);
+    ResponseEntity<SchoolResponse> create(SchoolRequest request);
+    ResponseEntity<SchoolResponse> update(SchoolRequest request);
+    ResponseEntity<?> toggleSchool(Integer id, Boolean isActive);
+    School createSchoolFromRequest(SchoolRequest request, School school);
     
     // Base method for service-to-service communication (no tenant validation needed for schools)
     Optional<School> findById(Integer id);

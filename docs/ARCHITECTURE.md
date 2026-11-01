@@ -101,8 +101,9 @@ build failure.
 | anything → `audit` | the audit columns are set by a JPA entity listener, not by callers |
 
 **Forbidden:** a repository in module A queried from module B's service; a service returning another module's
-entity; a controller reaching `security/` internals directly (today `SecurityUtil` is a static re-parse of the
-`Authorization` header, called from controllers — §4 replaces it with a request-scoped value).
+entity; a controller reaching `security/` internals directly. Before Stage 3's `C-2` the last clause was broken by
+`SecurityUtil`, a static re-parse of the `Authorization` header called from controllers; it has been deleted and
+§4's request-scoped value replaced it.
 
 ## 4. Tenancy
 
@@ -115,6 +116,15 @@ mechanism is what Stage 2's migrations and Stage 3's code must both agree on.
    `TenantContext`, and controllers no longer each call `SecurityUtil.getSchoolIdFromToken()` and pass an `Integer`
    down that any service signature may drop (`TEN-01`, `TEN-07`: `SecurityUtil` returns null off-request and
    callers pass that null as a filter value).
+
+   **Shipped 2026-11-01 (Stage 3 `C-2`).** `JwtAuthenticationFilter` parses the token once and populates
+   `security/TenantContext` (username, school id, employee id, roles), clearing it in a `finally` so a pooled
+   thread never carries one caller's tenant forward. `util/SecurityUtil` — a static re-parse *and re-verification*
+   of the token, 325 call sites in 41 files — is deleted, not wrapped. No service method may accept the tenant as
+   an argument; `TenantParameterArchTest` fails the build if one does, so the "a caller may forget" path is
+   closed rather than documented. A request that names another school's row is refused with 403
+   (`TenantAccessDeniedException`), not 400. What is *not* yet shipped is level 2 below: the tenant is available
+   everywhere, but not every query yet filters on it — that is `C-3`.
 2. **Query.** Every repository method that reads tenant data takes the tenant explicitly, and Hibernate applies the
    discriminator at the SQL level, so an unscoped `findAll()` cannot be written by accident (`TEN-06`: `@Where` /
    `@Filter` appear nowhere today).

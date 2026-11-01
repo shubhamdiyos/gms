@@ -2,8 +2,8 @@ package com.gms.controller;
 
 import com.gms.model.entity.AcademicYear;
 import com.gms.model.request.AcademicYearRequest;
+import com.gms.security.TenantContext;
 import com.gms.service.AcademicYearService;
-import com.gms.util.SecurityUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -22,30 +22,30 @@ public class AcademicYearController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> createAcademicYear(@RequestBody AcademicYearRequest academicYearRequest) {
-        return academicYearService.createAcademicYear(academicYearRequest, SecurityUtil.getSchoolIdFromToken());
+        return academicYearService.createAcademicYear(academicYearRequest);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> updateAcademicYear(@PathVariable Integer id, @RequestBody AcademicYearRequest academicYearRequest) {
-        return academicYearService.updateAcademicYear(id, academicYearRequest, SecurityUtil.getSchoolIdFromToken());
+        return academicYearService.updateAcademicYear(id, academicYearRequest);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteAcademicYear(@PathVariable Integer id) {
-        return academicYearService.deleteAcademicYear(id, SecurityUtil.getSchoolIdFromToken());
+        return academicYearService.deleteAcademicYear(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<List<AcademicYear>> getAllAcademicYears() {
-        return academicYearService.getAllAcademicYears(SecurityUtil.getSchoolIdFromToken());
+        return academicYearService.getAllAcademicYears();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<AcademicYear> getAcademicYearById(@PathVariable Integer id) {
-        return academicYearService.getAcademicYearById(id, SecurityUtil.getSchoolIdFromToken());
+        return academicYearService.getAcademicYearById(id);
     }
 }

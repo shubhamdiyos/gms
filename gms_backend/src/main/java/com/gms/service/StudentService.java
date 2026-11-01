@@ -8,12 +8,12 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 public interface StudentService {
-    List<Student> findBySchool(Integer schoolId);
-    Student getById(Integer id, Integer schoolId);
-    ResponseEntity<StudentResponse> create(StudentRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<StudentResponse> update(StudentRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<?> toggleStudent(Integer id, Boolean isActive, Integer schoolId, Integer empId);
-    Student createStudentFromRequest(StudentRequest request, Student student, Integer empId, Integer schoolId);
+    List<Student> findBySchool();
+    Student getById(Integer id);
+    ResponseEntity<StudentResponse> create(StudentRequest request);
+    ResponseEntity<StudentResponse> update(StudentRequest request);
+    ResponseEntity<?> toggleStudent(Integer id, Boolean isActive);
+    Student createStudentFromRequest(StudentRequest request, Student student);
     
     // Service-to-service communication method
     java.util.Optional<Student> findById(Integer id);

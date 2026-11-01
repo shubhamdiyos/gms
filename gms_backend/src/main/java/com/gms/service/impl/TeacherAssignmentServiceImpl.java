@@ -1,6 +1,7 @@
 
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.*;
 import com.gms.exception.NotFoundException;
 import com.gms.model.request.TeacherAssignmentRequest;
@@ -9,6 +10,7 @@ import com.gms.model.response.EmployeeResponse;
 import com.gms.model.response.SubjectResponse;
 import com.gms.model.response.TeacherAssignmentResponse;
 import com.gms.repository.*;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,7 +41,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional
-    public TeacherAssignmentResponse createAssignment(TeacherAssignmentRequest request, Integer schoolId, Integer empId) {
+    public TeacherAssignmentResponse createAssignment(TeacherAssignmentRequest request) {
         Employee teacher = employeeService.findById(request.getTeacherId())
                 .orElseThrow(() -> new NotFoundException("TEACHER_NOT_FOUND", "Teacher not found"));
 
@@ -50,9 +52,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
                 .orElseThrow(() -> new NotFoundException("CLASSROOM_NOT_FOUND", "Classroom not found"));
 
         // Validation - ensure all entities belong to the same school
-        if (!teacher.getSchool().getId().equals(schoolId) || 
-            !subject.getSchool().getId().equals(schoolId) || 
-            !classroom.getSchool().getId().equals(schoolId)) {
+        if (!teacher.getSchool().getId().equals(TenantContext.schoolId()) || 
+            !subject.getSchool().getId().equals(TenantContext.schoolId()) || 
+            !classroom.getSchool().getId().equals(TenantContext.schoolId())) {
             throw new IllegalArgumentException("Teacher, Subject, and Classroom must belong to the current school.");
         }
 
@@ -74,8 +76,8 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TeacherAssignmentResponse> getAllAssignmentsBySchool(Integer schoolId) {
-        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_Id(schoolId);
+    public List<TeacherAssignmentResponse> getAllAssignmentsBySchool() {
+        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_Id(TenantContext.schoolId());
         return assignments.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -83,12 +85,12 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TeacherAssignmentResponse> getAssignmentsByTeacher(Integer teacherId, Integer schoolId) {
+    public List<TeacherAssignmentResponse> getAssignmentsByTeacher(Integer teacherId) {
         Employee teacher = employeeService.findById(teacherId)
                 .orElseThrow(() -> new NotFoundException("TEACHER_NOT_FOUND", "Teacher not found"));
         
-        if (!teacher.getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Teacher does not belong to the current school.");
+        if (!teacher.getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Teacher does not belong to the current school.");
         }
 
         List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_Id(teacherId);
@@ -99,12 +101,12 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TeacherAssignmentResponse> getAssignmentsByClassroom(Integer classroomId, Integer schoolId) {
+    public List<TeacherAssignmentResponse> getAssignmentsByClassroom(Integer classroomId) {
         Classroom classroom = classroomService.findById(classroomId)
                 .orElseThrow(() -> new NotFoundException("CLASSROOM_NOT_FOUND", "Classroom not found"));
         
-        if (!classroom.getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Classroom does not belong to the current school.");
+        if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Classroom does not belong to the current school.");
         }
 
         List<TeacherAssignment> assignments = teacherAssignmentRepository.findByClassroom_Id(classroomId);
@@ -115,9 +117,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<TeacherAssignmentResponse> getAssignmentsByAcademicYear(String academicYear, Integer schoolId) {
+    public List<TeacherAssignmentResponse> getAssignmentsByAcademicYear(String academicYear) {
         List<TeacherAssignment> assignments = teacherAssignmentRepository
-                .findByAcademicYearAndTeacher_School_Id(academicYear, schoolId);
+                .findByAcademicYearAndTeacher_School_Id(academicYear, TenantContext.schoolId());
         return assignments.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -125,20 +127,20 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional
-    public TeacherAssignmentResponse updateAssignment(Integer id, TeacherAssignmentRequest request, Integer schoolId, Integer empId) {
+    public TeacherAssignmentResponse updateAssignment(Integer id, TeacherAssignmentRequest request) {
         TeacherAssignment assignment = teacherAssignmentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
 
-        if (!assignment.getTeacher().getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Assignment does not belong to the current school.");
+        if (!assignment.getTeacher().getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Assignment does not belong to the current school.");
         }
 
         // Update assignment
         if (request.getTeacherId() != null) {
             Employee teacher = employeeService.findById(request.getTeacherId())
                     .orElseThrow(() -> new NotFoundException("TEACHER_NOT_FOUND", "Teacher not found"));
-            if (!teacher.getSchool().getId().equals(schoolId)) {
-                throw new IllegalArgumentException("Teacher does not belong to the current school.");
+            if (!teacher.getSchool().getId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Teacher does not belong to the current school.");
             }
             assignment.setTeacher(teacher);
         }
@@ -146,8 +148,8 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
         if (request.getSubjectId() != null) {
             Subject subject = subjectService.findById(request.getSubjectId())
                     .orElseThrow(() -> new NotFoundException("SUBJECT_NOT_FOUND", "Subject not found"));
-            if (!subject.getSchool().getId().equals(schoolId)) {
-                throw new IllegalArgumentException("Subject does not belong to the current school.");
+            if (!subject.getSchool().getId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Subject does not belong to the current school.");
             }
             assignment.setSubject(subject);
         }
@@ -155,8 +157,8 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
         if (request.getClassroomId() != null) {
             Classroom classroom = classroomService.findById(request.getClassroomId())
                     .orElseThrow(() -> new NotFoundException("CLASSROOM_NOT_FOUND", "Classroom not found"));
-            if (!classroom.getSchool().getId().equals(schoolId)) {
-                throw new IllegalArgumentException("Classroom does not belong to the current school.");
+            if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Classroom does not belong to the current school.");
             }
             assignment.setClassroom(classroom);
         }
@@ -171,12 +173,12 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     @Override
     @Transactional
-    public void deleteAssignment(Integer id, Integer schoolId) {
+    public void deleteAssignment(Integer id) {
         TeacherAssignment assignment = teacherAssignmentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
 
-        if (!assignment.getTeacher().getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Assignment does not belong to the current school.");
+        if (!assignment.getTeacher().getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Assignment does not belong to the current school.");
         }
 
         teacherAssignmentRepository.delete(assignment);

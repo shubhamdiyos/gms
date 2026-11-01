@@ -12,7 +12,7 @@ No duplicate implementations are permitted where a capability already exists. Ev
 | Pagination | `UserServiceImpl.java:173` already paginates users (no controller calls it); controllers already return `ResponseEntity` | a second paging framework, a new list-response wrapper alongside the current one |
 | DTO mapping | per-service `mapToResponse` methods in 34 impls | MapStruct/ModelMapper added beside hand-mapping — pick one and convert incrementally |
 | Error contract | `exception/GlobalExceptionHandler` + `DomainException` (declared, unused) | a new `ApiResponse`/`Result` wrapper layered over the existing exception types |
-| Tenancy | `util/SecurityUtil` call sites in controllers | a parallel `TenantFilter` that coexists with header re-parsing |
+| Tenancy | `security/TenantContext` + `JwtAuthenticationFilter` (Stage 3 `C-2`, 2026-11-01); before that, `util/SecurityUtil` call sites in controllers | a parallel `TenantFilter` that coexists with header re-parsing — `C-2` deleted `SecurityUtil` rather than adding a second path |
 | Auth | `security/JwtTokenProvider`, `JwtAuthenticationFilter` | a second token service, or Spring Authorization Server alongside JWT |
 | Shared UI | 9 structurally identical list pages (`SchoolsPage`, `StudentsPage`, `FeesPage`, `ExamsPage`, `AnnouncementsPage`, `ClassroomsPage`, `SubjectsPage`, `AcademicYearsPage`, `ResultsPage`) | a new component library imported next to the copies — extract once, migrate all 9, delete the duplicates |
 | Validation schemas | 11 per-page Yup schemas + unused `constants/index.js:135-142` | a second schema module duplicating the first |
@@ -66,7 +66,7 @@ result, measured" holds the numbers.
 
 | ID | Debt | Severity | Effort | Reuse action |
 |---|---|---|---|---|
-| TEN-01…07 | Tenancy as a convention; 15+ endpoints accept and ignore `schoolId` | **P0** | L | one `TenantContext` + mandatory tenant parameter on existing repository methods |
+| TEN-01…07 | Tenancy as a convention; 15+ endpoints accept and ignore `schoolId` | **P0** | L | one `TenantContext` + mandatory tenant parameter on existing repository methods — **half done on branch (`feat/stage2-flyway-baseline`, 2026-11-01)**: `util/SecurityUtil` deleted, the token is parsed once per request into `security/TenantContext`, no service method may take the tenant as a parameter (`TenantParameterArchTest` enforces this), and cross-tenant refusals answer 403 via `TenantAccessDeniedException`. **Still open — `C-3`**: the queries that still span schools (`resultRepository.findByStudentExam_Student_Id`, `studentExamRepository.findByStudentId`, `feePaymentRepository.findByStudentFee_Student_Id`, `invoiceRepository.findByStudentId`, `receiptRepository.findByStudentId`, `attendanceRepository.findByStudent_IdAndDateBetween`, `timetableRepository.findByClassroom_Id`, `teacherAssignmentRepository.findByTeacher_Id`, `parentRepository.findByStudentsId`, `userRepository.findByRole`) and the queries the discriminator is missing from |
 | FIN-01 | Payments marked SUCCESS from client input | **P0** | M | extend the existing `FeePayment` status field into a state machine; verification is a *new* concern (webhook) and belongs in a new handler, not a new entity |
 | FIN-04 | Invoice/Receipt orphaned; `FeeStructure` written, never read | P1 | L | wire the existing FK columns (`invoice.student`, `receipt.fee_payment`) — they already exist, they are just never populated |
 | FIN-05 | Balance arithmetic wrong on update/delete/overpay | P1 | M | recompute in the existing `updateBalance` path, add guard + idempotency key |
@@ -122,7 +122,7 @@ half was closed earlier by the index itself.
 | 2 | Delete credential logging, response-leak and dead endpoints | SEC-07, SEC-08, BKL-05, BKL-06, BKL-07 | — | S |
 | 3 | Close escalation/destruction holes: roles, inherited CRUD, self-register | SEC-04, SEC-05, SEC-09, SEC-12, SEC-13, BKL-08 | 1 | M |
 | 4 | Test harness + CI gate (build, unit, integration, coverage) | OPS-01, OPS-14, OPS-12 | 2 | L |
-| 5 | Tenant invariant: `TenantContext`, mandatory tenant params, ownership guard | TEN-01…07, SEC-06 | 3, 4 | L |
+| 5 | Tenant invariant: `TenantContext`, mandatory tenant params, ownership guard | TEN-01…07, SEC-06 | 3, 4 | L — **half done 2026-11-01**: the `TenantContext` half shipped with Stage 3 `C-2` (86 tests green, live 32/32); the query half is `C-3`, the ownership guard is `C-4` |
 | 6 | Schema baseline via Flyway + constraints + indexes | OPS-07, DB-01…06 | 4 | L |
 | 7 | Compose v2 + Makefile + non-root images + working nginx proxy | OPS-08/09/10, SEC-14 | — | M |
 | 8 | Financial integrity: transactions, state machine, linkage, real metrics | FIN-01…08 | 5, 6 | XL |

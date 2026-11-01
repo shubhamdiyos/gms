@@ -3,6 +3,7 @@ package com.gms.service.impl;
 import com.gms.model.entity.School;
 import com.gms.model.response.FinancialDashboardResponse;
 import com.gms.repository.SchoolRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.FeePaymentService;
 import com.gms.service.FeeService;
 import com.gms.service.StudentFeeService;
@@ -34,9 +35,9 @@ public class FinancialDashboardServiceImpl implements FinancialDashboardService 
     }
 
     @Override
-    public ResponseEntity<FinancialDashboardResponse> getFinancialDashboardData(Integer schoolId) {
+    public ResponseEntity<FinancialDashboardResponse> getFinancialDashboardData() {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         FinancialDashboardResponse dashboard = new FinancialDashboardResponse();
@@ -45,9 +46,9 @@ public class FinancialDashboardServiceImpl implements FinancialDashboardService 
         String currentAcademicYear = getCurrentAcademicYear();
 
         // Fee collection statistics
-        BigDecimal totalFeeExpected = feeService.getTotalFeeAmountBySchoolIdAndAcademicYear(schoolId, currentAcademicYear);
-        BigDecimal totalFeeCollected = studentFeeService.getTotalCollectedFeesBySchoolId(schoolId);
-        BigDecimal totalFeeOutstanding = studentFeeService.getTotalOutstandingFeesBySchoolId(schoolId);
+        BigDecimal totalFeeExpected = feeService.getTotalFeeAmountBySchoolIdAndAcademicYear(currentAcademicYear);
+        BigDecimal totalFeeCollected = studentFeeService.getTotalCollectedFeesBySchoolId();
+        BigDecimal totalFeeOutstanding = studentFeeService.getTotalOutstandingFeesBySchoolId();
 
         dashboard.setTotalFeeExpected(totalFeeExpected != null ? totalFeeExpected : BigDecimal.ZERO);
         dashboard.setTotalFeeCollected(totalFeeCollected != null ? totalFeeCollected : BigDecimal.ZERO);
@@ -65,7 +66,7 @@ public class FinancialDashboardServiceImpl implements FinancialDashboardService 
         // Payment statistics (last 30 days)
         LocalDate endDate = LocalDate.now();
         LocalDate startDate = endDate.minusDays(30);
-        BigDecimal totalPayments = feePaymentService.getTotalPaymentsBySchoolIdAndDateRange(schoolId, startDate, endDate);
+        BigDecimal totalPayments = feePaymentService.getTotalPaymentsBySchoolIdAndDateRange(startDate, endDate);
 
         dashboard.setTotalPayments(totalPayments != null ? totalPayments.longValue() : 0L);
 
@@ -78,7 +79,7 @@ public class FinancialDashboardServiceImpl implements FinancialDashboardService 
         }
 
         // Payments today
-        Long paymentsToday = feePaymentService.getCountOfPaymentsBySchoolIdAndDate(schoolId, LocalDate.now());
+        Long paymentsToday = feePaymentService.getCountOfPaymentsBySchoolIdAndDate(LocalDate.now());
         dashboard.setPaymentsToday(paymentsToday != null ? paymentsToday : 0L);
 
         // Overall financial summary (placeholder values - would be calculated from actual data)

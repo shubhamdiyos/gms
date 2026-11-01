@@ -697,3 +697,135 @@ and is now recorded as **BKL-10**.
 * `/tmp/gms-boot*.log` and `/tmp/gms-c1-final.log` hold the boot logs referenced in §14.1 and §14.4. They are outside
   the repository and contain no credential material — the JWT secret was generated per run and never written to a
   file. The disposable platform password lives in `/tmp/gms-c1-secret.env` (mode 600), also outside the repository.
+
+---
+
+## 15. Stage 3 `C-2` verification evidence (`feat/stage2-flyway-baseline`)
+
+Section §14 described the `C-1` disposition; this one describes `C-2`, the card that gives the tenant a single
+resolution path. Everything above §14 is unchanged, for the reason §13 states.
+
+**Environment.** The same as §14: JDK 21, PostgreSQL 16.15 in container `gms-postgres`, the packaged jar run with
+`--spring.profiles.active=dev` against the **disposable** database `gms_c2_verify`, created empty and built by
+Flyway (5 migrations, `V1` → `V5`). The platform account came from `APP_SUPERADMIN_*` environment variables only.
+No Neon connection was made and the pre-existing `gms` database was not touched.
+
+### 15.1 What changed, measured on the code
+
+| Measure | Before | After |
+|---|---|---|
+| Files that re-parse and re-verify the JWT signature | 41 (325 call sites) | **0** — `util/SecurityUtil.java` deleted, 100 lines |
+| Service methods that take the tenant as a parameter | 221 | **0** — pinned by `TenantParameterArchTest` |
+| Service interfaces rewritten | — | 35 |
+| Service implementations rewritten | — | 31 |
+| Controller locals that became dead | — | 201 removed across 22 files |
+| Reads that re-verified one token three times (username, roles, school) | every controller | **once**, in `JwtAuthenticationFilter` |
+
+The tenant now arrives as a `ThreadLocal` principal that the filter fills from the claims it has already verified and
+clears in a `finally`, so a pooled thread cannot carry one caller's tenant into the next caller's request.
+
+### 15.2 Build and tests
+
+```
+mvn -B clean test
+Tests run: 86, Failures: 0, Errors: 0, Skipped: 0
+BUILD SUCCESS
+```
+
+**86 tests green**: 79 before this card, plus 5 in `TenantContextTest`, 1 in `TenantParameterArchTest` and 1 in
+`GlobalExceptionHandlerTest`.
+
+**One environment trap, recorded so the next person does not lose an hour to it.** The suite must be run on **JDK
+21**, which is what the project targets (`pom.xml` `<java.version>21</java.version>`) and what CI pins
+(`.github/workflows/ci.yml:51`, with the comment *"the project targets 21; JDK 24 breaks Lombok"*). This machine's
+default `java` is **JDK 24**, and on it the run fails with **38 errors** that look like application failures and are
+not:
+
+```
+java.lang.IllegalArgumentException: Unsupported class file major version 68
+    at org.jacoco.agent.rt.internal_4a7f17c.asm.ClassReader.<init>
+```
+
+That is the JaCoCo agent (0.8.10) trying to instrument JDK 24's own classes — class file major version 68 — and it
+is a **tooling** failure, not a test failure. The same suite on JDK 21 is 86/86 green. Fix: run
+`export JAVA_HOME=$(/usr/libexec/java_home -v 21)` first. Bumping JaCoCo to a version that understands class file v68
+would remove the trap for anyone on a newer JDK; it was left alone here because 0.8.10 is the only version in the
+local Maven repository and the change could not be verified offline. `OPS-12` owns that upgrade.
+
+### 15.3 The deliberate-failure control
+
+`TenantContextTest.theTokenIsVerifiedOncePerRequest` asserts `verify(tokenProvider, times(1)).parseClaims(anyString())`.
+To prove the assertion had teeth, a second `tokenProvider.parseClaims(token)` call was added to the filter as a
+deliberate failure. The suite went red on **exactly that one test** ("Wanted 1 time but was 2 times") and the call
+was removed. Without this control a `times(1)` assertion that never fires would look identical to one that holds.
+
+### 15.4 Live run — `scripts/verify-c2-tenant-context.sh`, 32 checks, 0 failures
+
+Run against the running instance and the real database. Two schools, two administrators, a teacher, two classrooms and
+two students were created; every row-level check reads the database through `docker exec`.
+
+| Group | Checks | Measured |
+|---|---|---|
+| Platform login | 1 | 200 |
+| Two schools created | 2 | 200 · 200 |
+| Two administrator logins | 2 | 200 · 200 |
+| School A builds data | 3 | classroom 200 · subject 200 · student 200 |
+| School B builds data | 2 | classroom 200 · student 200 |
+| The tenant is the one in the token | 9 | own student **200** · another school's student **403** · each list holds rows from **exactly one** school · neither list contains the other school's student · the two schools are **different** tenants |
+| The audit trail comes from the token's employee | 7 | teacher list by role **403** · `users.created_by` = the caller's account · `users.school_id` = the caller's school · `students.school_id` = the caller's school · school A's administrator wrote **0** rows in school B |
+| A cross-service check refuses another school's row | 2 | **403** · the refused student was **not written** |
+| A token that does not verify | 2 | tampered **401** · no token **401** |
+| The platform owner is not a tenant | 2 | lists schools **200** · sees both new schools |
+
+The row-level checks report **SKIP**, never PASS, when `GMS_VERIFY_DB` is not set.
+
+### 15.5 The regression check — `scripts/verify-c1-tenancy.sh`, 29 checks, 0 failures
+
+`C-1`'s script was re-run against the same build and the same instance. Every check still passes, including the
+cross-tenant refusals (403 for another school's row, 404 for a row that is not there, 409 for a referenced row).
+
+### 15.6 Two defects the review found, and one the live run found
+
+| Defect | How it was found | Effect if shipped | Repair |
+|---|---|---|---|
+| The transformation rewrote the **string literal** `"schoolId"` inside three `BeanUtils.copyProperties` ignore-lists into `"TenantContext.schoolId()"` | diff review — the rewrite was textual, not syntactic | the ignore list names no bean property, so the property stops being ignored | restored to `"schoolId"`; the grep for `"[^"]*TenantContext\.` now returns nothing |
+| `AuthController.selfRegister` called `findByEmployee_Id(employee.getId())` — the employee **being registered**, who is not the caller. The rewrite made it the caller's own employee | a scripted audit of every identity argument at every call site against `HEAD` | the endpoint is unauthenticated, so the context is empty, the uniqueness check silently passes, and an employee can hold two accounts | `UserService.existsByEmployee_Id(Integer subjectEmployeeId)` — the employee is the subject of the question, and the parameter is named for what it is |
+| A cross-tenant refusal answered **400** on the write path and **403** on the read path | the live run: `POST /api/v1/students/create` naming another school's classroom answered 400 | the same refusal had two answers depending on the endpoint | 23 refusals now throw `TenantAccessDeniedException extends AccessDeniedException`; both paths answer 403 |
+
+The scripted audit in the second row is the one worth keeping: it read every service interface at `HEAD`, recorded the
+old parameter order, and listed every call site whose identity argument was **not** the caller's own id. It reported
+12 suspects, of which 9 were the caller's own token lookup (`SecurityUtil.getSchoolIdFromToken()`), 1 was
+`employee.getId()`, 1 was `student.getSchoolId()`, and 2 were a literal `null`.
+
+### 15.7 One deliberate behaviour change
+
+`ParentServiceImpl.getChildFees` called `studentFeeService.getStudentFeesByStudent(studentId, null)`. The callee
+compared `student.getSchoolId().equals(null)` — always false — so it answered **403**, and the parent saw an **empty**
+fee list for every child, always. The tenant now comes from the context, the comparison is against the caller's
+school, and the query is school-scoped in SQL. The parent's fee list is now populated. This is a fix; it is recorded
+because it changes what a parent sees.
+
+### 15.8 What `C-2` does not close
+
+`C-2` gives every service one way to learn the tenant. It does not give every **query** a school predicate. The
+queries that still span schools, and are `C-3`'s work list:
+
+`resultRepository.findByStudentExam_Student_Id` · `studentExamRepository.findByStudentId` ·
+`feePaymentRepository.findByStudentFee_Student_Id` · `invoiceRepository.findByStudentId` ·
+`receiptRepository.findByStudentId` · `attendanceRepository.findByStudent_IdAndDateBetween` ·
+`timetableRepository.findByClassroom_Id` · `teacherAssignmentRepository.findByTeacher_Id` ·
+`parentRepository.findByStudentsId` · `userRepository.findByRole`
+
+`TEN-01` is therefore **partly** closed: the tenant is unambiguous and cannot be named wrongly, but eight of the
+fifteen endpoints it names still need a school-scoped query.
+
+### 15.9 State left on this machine by `C-2`
+
+* Container `gms-postgres` is running and holds four databases: `gms` (pre-existing, **untouched**),
+  `gms_flyway_verify`, `gms_c1_verify` and `gms_c2_verify` (the three disposable ones built by Flyway during these
+  verifications). `docker compose down -v` removes the container and all four.
+* The backend was left **running** on `:8080` against `gms_c2_verify`, started from the packaged jar with
+  `APP_SUPERADMIN_*` and `SECURITY_JWT_SECRET` supplied as environment variables for that run only. Stop with
+  `lsof -ti tcp:8080 | xargs kill`.
+* `/tmp/gms-c2-backend.log` holds the boot log referenced above and `/tmp/gms-c1-secret.env` (mode 600) holds the
+  disposable platform password. Both are outside the repository and contain no credential material in the repository.

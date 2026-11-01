@@ -3,9 +3,9 @@ package com.gms.controller;
 import com.gms.model.entity.Classroom;
 import com.gms.model.request.ClassroomRequest;
 import com.gms.model.response.ClassroomResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.ClassroomService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -36,33 +36,33 @@ public class ClassroomController {
     @PostMapping("/create")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ClassroomResponse> create(@Valid @RequestBody ClassroomRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return classroomService.create(request, empId, schoolId);
+        return classroomService.create(request);
     }
 
     @PutMapping("/update")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ClassroomResponse> update(@Valid @RequestBody ClassroomRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return classroomService.update(request, empId, schoolId);
+        return classroomService.update(request);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<Classroom>> getAll() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Classroom> list = classroomService.findBySchool(schoolId);
+        List<Classroom> list = classroomService.findBySchool();
         if (list.isEmpty()) return ResponseEntity.noContent().build();
         return ResponseEntity.ok(list);
     }
@@ -70,12 +70,12 @@ public class ClassroomController {
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<Classroom> getById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
         try {
-            Classroom classroom = classroomService.getById(id, schoolId);
+            Classroom classroom = classroomService.getById(id);
             return ResponseEntity.ok(classroom);
         } catch (jakarta.persistence.EntityNotFoundException ex) {
             return ResponseEntity.status(404).build();
@@ -96,11 +96,11 @@ public class ClassroomController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        if (!classroomService.deleteWithinSchool(id, schoolId)) {
+        if (!classroomService.deleteWithinSchool(id)) {
             return ResponseEntity.notFound().build();
         }
         return ResponseEntity.noContent().build();
@@ -109,12 +109,12 @@ public class ClassroomController {
     @PatchMapping("/toggle")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> toggleActive(@RequestParam Integer id, @RequestParam Boolean isActive) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        Integer empId = TenantContext.employeeId();
+        Integer schoolId = TenantContext.schoolId();
         if (empId == null || schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        return classroomService.toggleClassroom(id, isActive, schoolId, empId);
+        return classroomService.toggleClassroom(id, isActive);
     }
 
     @GetMapping("/teacher/assigned")

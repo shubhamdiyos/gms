@@ -10,35 +10,35 @@ import java.util.List;
 
 public interface AnnouncementService {
 
-    ResponseEntity<AnnouncementResponse> createAnnouncement(AnnouncementRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<AnnouncementResponse> createAnnouncement(AnnouncementRequest request);
 
-    ResponseEntity<AnnouncementResponse> updateAnnouncement(Integer id, AnnouncementRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<AnnouncementResponse> updateAnnouncement(Integer id, AnnouncementRequest request);
 
-    ResponseEntity<?> deleteAnnouncement(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteAnnouncement(Integer id);
 
-    ResponseEntity<List<Announcement>> getAllAnnouncements(Integer schoolId);
+    ResponseEntity<List<Announcement>> getAllAnnouncements();
 
-    ResponseEntity<Announcement> getAnnouncementById(Integer id, Integer schoolId);
+    ResponseEntity<Announcement> getAnnouncementById(Integer id);
 
-    ResponseEntity<List<Announcement>> getPublishedAnnouncements(Integer schoolId);
+    ResponseEntity<List<Announcement>> getPublishedAnnouncements();
 
-    ResponseEntity<List<Announcement>> getAnnouncementsByTargetAudience(Integer schoolId, String targetAudience);
+    ResponseEntity<List<Announcement>> getAnnouncementsByTargetAudience(String targetAudience);
 
-    ResponseEntity<List<Announcement>> getAnnouncementsByType(Integer schoolId, String announcementType);
+    ResponseEntity<List<Announcement>> getAnnouncementsByType(String announcementType);
 
-    ResponseEntity<List<Announcement>> getAnnouncementsByCategory(Integer schoolId, String category);
+    ResponseEntity<List<Announcement>> getAnnouncementsByCategory(String category);
 
-    ResponseEntity<List<Announcement>> getAnnouncementsByPriority(Integer schoolId, String priority);
+    ResponseEntity<List<Announcement>> getAnnouncementsByPriority(String priority);
 
-    ResponseEntity<List<Announcement>> getActiveAnnouncements(Integer schoolId);
+    ResponseEntity<List<Announcement>> getActiveAnnouncements();
 
-    ResponseEntity<List<Announcement>> getPinnedAnnouncements(Integer schoolId);
+    ResponseEntity<List<Announcement>> getPinnedAnnouncements();
 
-    ResponseEntity<Long> countPublishedAnnouncements(Integer schoolId);
+    ResponseEntity<Long> countPublishedAnnouncements();
 
-    ResponseEntity<Long> countPinnedAnnouncements(Integer schoolId);
+    ResponseEntity<Long> countPinnedAnnouncements();
 
-    ResponseEntity<?> publishAnnouncement(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> publishAnnouncement(Integer id);
 
-    ResponseEntity<?> unpublishAnnouncement(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> unpublishAnnouncement(Integer id);
 }

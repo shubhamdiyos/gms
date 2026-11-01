@@ -8,6 +8,7 @@ import com.gms.model.response.GradingSchemeResponse;
 import com.gms.repository.GradingSchemeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.GradingSchemeService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -31,13 +32,13 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
     }
 
     @Override
-    public ResponseEntity<GradingSchemeResponse> createGradingScheme(GradingSchemeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<GradingSchemeResponse> createGradingScheme(GradingSchemeRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create grading scheme
@@ -60,18 +61,18 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
     }
 
     @Override
-    public ResponseEntity<GradingSchemeResponse> updateGradingScheme(Integer id, GradingSchemeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<GradingSchemeResponse> updateGradingScheme(Integer id, GradingSchemeRequest request) {
         // Validate grading scheme exists
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
         // Validate school
-        if (!gradingScheme.getSchool().getId().equals(schoolId)) {
+        if (!gradingScheme.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update grading scheme
@@ -91,18 +92,18 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
     }
 
     @Override
-    public ResponseEntity<?> deleteGradingScheme(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteGradingScheme(Integer id) {
         // Validate grading scheme exists
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
         // Validate school
-        if (!gradingScheme.getSchool().getId().equals(schoolId)) {
+        if (!gradingScheme.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting active to false
@@ -114,17 +115,17 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
     }
 
     @Override
-    public ResponseEntity<List<GradingScheme>> getAllGradingSchemes(Integer schoolId) {
-        List<GradingScheme> gradingSchemes = gradingSchemeRepository.findBySchoolIdAndIsActive(schoolId, true);
+    public ResponseEntity<List<GradingScheme>> getAllGradingSchemes() {
+        List<GradingScheme> gradingSchemes = gradingSchemeRepository.findBySchoolIdAndIsActive(TenantContext.schoolId(), true);
         return ResponseEntity.ok(gradingSchemes);
     }
 
     @Override
-    public ResponseEntity<GradingScheme> getGradingSchemeById(Integer id, Integer schoolId) {
+    public ResponseEntity<GradingScheme> getGradingSchemeById(Integer id) {
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        if (!gradingScheme.getSchool().getId().equals(schoolId)) {
+        if (!gradingScheme.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 

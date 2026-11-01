@@ -211,6 +211,42 @@ One unrelated defect was found and fixed on the way, and it was not a Stage 3 fi
 in the same way — a method mismatch answered 500 instead of 405, and a delete the database refused because another row
 still referenced it answered 500 instead of 409. `GlobalExceptionHandler` now maps all three.
 
+### 5.3 Status after Stage 3 `C-2` (2026-11-01, `feat/stage2-flyway-baseline`)
+
+**The first clause of `SEC-REMED` is met.** The audit's own sentence for it was: *"Tenant is re-derived per call from
+the raw HTTP header by a static holder (`util/SecurityUtil.java:59-99`) rather than from the already-authenticated
+`SecurityContext`."* That is no longer true. `SecurityUtil` is deleted; `JwtAuthenticationFilter` parses the claims
+**once** and puts the tenant, the employee and the roles into `security/TenantContext`, a request-scoped holder cleared
+in a `finally` so a pooled thread cannot carry one caller's tenant into the next caller's request. 221 service methods
+no longer take the tenant as a parameter, and `TenantParameterArchTest` fails the build if one ever does again.
+
+What this closes, precisely:
+
+* **The signature re-verification.** `SecurityUtil` re-parsed *and re-verified* the JWT signature on every one of its
+  325 call sites across 41 files — the same token was checked three times in most controllers (username, roles,
+  school) and again in every service that wanted the tenant.
+* **The parameter a caller may forget or get wrong.** A service method that takes `schoolId` can be called with the
+  wrong one. There is no longer such a parameter to get wrong: the tenant is a property of the request, not of the
+  call.
+* **The audit trail as a parameter.** `UserServiceImpl` now resolves the creator from the context, so `created_by`
+  cannot be pointed at somebody else's account by a caller.
+
+*Evidence:* `TenantContextTest` (5 cases), `TenantParameterArchTest` (1 case), `GlobalExceptionHandlerTest` (9 cases),
+`scripts/verify-c2-tenant-context.sh` (32 live checks against the packaged jar on PostgreSQL 16.15, 0 failures) and
+`scripts/verify-c1-tenancy.sh` re-run against the same build (29 live checks, 0 failures); the deliberate-failure
+control red on exactly the "parsed once" assertion; full suite **86 green**.
+
+**What is still open.** `SEC-REMED`'s second clause — *"every tenant-scoped repository method takes the tenant as a
+mandatory parameter"* — is `C-3`, and it is the half that matters for a cross-tenant **read**. `C-2` made the tenant
+unambiguous; it did not make every query school-scoped. The queries that still span schools are listed in
+[BASELINE_STATUS.md §15.8](BASELINE_STATUS.md) and are the remaining part of `TEN-01`. The audit's own rows for
+`TEN-01` — the cross-tenant reads on `/fee-payments/student/{id}`, `/invoices/student/{id}`,
+`/receipts/student/{id}`, `/results/student/{id}`, `/student-exams/student/{id}` and `/attendance/student/{id}` — are
+therefore **not** closed by this card, and the table in §4 must not be read as saying otherwise.
+
+One inconsistency was closed along the way because the live run exposed it: a cross-tenant refusal answered **400** on
+the write path and **403** on the read path. 23 refusals now throw `TenantAccessDeniedException`, which extends
+`AccessDeniedException`, so both paths answer 403.
 
 ### SEC-REMED — the invariant to introduce
 

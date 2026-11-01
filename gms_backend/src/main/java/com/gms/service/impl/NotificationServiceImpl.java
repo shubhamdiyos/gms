@@ -8,6 +8,7 @@ import com.gms.model.response.NotificationResponse;
 import com.gms.repository.NotificationRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.NotificationService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -33,13 +34,13 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<NotificationResponse> createNotification(NotificationRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<NotificationResponse> createNotification(NotificationRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create notification
@@ -69,18 +70,18 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request) {
         // Validate notification exists
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
         // Validate school
-        if (!notification.getSchool().getId().equals(schoolId)) {
+        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update notification
@@ -105,18 +106,18 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<?> deleteNotification(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteNotification(Integer id) {
         // Validate notification exists
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
         // Validate school
-        if (!notification.getSchool().getId().equals(schoolId)) {
+        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting delivery status to CANCELLED
@@ -128,17 +129,17 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getAllNotifications(Integer schoolId) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndDeliveryStatusOrderByCreatedOnDesc(schoolId, "PENDING");
+    public ResponseEntity<List<Notification>> getAllNotifications() {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndDeliveryStatusOrderByCreatedOnDesc(TenantContext.schoolId(), "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<Notification> getNotificationById(Integer id, Integer schoolId) {
+    public ResponseEntity<Notification> getNotificationById(Integer id) {
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        if (!notification.getSchool().getId().equals(schoolId)) {
+        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -146,15 +147,15 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByRecipientType(Integer schoolId, String recipientType) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(schoolId, recipientType, "PENDING");
+    public ResponseEntity<List<Notification>> getNotificationsByRecipientType(String recipientType) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(TenantContext.schoolId(), recipientType, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByUserId(Integer schoolId, Integer userId) {
+    public ResponseEntity<List<Notification>> getNotificationsByUserId(Integer userId) {
         List<Notification> notifications = notificationRepository
-                .findBySchoolIdAndRecipientTypeAndDeliveryStatus(schoolId, "INDIVIDUAL", "PENDING")
+                .findBySchoolIdAndRecipientTypeAndDeliveryStatus(TenantContext.schoolId(), "INDIVIDUAL", "PENDING")
                 .stream()
                 .filter(notification -> addressesUser(notification.getRecipientIds(), userId))
                 // the deleted query carried ORDER BY created_on DESC; the sort moves here rather than disappearing
@@ -187,43 +188,43 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getScheduledNotifications(Integer schoolId, LocalDateTime scheduledTime) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(schoolId, scheduledTime, "PENDING");
+    public ResponseEntity<List<Notification>> getScheduledNotifications(LocalDateTime scheduledTime) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(TenantContext.schoolId(), scheduledTime, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByType(Integer schoolId, String notificationType) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndNotificationTypeAndDeliveryStatus(schoolId, notificationType, "PENDING");
+    public ResponseEntity<List<Notification>> getNotificationsByType(String notificationType) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndNotificationTypeAndDeliveryStatus(TenantContext.schoolId(), notificationType, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByPriority(Integer schoolId, String priority) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndPriorityAndDeliveryStatus(schoolId, priority, "PENDING");
+    public ResponseEntity<List<Notification>> getNotificationsByPriority(String priority) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndPriorityAndDeliveryStatus(TenantContext.schoolId(), priority, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<Long> countPendingNotifications(Integer schoolId) {
-        Long count = notificationRepository.countPendingNotificationsBySchoolId(schoolId);
+    public ResponseEntity<Long> countPendingNotifications() {
+        Long count = notificationRepository.countPendingNotificationsBySchoolId(TenantContext.schoolId());
         return ResponseEntity.ok(count);
     }
 
     @Override
-    public ResponseEntity<Long> countUnreadNotifications(Integer schoolId) {
-        Long count = notificationRepository.countUnreadNotificationsBySchoolId(schoolId);
+    public ResponseEntity<Long> countUnreadNotifications() {
+        Long count = notificationRepository.countUnreadNotificationsBySchoolId(TenantContext.schoolId());
         return ResponseEntity.ok(count);
     }
 
     @Override
-    public ResponseEntity<?> markNotificationAsRead(Integer id, Integer schoolId) {
+    public ResponseEntity<?> markNotificationAsRead(Integer id) {
         // Validate notification exists
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
         // Validate school
-        if (!notification.getSchool().getId().equals(schoolId)) {
+        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -235,9 +236,9 @@ public class NotificationServiceImpl implements NotificationService {
     }
 
     @Override
-    public ResponseEntity<?> sendScheduledNotifications(Integer schoolId) {
+    public ResponseEntity<?> sendScheduledNotifications() {
         LocalDateTime now = LocalDateTime.now();
-        List<Notification> scheduledNotifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(schoolId, now, "PENDING");
+        List<Notification> scheduledNotifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(TenantContext.schoolId(), now, "PENDING");
         
         // In a complete implementation, we would actually send these notifications
         // For now, we'll just return the list
