@@ -391,8 +391,10 @@ commit whose message argued that documentation changes should not cost builds. `
 sets, and the negative control is free: the PR that lands this paragraph touches `docs/**` and `infra/oci/README.md`
 only, so it starts **no** `ci.yml` run — same repository, same class of edit, six jobs then and zero now. What that
 buys is stated in the audit rather than glossed here: a prose-only change is now unverified by CI *by design*, so a
-wrong sentence in `docs/` cannot fail a build. That is the accepted half of INF-10's trade, and it is another reason
-the required-checks decision outranks the runner-minute saving.
+wrong sentence in `docs/` cannot fail a build. The control ran on this paragraph's own PR: head commit
+`a5e2c0abcbd12d1c5d2c816c85975c2bbc5004e4` returns **zero** workflow runs from `GET /actions/runs?head_sha=`. That is
+the accepted half of INF-10's trade, and it is another reason the required-checks decision outranks the runner-minute
+saving.
 
 The count is stated as twelve rather than as "every PR this year" because of what the API can and cannot prove.
 `GET /pulls/N/reviews` was called once per PR for #10 through #22 and returned an empty array twelve times, so none of
