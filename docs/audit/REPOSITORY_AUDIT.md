@@ -539,6 +539,15 @@ Status vocabulary — **Verified** = observed at runtime or asserted by an execu
 in `HEAD` but the behaviour was not observed · **Open** = untouched by this branch · **Owner** = requires an action
 outside the repository.
 
+Citation vocabulary — every `file:line` in §1–§14 is a **baseline coordinate**: it names where the evidence sat when the
+finding was written, and it is deliberately **not** renumbered when later remediation shifts the file. A finding that
+has been partly fixed keeps its original coordinate because that is the only place the described code still exists.
+Coordinates that describe a *live* defect in a file a later PR edited are re-measured, in the row that reports that
+edit, with the old and new numbers both stated. The register previously had no such rule, and that was not hypothetical:
+PR #21 moved six still-live citations in three `Notification*` files, and INFRASTRUCTURE_AUDIT item 17 — which claimed
+every coordinate had been re-verified — had itself left `ci.yml:32` pointing at `backend:` instead of `permissions:`.
+See [§16.2](#162-citation-drift-caused-by-pr-21-and-pr-22) for the measured shifts.
+
 | Finding | Status | Evidence |
 |---|---|---|
 | SEC-01 committed Neon credential | **Owner** | The literals are gone from `application.properties:24-26` (`${DB_URL:}` etc.), which is a repository change only. The credential in git history is still valid until rotated; `git log -p` still shows it. Revocation is the owner's action and no amount of code change performs it. |
@@ -563,7 +572,7 @@ outside the repository.
 | OPS-11 debug logging in every profile | **Verified** | Base and prod default to INFO (`application.properties:95-98`); DEBUG is only what `application-dev.properties` opts into, and `StartupSecurityValidator` refuses to boot with `com.gms` at DEBUG/TRACE outside `dev`. |
 | OPS-14 no test suite | **Changed** | 42 backend tests now execute under `mvn verify` (36 from M1, plus the 6 recipient-matching cases in §16.1) and JaCoCo writes a report; `mvn -DskipTests` is no longer the only command that works. Frontend still has zero tests (FE-14) and no Playwright/Testcontainers coverage — that is M3. |
 | FE Quick-Login default credential button | **Verified** | Removed from `Login.jsx`, along with the blank `defaultValues`; the "Clear Storage & Logout" escape hatch is retained. |
-| Deploy workflow triggered by documentation edits | **Verified** | `deploy-backend.yml` `paths:` narrowed to backend/runtime inputs and `ci.yml` ignores docs. Two observations: run 41245769175 proves a `master` push touching `gms_backend/src/**` triggers the deploy, and PR #11 — documentation-only — started **no** `ci.yml` run at all, which is the `paths-ignore` contract seen from the negative side. Still unproven: a docs-only *push to `master`* not triggering the deploy (the workflow fires on push, so that case needs a docs commit on `master` to observe). |
+| Deploy workflow triggered by documentation edits | **Verified**, then made moot — PR #13 deleted `deploy-backend.yml` | `deploy-backend.yml`'s `paths:` was narrowed to backend/runtime inputs and `ci.yml` ignores docs. Two observations: run 41245769175 proves a `master` push touching `gms_backend/src/**` triggered the deploy, and PR #11 — documentation-only — started **no** `ci.yml` run at all, which is the `paths-ignore` contract seen from the negative side. That negative side then broke on its own file: PR #20 changed four `docs/` files plus `infra/oci/README.md` and `*.md` reaches only one directory level, so six jobs ran for markdown; PR #22 added `infra/**/*.md`, and the runner-seconds are in [INFRASTRUCTURE_AUDIT §7.2](../infrastructure/INFRASTRUCTURE_AUDIT.md). Still unproven at the moment it was deleted: a docs-only *push to `master`* not triggering the deploy (the workflow fired on push, so that case needed a docs commit on `master` to observe) |
 | SSH host-key verification disabled in deploy | **Verified** | `SSH_OPTS` pins `StrictHostKeyChecking=yes` with a `known_hosts` file, and the job fails when `EC2_SSH_KNOWN_HOSTS` is unset. Run 41245769175 log: `##[error]secret EC2_SSH_KNOWN_HOSTS is not set … Deploy is refused rather than run with host-key checking disabled`. This is the only control in this table with a **production-path** runtime proof rather than a local one. |
 | Dead password utilities packaged in the jar | **Verified** | `util/PasswordEncoderTest.java`, `util/PasswordVerificationTest.java`, `util/PasswordTestUtil.java`, the committed `PasswordVerificationTest.class` and the top-level `JwtDecoder.java` are deleted; the tracked-file list contains no `.class` entry. |
 
@@ -574,12 +583,40 @@ outside the repository.
 | TEN-03 recipient matching | **Verified** (unit) | The `LIKE %:userId%` query is deleted, and `getNotificationsByUserId` filters the school-scoped `INDIVIDUAL`/`PENDING` finder on numeric-token equality. `NotificationRecipientMatchTest` (6 cases; `mvn verify` → **42 tests, 0 failures**) asserts that user 1 does **not** collect `[11]`, `[21]`, `[210]`, `[100]`, `[1234]`, that `[1,7]` **is** collected, that `null`/`""`/`[abc]`/`[99999999999]` match nobody, that the repository is asked only for this school's individual pending rows, and that `ORDER BY created_on DESC` survived being moved out of SQL. **Not observed against PostgreSQL:** there is still no integration harness (§17), so the query plan and what the 1000-character column really contains in production remain unmeasured. |
 | TEN-03 `/notifications/user/{id}` | **Changed** | Now `ADMIN`/`SUPERADMIN` only. Nothing on the path ever compared the id to the caller, and the SPA has no call site (`apiSlice.js` uses `/notifications/{id}/read` alone), so this removes the surface by narrowing rather than by resolving the principal — a defensible trade only while no non-admin consumer exists, and the day one does the fix is a caller check, not a wider `@PreAuthorize`. |
 | TEN-03 shared `readStatus` | **Open** | `markNotificationAsRead` still flips one flag for every recipient of a multi-recipient notification. Per-recipient state is a schema change, and the Flyway baseline has not been cut, so editing it now means changing a schema no migration owns yet. |
-| DB-04 (the root cause) | **Open** | `recipient_ids` remains a validated-nowhere `String` copied verbatim from `NotificationRequest` at `NotificationServiceImpl:55,94`. That is why the reader parses tolerantly instead of assuming `[1,2]`, and why normalising the column into a join table is still the real fix. |
+| DB-04 (the root cause) | **Open** | `recipient_ids` remains a validated-nowhere `String` copied verbatim from `NotificationRequest` at `NotificationServiceImpl:56,95` (baseline `:55,94` — see §16.2). That is why the reader parses tolerantly instead of assuming `[1,2]`, and why normalising the column into a join table is still the real fix. |
 
 The cost note belongs here because the change moves work rather than removing it: the predicate used to run inside SQL
 as a text scan, and now a school's individual pending notifications are fetched and filtered in the service. Correct
 where the `LIKE` was not, bounded by that school's unread volume rather than by an index on an unqueryable column. If
 that volume ever makes it slow, the answer is DB-04's join table — not the `LIKE` coming back.
+
+### 16.2 Citation drift caused by PR #21 and PR #22
+
+Both PRs edited files that §1–§14 and the infrastructure audit point into, so the coordinates moved. This table is the
+single lookup the citation convention above promises; nothing in §1–§14 was renumbered in place, because a baseline
+coordinate is where the described code actually sat.
+
+| File | Cited as | Now at | What is there |
+|---|---|---|---|
+| `NotificationServiceImpl.java` | `:132` (§3 BKL-01) | `:133` | `getAllNotifications` returning `ResponseEntity` |
+| `NotificationServiceImpl.java` | `:91-94` (§6 FIN-07) | `:92-95` | verbatim `setChannel`/`setPriority`/`setRecipientType`/`setRecipientIds` |
+| `NotificationServiceImpl.java` | `:55` and `:94` (§5 DB-04, §16.1) | `:56` and `:95` | the two `setRecipientIds(request.getRecipientIds())` copies |
+| `NotificationServiceImpl.java` | `:62-63` (§8 COM-01) | `:63-64` | `PENDING` + `UNREAD` stamped on create |
+| `NotificationServiceImpl.java` | `:133,151,157,163,169,175` (§8 COM-01) | `:134,152,159,193,199,205` | the six `deliveryStatus = 'PENDING'` list queries |
+| `NotificationServiceImpl.java` | `:210-217` (§8 COM-01) | `:240-247` | the self-admitted `sendScheduledNotifications` stub |
+| `NotificationController.java` | `:117` (§5 SEC-14, §10 FE contract) | `:121` | `@PutMapping("/{id}/mark-read")` |
+| `NotificationRepository.java` | `:21-22` (§5 TEN-03) | *nowhere* | the `LIKE %:userId%` query is deleted; §16.1 carries the replacement |
+| `ci.yml` | `:11-22` (INF-23 evidence) | `:14-28` | both `paths-ignore` lists |
+| `ci.yml` | `:51-56` / `:58-65` (INF-16) | `:57-62` / `:64-71` | the two `upload-artifact` steps |
+| `ci.yml` | `:94` (INF-17 lint flag) | `:99` | `continue-on-error: true` |
+| `ci.yml` | `:32` (INF-10, readiness matrix) | `:34-35` | `permissions: {contents: read}` — **`:32` was never this**, in any revision |
+
+`gms_frontend/vercel.json` and `deploy-backend.yml` are also cited in the infrastructure audit and were *deleted* by
+PR #13, so those pointers resolve nowhere on `master` by design; the audit rows that report the deletion already say
+so. Everything else in the two audits' citation sets was re-checked against `master` at `3b6a6a5` for this pass and did
+not move, because no PR since `483a41c` has touched compose, `Dockerfile`, `.properties` or `pom.xml`:
+`git diff --name-only 483a41c..3b6a6a5 | grep -v '\.md$'` returns exactly 20 paths — three workflows, four backend
+classes, `gms_frontend/vercel.json` and twelve files under `infra/oci/`.
 
 ## 17. What M1 could not verify, and why
 

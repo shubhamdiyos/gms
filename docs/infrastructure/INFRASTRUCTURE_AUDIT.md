@@ -37,7 +37,7 @@ response retrieved this session.
 | 14 | `gh api accounts/shubhamdiyos/settings/billing/actions` → HTTP 404 | metered Actions usage is **not** readable through the REST API for a personal account; the quota check in §5 is arithmetic, not telemetry |
 | 15 | `psql 'select pg_size_pretty(pg_database_size('gms'))'` and a `pg_dump \| gzip -1` on the **local dev** database | 9.4 MB database, 12.7 KB compressed dump — the backup sizing input in §5.3 |
 | 16 | `grep -rn "logging.pattern" gms_backend/src/main/resources` → no match, plus reading `TraceIdFilter.java` | the filter *is* registered; no log pattern prints the id — INF-15, and a correction (§6.6) |
-| 17 | **Independent re-verification of every `file:line` citation in this file** against the source, not against other documents | four citations were wrong and are corrected here rather than quietly patched: `nginx.conf:1`→`:2`, `ci.yml:36-40`→`:51-56`, "15 Makefile recipes"→**16 of 17**, and OPS-15's "`*.class` rule absent" (`*.class` is at `.gitignore:28`, added by M1). Everything else confirmed, including all compose, Dockerfile, workflow, properties and `pom.xml` line numbers |
+| 17 | **Independent re-verification of every `file:line` citation in this file** against the source, not against other documents | four citations were wrong and are corrected here rather than quietly patched: `nginx.conf:1`→`:2`, `ci.yml:36-40`→`:51-56`, "15 Makefile recipes"→**16 of 17**, and OPS-15's "`*.class` rule absent" (`*.class` is at `.gitignore:28`, added by M1). **"Everything else confirmed" did not survive re-running this method on 2026-11-01:** `ci.yml:32` (cited as the `permissions:` block in INF-10 and in the readiness matrix) has never pointed at `permissions:` in any revision of that file, so this row is now "found five, not four". "Confirmed" was also always revision-relative: `ci.yml:51-56`, `:58-65` and `:94` were exact at `483a41c`/`13bc2ed` and read `:57-62`, `:64-69` and `:99` on `master` today, because PR #18 and PR #22 both grew `ci.yml`. Workflow coordinates here are stated against `483a41c` unless they name a commit |
 
 Where a claim could not be tested, it is in [§8](#8-what-could-not-be-tested-and-what-is-blocked-on-the-owner), not in a finding.
 
@@ -342,8 +342,9 @@ refused by the workflow.
 `enforce_admins.enabled = false`. Reviews are configured (`required_approving_review_count = 1`,
 `require_last_push_approval = true`, `dismiss_stale_reviews = true`) but admins bypass them — and PR #10 was in
 fact merged with `--admin` on 2026-10-31, which is on the record in
-[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It is now the normal path rather than the exception**: nine
-consecutive PRs (#10–#18) merged with zero recorded reviews, the closest pair nine seconds apart, and the full count
+[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It is now the normal path rather than the exception**: twelve
+consecutive PRs (#10–#22, #19 closed unmerged as the guard-deletion control) merged with zero recorded reviews, the
+closest pair nine seconds apart, and the full count
 with its merge SHAs and timestamps is carried in [§11 below](#11-what-i-can-execute-directly-and-the-genuine-human-blockers)
 rather than restated here. The ninth of those merges is the one that settles what the finding means: PR #18 added a
 fourth CI job whose seven assertions ran green twice — on the pull request and again on the push to `master` at its own
@@ -357,8 +358,14 @@ on it was reported and explicitly authorized by the owner before the merge.
 `gh api …/environments/Production` and `/Preview` both
 return `protection_rules: []` with `can_admins_bypass: true`. Neither workflow declared `environment:`
 (`grep -n environment .github/workflows/*.yml` → no match), and `deploy-backend.yml` had no top-level
-`permissions:` block, so every run received a default-writable `GITHUB_TOKEN`. `ci.yml:32` does declare
-`permissions: {contents: read}`. *Tense note: `deploy-backend.yml` is deleted by PR #13, so the second half of that
+`permissions:` block, so every run received a default-writable `GITHUB_TOKEN`. `ci.yml:34-35` does declare
+`permissions: {contents: read}` — and that coordinate is itself a correction, not a re-derivation. This file and the
+readiness matrix both pointed at `ci.yml:32`, which has never been `permissions:` in any revision: it was line 28 at
+`483a41c` (the commit this audit merged in), 29 from PR #14, and 34 from PR #22, while line 32 is `  backend:` at
+`483a41c` and `jobs:` at `13bc2ed` — the revision the adjacent lint measurement was taken against. Item 17 in §2 says
+every `file:line` citation in this file was re-verified against the
+source and that four were wrong; this is the fifth, and it survived that pass — so the claim is now qualified rather
+than repeated. *Tense note: `deploy-backend.yml` is deleted by PR #13, so the second half of that
 sentence describes `master` until #13 merges — and its deletion is what let the new gate's `permissions:` guard pass
 instead of failing.*
 
@@ -494,7 +501,8 @@ key is proven to be outside the repository and outside the image.
 *(Found after the register was drafted, and filed here because it is the last HIGH — see §3 on why the id sorts out
 of numeric sequence.)*
 
-**Evidence.** `ci.yml:11-22` puts `.github/**` in **both** `paths-ignore` lists, so no change to any workflow can
+**Evidence.** `ci.yml:14-28` (at `3b6a6a5`; `:11-22` at the baseline this finding was written) puts `.github/**` in
+**both** `paths-ignore` lists, so no change to any workflow can
 cause a workflow run to check it. Observed directly: `6198d86` — the only commit on this branch that touches
 `.github/workflows/ci.yml`, 6 comment lines — was pushed to PR #11 and `gh run list --branch infra/gms-platform-audit`
 still returns **empty** (checked again for this entry). Nothing else in the repository parses YAML or validates
@@ -867,7 +875,7 @@ outright wrong.
 | `docker compose build backend frontend` | executed for §13; reported in §7.1 |
 | Frontend lint | **47 errors / 22 files** — unchanged, advisory. The flag is `continue-on-error: true` at `ci.yml:94` (measured: `- name: Lint` is `ci.yml:86`, and the step's own comment block carries the flag to 94). It stays advisory until the frontend contract package fixes the errors, per INF-17 — making it blocking now would gate on noise |
 | Backend unit tests (`mvn -B verify` in CI) | **PASS** in CI runs 41245769121 / 41245531864 / 41245233160 |
-| Docs-only change starts no build | **PASS (negative case exercised)** — PR #11 is documentation-only and produced **no** `ci.yml` run (`gh run list` shows nothing for the branch), which is the `paths-ignore` contract at `ci.yml:11-22` observed from the other side. The deploy workflow's `paths:` filter is not proven by this, since it triggers only on `push` to `master`. |
+| Prose-only change starts no build | **PASS, then FAIL, then PASS — and the last two are the same file.** PR #11 (documentation-only, everything under `docs/`) produced **no** `ci.yml` run, which is the `paths-ignore` contract observed from the negative side. PR #20 falsified the general form of that claim: it changed four `docs/` files plus `infra/oci/README.md`, and because `*.md` matches one directory level while `docs/**` matches below it, that single nested prose file started all three jobs twice — runs 41290349536 and 41290409900, **140 runner-seconds for markdown**. PR #22 added `infra/**/*.md` to both trigger sets, and the negative control costs nothing: the PR that lands this row touches `docs/**` and `infra/oci/README.md` only, so its head commit's run list is empty — same repository, same class of edit, six jobs then and zero now. Also obsolete as a question: the deploy workflow's `paths:` filter was never proven by any of these (it fired only on `push` to `master`), and `deploy-backend.yml` no longer exists to be filtered |
 | A Vercel GitHub App is already in the delivery path | **observed** — PR #11 reports `Vercel / pass` against `shubhamdiyos-projects/gms-react`, so preview deployments are built per PR by a third party that no document in this repository names. Relevant to ADR-013 and to §8's privacy review: the access policy of those preview URLs is unverified. |
 | A workflow file edited on a PR branch starts **no** check | **FAIL — INF-23 proved by execution.** Commit `6198d86` changed `.github/workflows/ci.yml` (6 lines) and was pushed to PR #11; `gh run list --branch infra/gms-platform-audit` afterwards returns **empty**. `.github/**` is in both `paths-ignore` lists, so the gate that runs the tests cannot validate a change to itself, and GitHub reports a workflow that never ran as the *absence* of a check rather than a failure. Remediated by PR #14; see the status block in INF-23. |
 | `scripts/verify-security.sh` (18 assertions) | **18/18 PASS** locally, recorded in [BASELINE_STATUS.md §13.2](../audit/BASELINE_STATUS.md) |
@@ -1035,17 +1043,22 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 **The protection problem, stated once.** `required_approving_review_count = 1` with
 `require_last_push_approval = true` cannot be satisfied on a single-account repository, because GitHub refuses an
-author's own approval. Every PR so far has therefore needed an `--admin` override. **Nine now carry one** — #10
+author's own approval. Every PR so far has therefore needed an `--admin` override. **Twelve now carry one** — #10
 (`7a75d39`, 2026-10-31T21:54:43Z), #11 (`483a41c`, 2026-11-01T04:42:25Z), #12 (`e9c6b3d`, 06:20:38Z), #13 (`964acad`,
 07:13:33Z), #14 (`13bc2ed`, 07:14:21Z), #15 (`d274ebc`, 07:27:31Z), #16 (`7fb25b8`, 07:27:41Z), #17 (`ea3cebf`,
-07:33:52Z) and #18 (`3cf8fa1`, 08:10:46Z) — measured as `GET /pulls/N/reviews` returning an empty array for each of the
-nine while the rule required one. Timestamps come from the merge commits, which match `merged_at` to the second for
-#10–#17 and disagree with it by one hour for #18; [BASELINE_STATUS.md §11.1](../audit/BASELINE_STATUS.md) carries that
-measurement and the reason this section does not mix the two sources. The cadence is the finding, not the count: #13 and
+07:33:52Z), #18 (`3cf8fa1`, 08:10:46Z), #20 (`88b6f17`, 08:48:41Z), #21 (`04aff7b`, 09:56:05Z) and #22 (`3b6a6a5`,
+10:14:04Z) — measured as `GET /pulls/N/reviews` returning an empty array for each of the twelve while the rule required
+one. Timestamps come from the merge commits: they agree with `merged_at` to within a second for #10–#17 and #21–#22 and
+disagree by exactly one hour for #18 and #20; [BASELINE_STATUS.md §11.1](../audit/BASELINE_STATUS.md) now resolves which
+surface is the wall clock — the merge commits plus the runner logs, corroborated by this machine's own clock bracketing
+the disputed events — and the reason this section does not mix the two sources. The cadence is the finding, not the count: #13 and
 #14 went in forty-eight seconds apart and #15 and #16 nine seconds apart, and in both cases the second merge was a
 documentation PR recording the first pair. #17 was another documentation PR, this one recording seven of the overrides,
-and #18 landed the OCI stack thirty-seven minutes later — at a normal pace, which is the point: nine is what the default
-path produces when nothing about the protection is changed, not an artefact of stacking branches in a hurry. #18 also
+and #18 landed the OCI stack thirty-seven minutes later — at a normal pace, which is the point: twelve is what the
+default path produces when nothing about the protection is changed, not an artefact of stacking branches in a hurry.
+The later cadence makes that plainer still: #20 (the recount) came thirty-eight minutes after #18, #21 (the TEN-03 fix)
+sixty-seven minutes after #20, and #22 (this workflow's own path filter) eighteen minutes after #21 — no incident, no
+deadline, just the ordinary cost of a rule that cannot be satisfied. #18 also
 settles what the finding is *about*: its new `Infrastructure definitions` job was green on the PR (run 41287513214) and
 green again on `master` at its own merge commit (run 41287750885), seven guard assertions firing in each, and the merge
 still needed `--admin` because `contexts` is still `[]`. A rule that is met by being bypassed twice a minute is not a
