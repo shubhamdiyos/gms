@@ -6,7 +6,7 @@ name: Workflow validation
 # workflow triggers on exactly the path set that CI skips, which is what makes the
 # gate able to check itself.
 #
-# Pinning every action to a full commit SHA, and keeping it that way, is mandate §12.
+# Pinning every action to a full commit SHA, and keeping it that way, is third mandate §12.
 
 on:
   pull_request:
@@ -73,7 +73,7 @@ jobs:
             [ -e "$f" ] || continue
             while IFS= read -r hit; do
               if ! grep -qE '@[0-9a-f]{40}([[:space:]]|$)' <<<"$hit"; then
-                echo "::error::$(basename "$f"):${hit%%:*} — actions must pin to a full commit SHA (mandate §12)"
+                echo "::error::$(basename "$f"):${hit%%:*} — actions must pin to a full commit SHA (third mandate §12)"
                 unpinned=1
               fi
             done < <(grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]' "$f" || true)
