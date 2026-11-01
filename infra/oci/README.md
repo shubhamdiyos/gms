@@ -18,7 +18,7 @@ a measured property of an account.
 | Tool | Version | How installed | Why |
 |---|---|---|---|
 | `oci` CLI | 3.95.1 | `~/.venvs/oci-cli` (virtualenv) | official; `brew` is unusable on this macOS build (`unknown or unsupported macOS version: "27.0.1"`) |
-| OpenTofu | v1.13.2 | `~/.local/bin/tofu`, from `tofu_1.13.2_darwin_arm64.zip`, SHA-256 `cb46112c…93af61` verified against the published `tofu_1.13.2_SHA256SUMS` | MPL-2.0. Terraform Switched to BUSL in Aug 2023; OpenTofu is the fork under a free licence, and its registry serves the same `oracle/oci` provider (resolved to **9.11.0** here, recorded in the committed `.terraform.lock.hcl`) |
+| OpenTofu | v1.13.2 | `~/.local/bin/tofu`, from `tofu_1.13.2_darwin_arm64.zip`, SHA-256 `cb46112c…93af61` verified against the published `tofu_1.13.2_SHA256SUMS` | MPL-2.0. Terraform switched to BUSL in Aug 2023; OpenTofu is the fork under a free licence, and its registry serves the same `oracle/oci` provider (resolved to **9.11.0** here, recorded in the committed `.terraform.lock.hcl`) |
 
 ## First time — the one step that needs a human
 
@@ -99,7 +99,7 @@ publisher's `SHA256SUMS`, then runs `tofu fmt -check`, `tofu init
 -backend=false`, `tofu validate`, the seven-guard suite and the forbidden-port
 check. No third-party action, no credentials, no cloud call.
 
-Two things learned the hard way while writing that job, because both would
+Three things learned the hard way while writing that job, because all three would
 otherwise be re-learned by the next person:
 
 - **`tofu validate` does not evaluate `validation` blocks.** All seven invalid
@@ -117,7 +117,11 @@ otherwise be re-learned by the next person:
   the whole pipeline report failure — so every guard reads as broken precisely
   when every guard is working.
 
-If a `validation` block is deleted, this job fails. That is the point: the rules
+If a `validation` block is deleted, this job fails — and that sentence was tested
+rather than assumed. PR #19 (closed unmerged, scratch branch deleted) removed the
+`/32` guard from `ssh_source_cidr` and nothing else; run 41289417174 came back
+green through `fmt`, `init` and **`validate`**, then red at the guard step on
+exactly the two SSH-source assertions, with the other five still `ok`. The rules
 in §9 stop being enforceable-by-habit the moment the file is bigger than the
 person editing it.
 

@@ -385,7 +385,8 @@ re-read after the ninth merge, still `contexts: []`, `strict: false`, `enforce_a
 configuration changed to make any of this necessary. #8 and #9 also report zero reviews and `mergeable_state: blocked`,
 but that field is recomputed against the *current* protection rules, so it cannot show what the configuration was when a
 May 2026 PR merged. The defensible claim is therefore the window this programme owns: nine merges, nine overrides, zero
-reviews.
+reviews. The merge that lands this paragraph is the tenth, and the pass that counts it is the eleventh — a documentation
+loop that only ends when the rule changes, not when it is measured.
 
 Two measurement corrections belong here, because an earlier version of this section got them wrong and the errors were
 in the direction of sounding worse. #13 and #14 are **forty-eight** seconds apart, not eighty-eight, and #15 follows
