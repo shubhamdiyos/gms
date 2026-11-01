@@ -180,5 +180,14 @@ In dependency order — and note that items 1–4 are owner actions, not enginee
 6. Infra-M5 executes a restore and a host-reboot recovery for real; only then can `Persistence` and
    `Reliability` leave their status.
 
+**Re-sequenced 2026-11-01, and item 2 is closed.** The execution mandate put this work behind one roadmap
+([../ENGINEERING_ROADMAP.md](../ENGINEERING_ROADMAP.md)), so the six items above now have stage numbers: Infra-M1 →
+**Stage 2** (B-1), Infra-M2 → **Stage 5**, Infra-M3/M4/M5 → **Stage 6**, Infra-M6 → **Stage 7**. Item 2 needs no
+owner action and no survey: the EC2 host was formally retired and confirmed dead
+([INFRASTRUCTURE_AUDIT.md §10](INFRASTRUCTURE_AUDIT.md)), and `ADR-019` defers the whole cloud half of items 3–6
+(Oracle, Neon, DNS, TLS) to Stage 6 — **which changes when these rows are *allowed* to go green, not their verdict
+today**. Nothing in this matrix moved toward `VERIFIED` as a result of the roadmap, and that is the point: a plan is
+not evidence. The sentence below is unchanged until Stage 5 delivers.
+
 Until then the accurate sentence about this system is: **the application is improving under test, and the
 platform it runs on is unverified, exposed, and one approved-merge away from an ungated production deploy.**

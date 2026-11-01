@@ -13,6 +13,14 @@ eligibility/capacity/public-IP-cost verification has not been performed. Until
 that verification is recorded, "Always Free" is a requirement in a mandate, not
 a measured property of an account.
 
+**That is now a plan rather than a blocker.** The execution mandate moved cloud
+provisioning to roadmap **Stage 6** — *"Oracle Cloud infrastructure is not
+required at the beginning of GMS development"* — and [ADR-019](../../docs/infrastructure/INFRASTRUCTURE_DECISIONS.md)
+records the decision, its rejected alternatives and its one real cost: nothing before Stage 6 exercises TLS, proxy
+behaviour, public-interface hardening or actual OCI capacity. The stack stays declared, validated and guard-tested in
+CI exactly as it is, and the first `tofu plan` against the tenancy is a Stage 6 step with the four cost numbers read
+from the account before any `apply`.
+
 ## Tooling of record
 
 | Tool | Version | How installed | Why |

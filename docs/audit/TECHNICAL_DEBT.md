@@ -52,6 +52,7 @@ Blast radius = what breaks if the change is done badly, given **zero** existing 
 | DB-04 | JSON-in-TEXT sets (`recipient_ids`, `target_ids`, `report_data`) | P1 | L | root cause of **TEN-03** | normalise into join tables — replaces the LIKE query, no new query mechanism |
 | DB-05 | `Parent` global, `Employee`/`Student` emails globally unique-ish but unenforced | P1 | M | **TEN-05** | decide the model explicitly in a migration + ADR, then enforce |
 | DB-06 | No soft-delete concept despite README claiming one; three inconsistent status styles | P1 | M | `countActiveSchools` and employee-ACTIVE counters return 0 permanently | one status enum (**FIN-07**) + a `status` column convention; do **not** add a `deleted` flag beside `status` |
+| DB-07 | Four globally-`unique` natural keys that are logically per-school (`designations.designation_id`, `invoices.invoice_number`, `receipts.receipt_number`, `communication_templates.template_code`) | P1 | S | one tenant occupies a number the next tenant needs; `ACD-07`/`FIN-04` number collisions | `uq (school_id, …)` in the V3 migration; measured with `grep -rn "unique = true" model/entity/` → 8 |
 | FIN-03 | No `@Transactional` in 11 financial/communication services | **P0 (integrity)** | S | atomicity bugs today | annotations only, but must precede **FIN-04/05** |
 
 ### Service layer
@@ -99,6 +100,14 @@ Blast radius = what breaks if the change is done badly, given **zero** existing 
 ## 2. Ranked backlog
 
 Ordered by (risk removed ÷ effort), with the dependency edges that matter.
+
+**Sequencing moved on 2026-11-01.** The execution mandate replaced issue-by-issue work with one roadmap, so
+[../ENGINEERING_ROADMAP.md](../ENGINEERING_ROADMAP.md) owns *when a package is done*; this table owns *what the units
+of work are and which finding ids each resolves*. The two disagree in exactly three places — Flyway's schema baseline,
+the compose foundation, and whether tenancy or pagination comes first — and all three are argued in
+[../ENGINEERING_ROADMAP.md §4](../ENGINEERING_ROADMAP.md) rather than silently resolved here. **Package 13 is
+discharged** (PRD, architecture, ADRs `019…023`, roadmap: see [../README.md §1](../README.md)); its `docs/` repair
+half was closed earlier by the index itself.
 
 | # | Package | Resolves | Depends on | Est. |
 |---|---|---|---|---|
