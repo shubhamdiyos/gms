@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.config.TenantContextAuditorAware;
 import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Designation;
 import com.gms.model.entity.School;
@@ -72,6 +73,16 @@ public class SchoolServiceImpl implements SchoolService {
         }
 
         School school = createSchoolFromRequest(request, new School());
+        // The auditor is the verified caller, never a value off the request: `schools`, `users` and
+        // `employees` each map their own createdBy/updatedBy instead of extending BaseAuditEntity
+        // (DB-05's second convention), so the entity listener cannot reach them and this is one of the
+        // two places their rows are stamped. Identity resolution itself is not duplicated: it is the
+        // same TenantContextAuditorAware the listener calls, behind the same one rule.
+        User auditor = TenantContextAuditorAware.currentAuditor(userRepository).orElse(null);
+        if (auditor != null) {
+            school.setCreatedBy(auditor);
+            school.setUpdatedBy(auditor);
+        }
         School saved = schoolRepository.save(school);
         
         // Seed Designations (minimal example)
@@ -96,6 +107,12 @@ public class SchoolServiceImpl implements SchoolService {
         admin.setRequirePasswordChange(true);
         // Use mutable set for JPA-managed @ElementCollection to avoid UnsupportedOperationException
         admin.setRoles(new HashSet<>(Set.of(RoleEnum.ADMIN.getCode())));
+        if (auditor != null) {
+            // The provisioned administrator did not create itself: the caller who ran the provisioning
+            // did, and that is the row the audit trail has to name.
+            admin.setCreatedBy(auditor);
+            admin.setUpdatedBy(auditor);
+        }
         userRepository.save(admin);
         log.info("[SetupSchool] admin user saved id={} username={}", admin.getId(), admin.getUsername());
 
@@ -111,6 +128,10 @@ public class SchoolServiceImpl implements SchoolService {
         emp.setDesignation("SCHOOL_ADMIN");
         emp.setTeaching(false);
         emp.setEnabled(true);
+        if (auditor != null) {
+            emp.setCreatedBy(auditor);
+            emp.setUpdatedBy(auditor);
+        }
         // Persist employee and link to admin user
         com.gms.model.entity.Employee savedEmp = employeeRepository.save(emp);
         admin.setEmployee(savedEmp);
@@ -226,6 +247,10 @@ public class SchoolServiceImpl implements SchoolService {
         if (request.getEstablishedYear() != null) school.setEstablishedYear(request.getEstablishedYear());
         if (request.getBoardAffiliation() != null) school.setBoardAffiliation(request.getBoardAffiliation());
 
+        // Only the modifier is stamped here. createdBy is loaded with the row and left alone, which is
+        // what makes the creator of a school answerable years later rather than whoever renamed it last.
+        TenantContextAuditorAware.currentAuditor(userRepository).ifPresent(school::setUpdatedBy);
+
         School saved = schoolRepository.save(school);
         SchoolResponse response = new SchoolResponse(saved.getId(), saved.getSchoolId(), saved.getSchoolName(), saved.getSchoolCode(), saved.getStatus(), saved.isEnabled());
         return ResponseEntity.ok(response);
@@ -247,6 +272,7 @@ public class SchoolServiceImpl implements SchoolService {
 
         school.setEnabled(isActive);
         school.setStatus(isActive ? "1" : "0");
+        TenantContextAuditorAware.currentAuditor(userRepository).ifPresent(school::setUpdatedBy);
 
         School saved = schoolRepository.save(school);
         SchoolResponse response = new SchoolResponse(saved.getId(), saved.getSchoolId(), saved.getSchoolName(), saved.getSchoolCode(), saved.getStatus(), saved.isEnabled());

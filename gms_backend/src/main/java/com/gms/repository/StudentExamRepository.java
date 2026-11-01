@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface StudentExamRepository extends JpaRepository<StudentExam, Integer> {
+public interface StudentExamRepository extends TenantScopedRepository<StudentExam> {
 
     /**
      * The entries for one exam subject, scoped to the school that owns the exam.

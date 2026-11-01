@@ -1,6 +1,5 @@
 package com.gms.service.impl;
 
-import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
 import com.gms.model.entity.Subject;
@@ -82,8 +81,12 @@ public class SubjectServiceImpl implements SubjectService {
     public Subject getById(Integer id) {
         Subject subject = subjectRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Subject not found"));
-        if (!subject.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(subject.getStatus())) {
-            throw new TenantAccessDeniedException("Subject does not belong to current school");
+        // What remains is the archive rule, which is business state rather than tenancy and which
+        // the platform owner is not exempt from either. The school comparison this line replaces was
+        // a second copy of the predicate the scoped findById already applied, and because the
+        // bootstrapped platform owner carries its own SYSTEM school id it refused that owner too.
+        if ("0".equals(subject.getStatus())) {
+            throw new IllegalArgumentException("Subject is archived");
         }
         return subject;
     }
@@ -97,11 +100,11 @@ public class SubjectServiceImpl implements SubjectService {
     @Override
     @Transactional
     public boolean deleteWithinSchool(Integer id) {
+        // The load is scoped to the caller's school, so a foreign id yields nothing; the school
+        // comparison this method used to make was a second copy of that predicate, and it refused
+        // the platform owner whose own SYSTEM school id differs from the row's.
         Subject subject = subjectRepository.findById(id).orElse(null);
         if (subject == null) {
-            return false;
-        }
-        if (!TenantContext.schoolId().equals(subject.getSchoolId())) {
             return false;
         }
         subjectRepository.delete(subject);
@@ -120,7 +123,10 @@ public class SubjectServiceImpl implements SubjectService {
         Subject subject = subjectRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Subject not found"));
 
-        if (!subject.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(subject.getStatus())) {
+        // The scoped load already answered the tenancy question; what remains is the archive rule,
+        // which is business state rather than tenancy and which the platform owner is not exempt
+        // from either.
+        if ("0".equals(subject.getStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -147,10 +153,8 @@ public class SubjectServiceImpl implements SubjectService {
         Subject existing = subjectRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Subject not found"));
 
-        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-        }
-
+        // The toggle writes to the row the scoped load returned, so tenancy was settled at the load;
+        // the school comparison this path used to make only refused the platform owner.
         existing.setStatus(isActive ? "1" : "0");
 
         School school = schoolRepository.findById(TenantContext.schoolId())

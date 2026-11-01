@@ -6,8 +6,10 @@
 #
 # What it proves, against a running instance and a real database:
 #   * the routes the deleted AbstractCRUDController supplied are gone, and the
-#     ones that remain are tenant-scoped (403 for another school's row, 404 for
-#     a row that is not there);
+#     ones that remain are tenant-scoped. Since `C-4` the refusal of another
+#     school's id is a 404 rather than a 403 -- the row does not resolve for that
+#     caller at all -- so the tenant checks below accept either and still reject a
+#     200 that carries somebody else's row;
 #   * a role that may not perform an operation is refused with 403, not 500;
 #   * a delete that the database refuses because another row still references it
 #     is a 409, not a 500.
@@ -52,6 +54,20 @@ check() { # check <name> <expected> <actual>
     printf 'PASS  %s (expected %s, got %s)\n' "$1" "$2" "$3"
   else
     printf 'FAIL  %s (expected %s, got %s)\n' "$1" "$2" "$3"
+    failures=$((failures + 1))
+  fi
+}
+
+refused() { # refused <name> <code>
+  # The property is "the caller does not get the row", not the status code. `C-4` moved the
+  # ownership check into the load, so another school's id now resolves to nothing and the honest
+  # answer is 404; 403 is still what a role refusal and a post-load comparison answer. A 200 that
+  # carries somebody else's row, and a 500, are both failures -- this accepts neither.
+  checks=$((checks + 1))
+  if [[ "$2" == "403" || "$2" == "404" ]]; then
+    printf 'PASS  %s (refused with %s)\n' "$1" "$2"
+  else
+    printf 'FAIL  %s (expected a refusal -- 403 or 404 -- got %s)\n' "$1" "$2"
     failures=$((failures + 1))
   fi
 }
@@ -131,13 +147,13 @@ echo "=== 6. Tenant isolation on the reads C-1 re-declared ==="
 code=$(call GET "/students/$STUDENT_A" "$TOKEN_A")
 check "admin A reads its own student" "200" "$code"
 code=$(call GET "/students/$STUDENT_A" "$TOKEN_B")
-check "admin B refused another school's student" "403" "$code"
+refused "admin B refused another school's student" "$code"
 code=$(call GET "/students/$STUDENT_A" "")
 check "anonymous read refused" "401" "$code"
 code=$(call GET "/students/999999" "$TOKEN_A")
 check "missing student reported as not found" "404" "$code"
 code=$(call GET "/subjects/$SUBJECT_A" "$TOKEN_B")
-check "admin B refused another school's subject read" "403" "$code"
+refused "admin B refused another school's subject read" "$code"
 
 echo
 echo "=== 7. Tenant isolation on the deletes C-1 re-declared ==="

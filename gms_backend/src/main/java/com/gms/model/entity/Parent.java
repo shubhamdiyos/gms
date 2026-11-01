@@ -38,6 +38,7 @@ public class Parent extends BaseAuditEntity {
     @JoinColumn(name = "user_id")
     private User user;
 
+    @JsonIgnore
     @ManyToMany
     @JoinTable(
         name = "parent_student",

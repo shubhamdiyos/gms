@@ -53,7 +53,7 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
-        // Validate student exists and belongs to school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
         if (!student.getSchoolId().equals(TenantContext.schoolId())) {
@@ -93,11 +93,6 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
 
-        // Validate school
-        if (!studentFee.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -122,11 +117,6 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
 
-        // Validate school
-        if (!studentFee.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -150,21 +140,14 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
 
-        if (!studentFee.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         return ResponseEntity.ok(studentFee);
     }
 
     @Override
     public ResponseEntity<List<StudentFee>> getStudentFeesByStudent(Integer studentId) {
-        // Validate student exists and belongs to school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStudent_IdAndStatus(TenantContext.schoolId(), studentId, "ACTIVE");
         return ResponseEntity.ok(studentFees);

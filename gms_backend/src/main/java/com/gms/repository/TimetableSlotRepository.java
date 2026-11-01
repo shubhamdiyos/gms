@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface TimetableSlotRepository extends JpaRepository<TimetableSlot, Integer> {
+public interface TimetableSlotRepository extends TenantScopedRepository<TimetableSlot> {
 
     /**
      * One teacher's periods, inside one school. This is the query the timetable screen needs; the

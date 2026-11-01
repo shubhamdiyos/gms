@@ -89,8 +89,9 @@ public class EmployeeServiceImpl implements EmployeeService {
     @Transactional(readOnly = true)
     public Employee getById(Integer id) {
         Employee e = employeeRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Employee not found"));
-        if (!e.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(e.getEmployeeStatus())) {
-            throw new TenantAccessDeniedException("Employee does not belong to current school");
+        // The load is scoped to the caller's school, so only the archive rule is left to check here.
+        if ("0".equals(e.getEmployeeStatus())) {
+            throw new TenantAccessDeniedException("Employee is inactive");
         }
         return e;
     }
@@ -109,7 +110,10 @@ public class EmployeeServiceImpl implements EmployeeService {
 
         Employee e = employeeRepository.findById(request.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
-        if (!e.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(e.getEmployeeStatus())) {
+        // The scoped load above already filtered on the caller's school, so the hand-written
+        // school comparison is gone; what remains is the archive rule, which the platform
+        // owner is not exempt from either.
+        if ("0".equals(e.getEmployeeStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
         if (request.getFirstName() != null) e.setFirstName(request.getFirstName());
@@ -136,9 +140,7 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee existing = employeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
 
-        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-        }
+        // The scoped load answers the tenancy question; a foreign id never reaches here.
 
         existing.setEmployeeStatus(isActive ? "1" : "0");
         existing.setEnabled(isActive);

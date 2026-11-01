@@ -8,6 +8,7 @@ import com.gms.service.UserService;
 import com.gms.util.Constants;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -32,11 +33,13 @@ public class UserController {
     }
 
     @PostMapping("/create")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<UserResponse> create(@Valid @RequestBody UserRequest request) {
         return userService.create(request);
     }
 
     @PutMapping("/update")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<UserResponse> update(@Valid @RequestBody UserRequest request) {
         return userService.update(request);
     }
@@ -48,6 +51,7 @@ public class UserController {
      * layer for exactly this reason.
      */
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<UserResponse>> getAll() {
         List<UserResponse> users = userService.findBySchool().stream()
                 .map(userService::toResponse)
@@ -59,6 +63,7 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<UserResponse> getById(@PathVariable Integer id) {
         Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
@@ -80,6 +85,7 @@ public class UserController {
      * the row if it belongs to another one.</p>
      */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
         Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
@@ -92,6 +98,7 @@ public class UserController {
     }
 
     @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserResponse> me() {
         String username = TenantContext.username();
         if (username == null) {
@@ -103,6 +110,7 @@ public class UserController {
     }
 
     @PutMapping("/me")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserResponse> updateMe(@Valid @RequestBody UserRequest request) {
         String username = TenantContext.username();
         if (username == null) {

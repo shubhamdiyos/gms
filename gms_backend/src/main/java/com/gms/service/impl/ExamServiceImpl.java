@@ -92,11 +92,9 @@ public class ExamServiceImpl implements ExamService {
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        // Validate school
-        if (!exam.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped load proved this row is the caller's. The school comparison this line replaces
+        // was a second copy of that predicate, and because the bootstrapped platform owner carries
+        // its own SYSTEM school id it refused that owner too.
         // Validate updater exists
         User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -123,11 +121,8 @@ public class ExamServiceImpl implements ExamService {
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        // Validate school
-        if (!exam.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // No school comparison here: the load above filtered by the caller's school, so a foreign id
+        // yielded nothing, and the platform owner's cross-tenant branch is the caller this serves.
         // Soft delete
         exam.setStatus("0");
 
@@ -151,10 +146,9 @@ public class ExamServiceImpl implements ExamService {
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        if (!exam.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped findById answered the tenancy question at the point of load: a school caller
+        // never reaches here for a foreign id, and the platform owner's cross-tenant branch gets
+        // the row it is meant to see.
         return ResponseEntity.ok(exam);
     }
 

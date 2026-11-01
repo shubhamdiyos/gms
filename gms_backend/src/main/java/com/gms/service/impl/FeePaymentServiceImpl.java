@@ -80,11 +80,6 @@ public class FeePaymentServiceImpl implements FeePaymentService {
         FeePayment feePayment = feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
 
-        // Validate school
-        if (!feePayment.getStudentFee().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -112,11 +107,6 @@ public class FeePaymentServiceImpl implements FeePaymentService {
         FeePayment feePayment = feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
 
-        // Validate school
-        if (!feePayment.getStudentFee().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -140,10 +130,6 @@ public class FeePaymentServiceImpl implements FeePaymentService {
     public ResponseEntity<FeePayment> getFeePaymentById(Integer id) {
         FeePayment feePayment = feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
-
-        if (!feePayment.getStudentFee().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(feePayment);
     }

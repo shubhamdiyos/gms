@@ -63,7 +63,7 @@ class UserServiceImplRoleGuardTest {
      * exceed.
      */
     private void givenCaller(Set<String> roles) {
-        TenantContext.set(new TenantContext.Principal("creator", 1, 7, roles));
+        TenantContext.set(new TenantContext.Principal("creator", 12, 1, 7, roles));
     }
 
     private void givenTargetSchoolAndCreator() {

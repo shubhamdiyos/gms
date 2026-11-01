@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface UserService {
     UserResponse getById(Integer id);
@@ -53,4 +54,20 @@ public interface UserService {
      * the entity's lazy associations fail JSON writing (500) and its shape is not a contract.
      */
     UserResponse toResponse(User user);
+
+    /**
+     * The one role-code validator in the application, shared by every path that writes
+     * {@code users}/{@code user_roles}.
+     *
+     * <p>{@code /users/create} and {@code /users/update} already route the caller's role list through
+     * it; any other endpoint that mints roles must call this too, because a role written straight onto
+     * the entity bypasses {@link com.gms.enums.RoleEnum} entirely and produces an account no guard can
+     * ever answer — the defect the audit calls SEC-17's {@code EMPLOYEE} mirror. Stage 3 C-6.</p>
+     *
+     * @param requested the role codes to mint
+     * @return the validated codes, always members of the {@code RoleEnum} vocabulary
+     * @throws IllegalArgumentException when a code is outside the vocabulary, or the caller tries to
+     *                                  grant SUPERADMIN without holding it
+     */
+    Set<String> authoriseRoles(Set<String> requested);
 }

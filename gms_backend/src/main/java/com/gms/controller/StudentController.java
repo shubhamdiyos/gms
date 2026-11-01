@@ -10,6 +10,7 @@ import com.gms.service.StudentService;
 import com.gms.util.Constants;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
@@ -70,6 +71,42 @@ public class StudentController {
         }
         List<Student> students = studentService.findBySchool();
         return ResponseEntity.ok(students);
+    }
+
+    /**
+     * Server-side student search, filtering and pagination — MVP feature #9, added alongside
+     * {@code GET /students}, which is unchanged.
+     *
+     * <p>Returns a Spring Data {@link Page} of {@link StudentResponse} so the client reads
+     * {@code content[]}, {@code totalElements} and {@code totalPages} from one response. The path is the
+     * literal {@code /search}; it is deliberately not {@code /students/{id}}, which would collide with the
+     * by-id route declared next.</p>
+     *
+     * <p>Tenancy is decided from the caller's verified claims, never from a query parameter, and the
+     * service owns the branch: a school {@code ADMIN} searches only its own students, the platform owner
+     * ({@code SUPERADMIN}) searches across every school, and a bounded caller whose token carries no school
+     * gets an empty page. The guard below only refuses a caller that could read neither its own tenant nor
+     * across tenants, mirroring {@code SchoolController.getAll()}'s treatment of the platform owner.</p>
+     *
+     * @param query   optional case-insensitive free text over first name, last name, student id and email
+     * @param classId optional classroom ({@code classId}) filter
+     * @param page    0-based page index, defaults to 0
+     * @param size    page size, defaults to 20 and is capped server-side
+     * @param sort    {@code field} or {@code field,direction}; only whitelisted fields are honoured
+     */
+    @GetMapping("/search")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
+    public ResponseEntity<Page<StudentResponse>> search(
+            @RequestParam(name = "query", required = false) String query,
+            @RequestParam(name = "classId", required = false) Integer classId,
+            @RequestParam(name = "page", defaultValue = "0") int page,
+            @RequestParam(name = "size", defaultValue = "20") int size,
+            @RequestParam(name = "sort", required = false) String sort) {
+        if (!TenantContext.readsAcrossTenants() && TenantContext.schoolId() == null) {
+            return ResponseEntity.status(401).build();
+        }
+        Page<StudentResponse> result = studentService.searchStudents(query, classId, page, size, sort);
+        return ResponseEntity.ok(result);
     }
 
     /**

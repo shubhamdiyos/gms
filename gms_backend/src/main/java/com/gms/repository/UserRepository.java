@@ -12,7 +12,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface UserRepository extends JpaRepository<User, Integer> {
+public interface UserRepository extends TenantScopedRepository<User> {
 
     /**
      * Username is the login identity and globally unique ({@code uq_users_username}, V3:34), so a

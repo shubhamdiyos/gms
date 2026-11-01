@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface FeeStructureRepository extends JpaRepository<FeeStructure, Integer> {
+public interface FeeStructureRepository extends TenantScopedRepository<FeeStructure> {
 
     List<FeeStructure> findBySchoolIdAndIsActive(Integer schoolId, Boolean isActive);
 

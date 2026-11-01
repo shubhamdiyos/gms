@@ -46,16 +46,14 @@ public class AcademicYearServiceImpl implements AcademicYearService {
 
     @Override
     public ResponseEntity<?> updateAcademicYear(Integer id, AcademicYearRequest academicYearRequest) {
+        // The load is scoped to the caller's school, so a foreign id yields nothing and the
+        // hand-written school comparison the mechanism supersedes is gone with it.
         Optional<AcademicYear> academicYearOptional = academicYearRepository.findById(id);
         if (academicYearOptional.isEmpty()) {
-            return ResponseEntity.badRequest().body("Academic year not found");
+            return ResponseEntity.notFound().build();
         }
 
         AcademicYear academicYear = academicYearOptional.get();
-        if (!academicYear.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).body("You are not authorized to update this academic year");
-        }
-
         academicYear.setName(academicYearRequest.getName());
         academicYear.setStartDate(academicYearRequest.getStartDate());
         academicYear.setEndDate(academicYearRequest.getEndDate());
@@ -66,16 +64,14 @@ public class AcademicYearServiceImpl implements AcademicYearService {
 
     @Override
     public ResponseEntity<?> deleteAcademicYear(Integer id) {
+        // Same scoped load as the update path: absent for a foreign id, so notFound rather than
+        // a 400 that tells the caller the request was malformed when it was merely not theirs.
         Optional<AcademicYear> academicYearOptional = academicYearRepository.findById(id);
         if (academicYearOptional.isEmpty()) {
-            return ResponseEntity.badRequest().body("Academic year not found");
+            return ResponseEntity.notFound().build();
         }
 
         AcademicYear academicYear = academicYearOptional.get();
-        if (!academicYear.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).body("You are not authorized to delete this academic year");
-        }
-
         academicYear.setStatus("0");
         academicYearRepository.save(academicYear);
         return ResponseEntity.ok("Academic year deleted successfully");
@@ -88,16 +84,13 @@ public class AcademicYearServiceImpl implements AcademicYearService {
 
     @Override
     public ResponseEntity<AcademicYear> getAcademicYearById(Integer id) {
+        // The scoped load already confines the answer to the caller's school, so the
+        // hand-written comparison and its 403 are gone — a foreign id is 404.
         Optional<AcademicYear> academicYearOptional = academicYearRepository.findById(id);
         if (academicYearOptional.isEmpty()) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.notFound().build();
         }
 
-        AcademicYear academicYear = academicYearOptional.get();
-        if (!academicYear.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
-        return ResponseEntity.ok(academicYear);
+        return ResponseEntity.ok(academicYearOptional.get());
     }
 }

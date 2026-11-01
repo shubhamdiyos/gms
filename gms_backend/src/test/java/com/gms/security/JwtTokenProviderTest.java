@@ -54,12 +54,15 @@ class JwtTokenProviderTest {
     void issuesAndReadsBackItsOwnClaims() {
         JwtTokenProvider subject = provider(VALID_SECRET);
 
-        String token = subject.createToken("teacher-one", Set.of("TEACHER"), 7, 42);
+        String token = subject.createToken("teacher-one", Set.of("TEACHER"), 7, 42, 99);
 
         Claims claims = subject.parseClaims(token);
         assertThat(claims.getSubject()).isEqualTo("teacher-one");
         assertThat(claims.get("schoolId", Integer.class)).isEqualTo(7);
         assertThat(claims.get("empId", Integer.class)).isEqualTo(42);
+        assertThat(claims.get("uid", Integer.class))
+                .as("the account the audit trail is allowed to name, and the only one of these three that is")
+                .isEqualTo(99);
         assertThat(claims.getIssuer()).isEqualTo("gms");
         assertThat(subject.getRoles(token)).containsExactly("TEACHER");
         assertThat(subject.isTokenValid(token)).isTrue();

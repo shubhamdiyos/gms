@@ -80,11 +80,8 @@ public class SectionServiceImpl implements SectionService {
         Section section = sectionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Section not found"));
 
-        // Validate school
-        if (!section.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The load is scoped to the caller's school, so a foreign id yields nothing here; the school
+        // comparison this replaced was a second copy of that predicate.
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -116,11 +113,6 @@ public class SectionServiceImpl implements SectionService {
         Section section = sectionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Section not found"));
 
-        // Validate school
-        if (!section.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Soft delete
         section.setStatus("0");
         
@@ -147,10 +139,8 @@ public class SectionServiceImpl implements SectionService {
         }
 
         Section section = sectionOptional.get();
-        if (!section.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped load above is the ownership check: a school caller gets the 404 for a foreign
+        // id, and the platform owner's cross-tenant branch gets the row it administers.
         return ResponseEntity.ok(section);
     }
 

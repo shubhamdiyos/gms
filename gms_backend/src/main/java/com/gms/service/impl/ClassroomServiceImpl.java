@@ -77,8 +77,11 @@ public class ClassroomServiceImpl implements ClassroomService {
     public Classroom getById(Integer id) {
         Classroom classroom = classroomRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-        if (!classroom.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(classroom.getStatus())) {
-            throw new TenantAccessDeniedException("Classroom does not belong to current school");
+        // The load is scoped to the caller's school, so the tenant half of this predicate can no
+        // longer fire; what remains is the archive rule, which is business state rather than tenancy
+        // and which the platform owner is not exempt from either.
+        if ("0".equals(classroom.getStatus())) {
+            throw new TenantAccessDeniedException("Classroom is archived");
         }
         return classroom;
     }
@@ -92,11 +95,11 @@ public class ClassroomServiceImpl implements ClassroomService {
     @Override
     @Transactional
     public boolean deleteWithinSchool(Integer id) {
+        // The load is scoped to the caller's school, so a foreign id yields nothing; the school
+        // comparison this method used to make was a second copy of that predicate, and it refused
+        // the platform owner whose own SYSTEM school id differs from the row's.
         Classroom classroom = classroomRepository.findById(id).orElse(null);
         if (classroom == null) {
-            return false;
-        }
-        if (!TenantContext.schoolId().equals(classroom.getSchoolId())) {
             return false;
         }
         classroomRepository.delete(classroom);
@@ -111,7 +114,9 @@ public class ClassroomServiceImpl implements ClassroomService {
 
         Classroom classroom = classroomRepository.findById(request.getId())
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-        if (!classroom.getSchoolId().equals(TenantContext.schoolId()) || "0".equals(classroom.getStatus())) {
+        // The scoped load answered the tenancy question; what remains is the archive rule, which is
+        // business state rather than tenancy and which the platform owner is not exempt from either.
+        if ("0".equals(classroom.getStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
 
@@ -138,10 +143,8 @@ public class ClassroomServiceImpl implements ClassroomService {
         Classroom existing = classroomRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
 
-        if (!existing.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-        }
-
+        // The toggle writes to the row the scoped load returned, so tenancy was settled at the load;
+        // the school comparison this path used to make only refused the platform owner.
         existing.setStatus(isActive ? "1" : "0");
 
         School school = schoolService.findById(TenantContext.schoolId())

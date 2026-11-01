@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
-public interface EmailLogRepository extends JpaRepository<EmailLog, Integer> {
+public interface EmailLogRepository extends TenantScopedRepository<EmailLog> {
 
     List<EmailLog> findBySchoolIdAndSentAtBetweenOrderBySentAtDesc(Integer schoolId, LocalDateTime startDate, LocalDateTime endDate);
 

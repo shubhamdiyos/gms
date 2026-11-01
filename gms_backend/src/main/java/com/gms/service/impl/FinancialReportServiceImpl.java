@@ -71,11 +71,6 @@ public class FinancialReportServiceImpl implements FinancialReportService {
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
 
-        // Validate school
-        if (!financialReport.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -106,11 +101,6 @@ public class FinancialReportServiceImpl implements FinancialReportService {
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
 
-        // Validate school
-        if (!financialReport.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -132,10 +122,6 @@ public class FinancialReportServiceImpl implements FinancialReportService {
     public ResponseEntity<FinancialReport> getFinancialReportById(Integer id) {
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
-
-        if (!financialReport.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(financialReport);
     }

@@ -49,10 +49,11 @@ public class TimetableController {
     @GetMapping("/student/me")
     @PreAuthorize("hasAuthority('STUDENT')")
     public ResponseEntity<TimetableResponse> getTimetableForCurrentStudent() {
-        // Get student ID from the security context
         String username = TenantContext.username();
-        // In a complete implementation, we would retrieve the student based on the username
-        // For now, we'll throw an exception as this requires additional implementation
-        throw new UnsupportedOperationException("Getting student timetable requires additional implementation to retrieve student from username");
+        if (username == null) {
+            throw new IllegalStateException("Username not found in token");
+        }
+        TimetableResponse response = timetableService.getTimetableForAuthenticatedStudent(username);
+        return ResponseEntity.ok(response);
     }
 }

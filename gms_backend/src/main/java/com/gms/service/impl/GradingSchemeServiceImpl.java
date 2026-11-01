@@ -66,11 +66,10 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        // Validate school
-        if (!gradingScheme.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The load above is scoped to the caller's school, so the school comparison this replaces was
+        // a second copy of that predicate — and for the platform owner, whose own SYSTEM school id
+        // differs from the rows it administers across tenants, it was a 403 the mechanism never
+        // asked for.
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -97,11 +96,8 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        // Validate school
-        if (!gradingScheme.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // Scoped load: a foreign id yielded nothing, so no school comparison stands between this row
+        // and the deactivation below.
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -125,10 +121,8 @@ public class GradingSchemeServiceImpl implements GradingSchemeService {
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        if (!gradingScheme.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped findById answered the tenancy question at the point of load; the school
+        // comparison it replaced only ever refused the platform owner.
         return ResponseEntity.ok(gradingScheme);
     }
 

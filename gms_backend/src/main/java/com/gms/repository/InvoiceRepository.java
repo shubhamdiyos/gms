@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface InvoiceRepository extends JpaRepository<Invoice, Integer> {
+public interface InvoiceRepository extends TenantScopedRepository<Invoice> {
 
     List<Invoice> findBySchoolIdAndStatus(Integer schoolId, String status);
 

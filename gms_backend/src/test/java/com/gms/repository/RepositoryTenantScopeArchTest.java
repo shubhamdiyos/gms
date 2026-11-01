@@ -26,10 +26,12 @@ import org.springframework.data.repository.Repository;
  *
  * <p>This catches declarations, not executions. {@code JpaRepository} gives every repository
  * {@code findById}, {@code findAll}, {@code findAllById} and {@code delete}, and those inherit no
- * tenant predicate — they are C-4's problem, and a test that could not see them would be worse than
- * no test, because it would look like coverage. Only a re-declaration on the interface reaches this
- * scan, which is how {@code SchoolRepository.findById} is allow-listed while every other
- * repository's inherited {@code findById} is invisible here.</p>
+ * tenant predicate — the {@code findById} half of that is now closed by {@code C-4}'s
+ * {@link TenantScopedRepository}, and {@code TenantScopedReadArchTest} is the test for it, because a
+ * scan of declarations cannot see a filter written in a method body. Only a re-declaration on the
+ * interface reaches this scan, which is how {@code SchoolRepository.findById} is allow-listed while
+ * every other repository's inherited {@code findById} is invisible here. What this scan still cannot
+ * reach is {@code findAll} and {@code delete} — {@code C-5} and {@code C-4}'s own footnote.</p>
  *
  * <p>A query is tenant-scoped when its derived name walks into {@code school}, when one of its
  * parameters is the tenant, or when its JPQL filters on it. Anything else reaches across schools
@@ -64,12 +66,30 @@ class RepositoryTenantScopeArchTest {
             Map.entry("SchoolRepository.existsBySchoolId", "a school's own business key, and a blind spot in the name rule"),
             Map.entry("SchoolRepository.existsByEmail", "a school's own contact mailbox"),
             Map.entry("SchoolRepository.countActiveSchools", "a platform-wide count, and only the superadmin reads it"),
+            // The four platform cards of the superadmin dashboard (C-10's backend half). Same reason as
+            // countActiveSchools above — a platform-wide count is the question, so a school predicate is
+            // not in the answer — with one addition: DashboardServiceImpl re-checks
+            // TenantContext.isPlatformOwner() in its own body before it issues any of them, and
+            // DashboardController guards the route with hasAuthority('SUPERADMIN'). The per-school
+            // counts in the same repository are NOT here: they name the tenant.
+            Map.entry("DashboardStatisticsRepository.countSchoolsAcrossTenants",
+                    "a platform-wide count, reached only by the SUPERADMIN platform dashboard"),
+            Map.entry("DashboardStatisticsRepository.countUsersAcrossTenants",
+                    "a platform-wide count, reached only by the SUPERADMIN platform dashboard"),
+            Map.entry("DashboardStatisticsRepository.countStudentsAcrossTenants",
+                    "a platform-wide count, reached only by the SUPERADMIN platform dashboard"),
+            Map.entry("DashboardStatisticsRepository.countEmployeesAcrossTenants",
+                    "a platform-wide count, reached only by the SUPERADMIN platform dashboard"),
             Map.entry("UserRepository.findByUsername", "uq_users_username (V3:34) is global, so this cannot match another school's row"),
             Map.entry("UserRepository.existsByUsername", "uq_users_username (V3:34) is global, so login is a tenant-free lookup"),
             Map.entry("UserRepository.findByEmployee_Id", "scoped transitively: the employee row already belongs to one school"),
             Map.entry("UserRepository.existsByEmployee_Id", "scoped transitively: the employee row already belongs to one school"),
             Map.entry("ParentRepository.findByEmail", "uq_parents_email (V3:38) is global by D-2; a parent links children across schools on purpose"),
-            Map.entry("ParentRepository.existsByEmail", "uq_parents_email (V3:38) is global by D-2"));
+            Map.entry("ParentRepository.existsByEmail", "uq_parents_email (V3:38) is global by D-2"),
+            Map.entry("TenantScopedRepository.findByIdAnyTenant",
+                    "the platform-owner branch of findById, reached only when TenantContext says the caller "
+                            + "is SUPERADMIN or is not serving a request at all; TenantScopedReadArchTest "
+                            + "fails the build if anything else calls it"));
 
     @Test
     void everyDeclaredRepositoryQueryNamesTheTenant() throws Exception {
@@ -127,6 +147,15 @@ class RepositoryTenantScopeArchTest {
      */
     private boolean isRead(Method method) {
         if (method.isBridge() || method.isSynthetic()) {
+            return false;
+        }
+        // A default method declares no query. It can only issue reads that are themselves declared
+        // somewhere this scan reaches, so excluding it hides nothing — and it is what lets C-4
+        // re-declare findById on TenantScopedRepository at all: that override is a tenant filter
+        // written in Java rather than in a method name, and this scan cannot read a body. The read it
+        // delegates to is still checked here, which is why findByIdAnyTenant is allow-listed below
+        // rather than invisible.
+        if (method.isDefault()) {
             return false;
         }
         String name = method.getName();

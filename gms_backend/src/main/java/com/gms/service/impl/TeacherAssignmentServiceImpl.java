@@ -74,7 +74,6 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
         assignment.setSubject(subject);
         assignment.setClassroom(classroom);
         assignment.setAcademicYear(request.getAcademicYear());
-
         TeacherAssignment savedAssignment = teacherAssignmentRepository.save(assignment);
         return mapToResponse(savedAssignment);
     }
@@ -91,12 +90,10 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     @Override
     @Transactional(readOnly = true)
     public List<TeacherAssignmentResponse> getAssignmentsByTeacher(Integer teacherId) {
+        // The scoped employee load above already confines the answer to the caller's school,
+        // so the hand-written teacher-school comparison is gone; a foreign id is 404.
         Employee teacher = employeeService.findById(teacherId)
                 .orElseThrow(() -> new NotFoundException("TEACHER_NOT_FOUND", "Teacher not found"));
-        
-        if (!teacher.getSchool().getId().equals(TenantContext.schoolId())) {
-            throw new TenantAccessDeniedException("Teacher does not belong to the current school.");
-        }
 
         List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacherId);
         return assignments.stream()
@@ -107,12 +104,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     @Override
     @Transactional(readOnly = true)
     public List<TeacherAssignmentResponse> getAssignmentsByClassroom(Integer classroomId) {
+        // Same: the scoped classroom load replaces the hand-written comparison.
         Classroom classroom = classroomService.findById(classroomId)
                 .orElseThrow(() -> new NotFoundException("CLASSROOM_NOT_FOUND", "Classroom not found"));
-        
-        if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
-            throw new TenantAccessDeniedException("Classroom does not belong to the current school.");
-        }
 
         List<TeacherAssignment> assignments = teacherAssignmentRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), classroomId);
         return assignments.stream()
@@ -133,12 +127,11 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     @Override
     @Transactional
     public TeacherAssignmentResponse updateAssignment(Integer id, TeacherAssignmentRequest request) {
+        // The scoped load filters the assignment's own school — the exact predicate this
+        // hand-written check restates through the teacher association — so it is gone; the
+        // teacher/subject/classroom comparisons below stay, guarding rows newly attached by id.
         TeacherAssignment assignment = teacherAssignmentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
-
-        if (!assignment.getTeacher().getSchool().getId().equals(TenantContext.schoolId())) {
-            throw new TenantAccessDeniedException("Assignment does not belong to the current school.");
-        }
 
         // Update assignment
         if (request.getTeacherId() != null) {
@@ -179,12 +172,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
     @Override
     @Transactional
     public void deleteAssignment(Integer id) {
+        // The scoped load already refused any assignment the caller's tenant does not own.
         TeacherAssignment assignment = teacherAssignmentRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("ASSIGNMENT_NOT_FOUND", "Assignment not found"));
-
-        if (!assignment.getTeacher().getSchool().getId().equals(TenantContext.schoolId())) {
-            throw new TenantAccessDeniedException("Assignment does not belong to the current school.");
-        }
 
         teacherAssignmentRepository.delete(assignment);
     }

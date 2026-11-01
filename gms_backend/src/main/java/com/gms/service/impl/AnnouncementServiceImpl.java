@@ -55,7 +55,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         announcement.setCategory(request.getCategory());
         announcement.setAttachmentUrls(request.getAttachmentUrls());
         announcement.setClickActionUrl(request.getClickActionUrl());
-        announcement.setIsPinned(request.getIsPinned());
+        announcement.setIsPinned(Boolean.TRUE.equals(request.getIsPinned()));
         announcement.setCreatedBy(creator);
         announcement.setUpdatedBy(creator);
 
@@ -66,14 +66,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public ResponseEntity<AnnouncementResponse> updateAnnouncement(Integer id, AnnouncementRequest request) {
-        // Validate announcement exists
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
-
-        // Validate school
-        if (!announcement.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate updater exists
         User updater = userService.findByEmployee_Id()
@@ -91,7 +87,7 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         announcement.setCategory(request.getCategory());
         announcement.setAttachmentUrls(request.getAttachmentUrls());
         announcement.setClickActionUrl(request.getClickActionUrl());
-        announcement.setIsPinned(request.getIsPinned());
+        announcement.setIsPinned(Boolean.TRUE.equals(request.getIsPinned()));
         announcement.setUpdatedBy(updater);
 
         Announcement savedAnnouncement = announcementRepository.save(announcement);
@@ -101,14 +97,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public ResponseEntity<?> deleteAnnouncement(Integer id) {
-        // Validate announcement exists
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
-
-        // Validate school
-        if (!announcement.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate updater exists
         User updater = userService.findByEmployee_Id()
@@ -130,12 +122,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public ResponseEntity<Announcement> getAnnouncementById(Integer id) {
+        // The scoped load already confines the answer to the caller's school, so the
+        // hand-written comparison and its 403 are gone — a foreign id is 404.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
-
-        if (!announcement.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(announcement);
     }
@@ -196,14 +186,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public ResponseEntity<?> publishAnnouncement(Integer id) {
-        // Validate announcement exists
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
-
-        // Validate school
-        if (!announcement.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate publisher exists
         User publisher = userService.findByEmployee_Id()
@@ -221,14 +207,10 @@ public class AnnouncementServiceImpl implements AnnouncementService {
 
     @Override
     public ResponseEntity<?> unpublishAnnouncement(Integer id) {
-        // Validate announcement exists
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
-
-        // Validate school
-        if (!announcement.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate unpublisher exists
         User unpublisher = userService.findByEmployee_Id()

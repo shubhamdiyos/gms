@@ -71,14 +71,10 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request) {
-        // Validate notification exists
+        // Validate notification exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
-
-        // Validate school
-        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
@@ -107,14 +103,10 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public ResponseEntity<?> deleteNotification(Integer id) {
-        // Validate notification exists
+        // Validate notification exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
-
-        // Validate school
-        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
@@ -139,10 +131,8 @@ public class NotificationServiceImpl implements NotificationService {
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The load that produced this row was scoped by the claim, so a caller from another school
+        // never reaches here; the platform owner does, and it is the caller this row is meant for.
         return ResponseEntity.ok(notification);
     }
 
@@ -219,14 +209,10 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public ResponseEntity<?> markNotificationAsRead(Integer id) {
-        // Validate notification exists
+        // Validate notification exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
-
-        // Validate school
-        if (!notification.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Mark as read
         notification.setReadStatus("READ");

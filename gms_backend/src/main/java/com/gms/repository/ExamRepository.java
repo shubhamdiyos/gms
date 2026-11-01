@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface ExamRepository extends JpaRepository<Exam, Integer> {
+public interface ExamRepository extends TenantScopedRepository<Exam> {
 
     List<Exam> findBySchool_IdAndStatus(Integer schoolId, String status);
 

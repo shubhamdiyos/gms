@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface GradingSchemeRepository extends JpaRepository<GradingScheme, Integer> {
+public interface GradingSchemeRepository extends TenantScopedRepository<GradingScheme> {
 
     List<GradingScheme> findBySchoolIdAndIsActive(Integer schoolId, Boolean isActive);
 }

@@ -7,6 +7,7 @@ import com.gms.security.TenantContext;
 import com.gms.service.TeacherService;
 import com.gms.util.Constants;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -26,6 +27,7 @@ public class TeacherController {
     }
 
     @GetMapping("/profile")
+    @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<EmployeeResponse> getTeacherProfile() {
         String username = TenantContext.username();
         EmployeeResponse response = teacherService.getTeacherProfile(username);
@@ -33,6 +35,7 @@ public class TeacherController {
     }
 
     @GetMapping("/classes")
+    @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<List<ClassroomResponse>> getAssignedClasses() {
         String username = TenantContext.username();
         List<ClassroomResponse> response = teacherService.getAssignedClasses(username);
@@ -40,6 +43,7 @@ public class TeacherController {
     }
 
     @GetMapping("/students")
+    @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<List<StudentResponse>> getAssignedStudents() {
         String username = TenantContext.username();
         List<StudentResponse> response = teacherService.getAssignedStudents(username);

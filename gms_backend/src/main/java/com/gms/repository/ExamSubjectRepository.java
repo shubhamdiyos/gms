@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface ExamSubjectRepository extends JpaRepository<ExamSubject, Integer> {
+public interface ExamSubjectRepository extends TenantScopedRepository<ExamSubject> {
 
     /**
      * The subjects of one school's exams. {@code exam_subjects} carries no tenant column; the

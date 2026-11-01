@@ -69,11 +69,6 @@ public class FeeStructureServiceImpl implements FeeStructureService {
         FeeStructure feeStructure = feeStructureRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee structure not found"));
 
-        // Validate school
-        if (!feeStructure.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -103,11 +98,6 @@ public class FeeStructureServiceImpl implements FeeStructureService {
         FeeStructure feeStructure = feeStructureRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee structure not found"));
 
-        // Validate school
-        if (!feeStructure.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -130,10 +120,6 @@ public class FeeStructureServiceImpl implements FeeStructureService {
     public ResponseEntity<FeeStructure> getFeeStructureById(Integer id) {
         FeeStructure feeStructure = feeStructureRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee structure not found"));
-
-        if (!feeStructure.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(feeStructure);
     }

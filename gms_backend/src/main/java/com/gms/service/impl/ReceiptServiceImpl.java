@@ -67,11 +67,6 @@ public class ReceiptServiceImpl implements ReceiptService {
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
-        // Validate school
-        if (!receipt.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -98,11 +93,6 @@ public class ReceiptServiceImpl implements ReceiptService {
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
-        // Validate school
-        if (!receipt.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -125,10 +115,6 @@ public class ReceiptServiceImpl implements ReceiptService {
     public ResponseEntity<Receipt> getReceiptById(Integer id) {
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
-
-        if (!receipt.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(receipt);
     }

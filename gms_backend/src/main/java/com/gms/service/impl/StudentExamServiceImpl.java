@@ -50,7 +50,7 @@ public class StudentExamServiceImpl implements StudentExamService {
         School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
-        // Validate student exists and belongs to school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
         if (!student.getSchoolId().equals(TenantContext.schoolId())) {
@@ -89,11 +89,6 @@ public class StudentExamServiceImpl implements StudentExamService {
         StudentExam studentExam = studentExamRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam registration not found"));
 
-        // Validate school
-        if (!studentExam.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -120,12 +115,9 @@ public class StudentExamServiceImpl implements StudentExamService {
 
     @Override
     public ResponseEntity<List<StudentExam>> getExamsForStudent(Integer studentId) {
-        // Validate student exists and belongs to school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         List<StudentExam> studentExams = studentExamRepository.findByStudent_School_IdAndStudent_Id(TenantContext.schoolId(), studentId);
         return ResponseEntity.ok(studentExams);

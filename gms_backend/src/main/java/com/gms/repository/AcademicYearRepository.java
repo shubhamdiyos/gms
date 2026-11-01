@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface AcademicYearRepository extends JpaRepository<AcademicYear, Integer> {
+public interface AcademicYearRepository extends TenantScopedRepository<AcademicYear> {
 
     List<AcademicYear> findBySchool_IdAndStatus(Integer schoolId, String status);
 

@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
-public interface NotificationRepository extends JpaRepository<Notification, Integer> {
+public interface NotificationRepository extends TenantScopedRepository<Notification> {
 
     List<Notification> findBySchoolIdAndDeliveryStatusOrderByCreatedOnDesc(Integer schoolId, String deliveryStatus);
 

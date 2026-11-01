@@ -66,11 +66,6 @@ public class PaymentGatewayServiceImpl implements PaymentGatewayService {
         PaymentGateway paymentGateway = paymentGatewayRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Payment gateway not found"));
 
-        // Validate school
-        if (!paymentGateway.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -97,11 +92,6 @@ public class PaymentGatewayServiceImpl implements PaymentGatewayService {
         PaymentGateway paymentGateway = paymentGatewayRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Payment gateway not found"));
 
-        // Validate school
-        if (!paymentGateway.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -124,10 +114,6 @@ public class PaymentGatewayServiceImpl implements PaymentGatewayService {
     public ResponseEntity<PaymentGateway> getPaymentGatewayById(Integer id) {
         PaymentGateway paymentGateway = paymentGatewayRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Payment gateway not found"));
-
-        if (!paymentGateway.getSchool().getId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(paymentGateway);
     }

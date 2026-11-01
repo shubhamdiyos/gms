@@ -85,17 +85,25 @@ public class TimetableServiceImpl implements TimetableService {
         return mapToResponse(timetable);
     }
 
+    /**
+     * A teacher's own periods, read with the tenant in the query — the version this replaced walked
+     * every timetable in the platform in Java to reach the same rows, and then threw them away.
+     *
+     * <p>The schedule stays in the slots: a teacher teaches across several classrooms, so there is no
+     * single timetable row to name, and each slot already carries the assignment's subject and
+     * classroom. The identifier and classroom columns of the response are therefore null by design.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public TimetableResponse getTimetableForTeacher(Integer teacherId) {
         List<TimetableSlot> teacherSlots = timetableSlotRepository
                 .findByAssignment_Teacher_School_IdAndAssignment_Teacher_Id(TenantContext.schoolId(), teacherId);
 
-        // A teacher has no single timetable, so there is no TimetableResponse to build from those
-        // slots yet — returning the empty response is ACD-02's stub, unchanged here. What changed is
-        // that the slots are read with the tenant in the query: the version this replaced walked
-        // every timetable in the platform in Java to reach the same rows.
-        return new TimetableResponse();
+        List<TimetableSlotResponse> slotResponses = teacherSlots.stream()
+                .map(this::mapToSlotResponse)
+                .collect(Collectors.toList());
+
+        return new TimetableResponse(null, null, null, null, slotResponses);
     }
 
     @Override

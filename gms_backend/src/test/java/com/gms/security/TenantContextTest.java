@@ -130,6 +130,46 @@ class TenantContextTest {
     }
 
     /**
+     * The three states {@code TenantScopedRepository.findById} branches on, and the fourth it must not.
+     *
+     * <p>A read is unbounded for the platform owner, which administers every school, and for code that is
+     * not serving a request at all. It is bounded for a school principal — and bounded for a principal
+     * whose token carries no school too, because a filter built from a {@code null} tenant answers nothing
+     * where a filter skipped because the tenant was {@code null} answers everything. That difference is
+     * the whole of {@code SEC-06}: the fall-open {@code null} is what the old {@code getById} answered with.</p>
+     */
+    @Test
+    void onlyThePlatformOwnerAndCodeOutsideARequestReadAcrossTenants() {
+        assertThat(TenantContext.readsAcrossTenants())
+                .as("no request, so no caller to be bounded by -- the bootstrap runner's case")
+                .isTrue();
+
+        TenantContext.set(new TenantContext.Principal("nadia", 44, 7, 3, Set.of("ADMIN")));
+        assertThat(TenantContext.readsAcrossTenants())
+                .as("a school principal reads inside school 7")
+                .isFalse();
+        assertThat(TenantContext.userId())
+                .as("and the account it authenticates as is users.id 44, not employee 3")
+                .isEqualTo(44);
+
+        TenantContext.set(new TenantContext.Principal("root", 1, 1, null, Set.of("SUPERADMIN")));
+        assertThat(TenantContext.readsAcrossTenants())
+                .as("the platform owner reaches across, and its own system school is not the bound")
+                .isTrue();
+
+        TenantContext.set(new TenantContext.Principal("orphan", null, null, null, Set.of("TEACHER")));
+        assertThat(TenantContext.readsAcrossTenants())
+                .as("a token with no school claim is bounded rather than unbounded")
+                .isFalse();
+        assertThat(TenantContext.userId())
+                .as("and with no uid claim there is no auditor to record, which is not the same as a guess")
+                .isNull();
+        assertThat(TenantContext.schoolId())
+                .as("and the bound it is filtered against matches no row")
+                .isNull();
+    }
+
+    /**
      * The filter reads the tenant and the authorities from the claims it has already verified.
      */
     private void authenticate(String username, Set<String> roles) {

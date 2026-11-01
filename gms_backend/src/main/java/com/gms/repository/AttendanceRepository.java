@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface AttendanceRepository extends JpaRepository<Attendance, Integer> {
+public interface AttendanceRepository extends TenantScopedRepository<Attendance> {
 
     /**
      * Attendance of one student, inside one school. {@code attendances} has no {@code school_id}

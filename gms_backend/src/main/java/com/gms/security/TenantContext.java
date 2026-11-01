@@ -28,11 +28,13 @@ public final class TenantContext {
      * Who is calling, and which tenant they belong to.
      *
      * @param username   the authenticated principal's username
+     * @param userId     the {@code users.id} the principal authenticated as, or {@code null} for a token
+     *                   minted before the claim existed
      * @param schoolId   the tenant the principal belongs to, or {@code null} for one that belongs to none
      * @param employeeId the employee the principal acts as, or {@code null}
      * @param roles      the authorities carried by the token
      */
-    public record Principal(String username, Integer schoolId, Integer employeeId, Set<String> roles) {
+    public record Principal(String username, Integer userId, Integer schoolId, Integer employeeId, Set<String> roles) {
 
         public Principal {
             roles = roles == null ? Set.of() : Set.copyOf(roles);
@@ -59,6 +61,17 @@ public final class TenantContext {
      */
     public static Principal current() {
         return CURRENT.get();
+    }
+
+    /**
+     * The account the caller authenticated as, or {@code null} outside a request or for a token that carries
+     * no {@code uid}. This is the only identity an audit trail may use: {@code employeeId} is one claim
+     * holding two id spaces (the employee primary key for staff, the user primary key for the platform
+     * owner), which is finding BKL-08.
+     */
+    public static Integer userId() {
+        Principal principal = CURRENT.get();
+        return principal == null ? null : principal.userId();
     }
 
     /**
@@ -93,5 +106,18 @@ public final class TenantContext {
     public static boolean isPlatformOwner() {
         Principal principal = CURRENT.get();
         return principal != null && principal.isPlatformOwner();
+    }
+
+    /**
+     * Whether a read may cross tenants.
+     *
+     * <p>The platform owner may, and code that is not serving a request at all — the bootstrap runner — has no
+     * caller to be bounded by. Everything else is bounded, including an authenticated caller whose token carries
+     * no school: a bounded caller with no tenant finds nothing, which is the opposite of the fall-open
+     * {@code null} that {@code getById} used to answer with.</p>
+     */
+    public static boolean readsAcrossTenants() {
+        Principal principal = CURRENT.get();
+        return principal == null || principal.isPlatformOwner();
     }
 }

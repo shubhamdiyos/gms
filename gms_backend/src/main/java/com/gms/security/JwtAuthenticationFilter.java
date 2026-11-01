@@ -62,6 +62,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             SecurityContextHolder.getContext().setAuthentication(auth);
             TenantContext.set(new TenantContext.Principal(
                     username,
+                    integerClaim(claims, "uid"),
                     integerClaim(claims, "schoolId"),
                     integerClaim(claims, "empId"),
                     roles(claims)));

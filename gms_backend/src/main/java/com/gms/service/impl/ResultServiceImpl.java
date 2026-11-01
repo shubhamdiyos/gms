@@ -91,11 +91,6 @@ public class ResultServiceImpl implements ResultService {
         Result result = resultRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Result not found"));
 
-        // Validate school
-        if (!result.getStudentExam().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -126,11 +121,6 @@ public class ResultServiceImpl implements ResultService {
         Result result = resultRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Result not found"));
 
-        // Validate school
-        if (!result.getStudentExam().getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
@@ -148,11 +138,6 @@ public class ResultServiceImpl implements ResultService {
         // Validate student exam exists
         StudentExam studentExam = studentExamRepository.findById(studentExamId)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
-
-        // Validate school
-        if (!studentExam.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // There should be at most one Result per StudentExam; repository returns Optional
         Optional<Result> resultOpt = resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Id(TenantContext.schoolId(), studentExamId);

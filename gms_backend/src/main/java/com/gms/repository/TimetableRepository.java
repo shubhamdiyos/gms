@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface TimetableRepository extends JpaRepository<Timetable, Integer> {
+public interface TimetableRepository extends TenantScopedRepository<Timetable> {
 
     /**
      * One school's timetables. A timetable reaches a school only through its classroom;

@@ -17,6 +17,7 @@ public class StudentAdmissionController {
     private StudentAdmissionService studentAdmissionService;
     
     @PostMapping("/apply")
+    @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> applyForAdmission(@RequestBody StudentAdmissionRequest studentAdmissionRequest) {
         return studentAdmissionService.applyForAdmission(studentAdmissionRequest);
     }

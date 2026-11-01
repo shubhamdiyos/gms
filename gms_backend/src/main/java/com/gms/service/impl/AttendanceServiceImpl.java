@@ -58,12 +58,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             return ResponseEntity.badRequest().build();
         }
 
-        // Validate student exists and belongs to the school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentService.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // The DTO calls this field optional; the schema does not — attendances.timetable_slot_id is
         // NOT NULL, so the code that read the id and then dropped it could never write the row.
@@ -160,17 +157,10 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
-        
-        if (!attendance.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
-        // Validate student exists and belongs to the school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentService.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // The register already has a slot, and the column is NOT NULL, so an update that does not name
         // a new one keeps the existing one rather than writing a null over it.
@@ -206,10 +196,6 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
-        
-        if (!attendance.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         attendanceRepository.delete(attendance);
         return ResponseEntity.ok().build();

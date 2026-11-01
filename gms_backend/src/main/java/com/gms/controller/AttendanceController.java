@@ -11,6 +11,7 @@ import com.gms.util.Constants;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.time.LocalDate;
@@ -28,6 +29,7 @@ public class AttendanceController {
     }
 
     @PostMapping
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<AttendanceResponse> recordAttendance(@Valid @RequestBody AttendanceRequest request) {
         Integer empId = TenantContext.employeeId();
         Integer schoolId = TenantContext.schoolId();
@@ -38,6 +40,7 @@ public class AttendanceController {
     }
 
     @PostMapping("/bulk")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<?> recordBulkAttendance(@Valid @RequestBody BulkAttendanceRequest request) {
         Integer empId = TenantContext.employeeId();
         Integer schoolId = TenantContext.schoolId();
@@ -48,6 +51,7 @@ public class AttendanceController {
     }
 
     @PutMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<AttendanceResponse> updateAttendance(@PathVariable Integer id, 
                                                              @Valid @RequestBody AttendanceRequest request) {
         Integer empId = TenantContext.employeeId();
@@ -59,6 +63,7 @@ public class AttendanceController {
     }
 
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteAttendance(@PathVariable Integer id) {
         Integer empId = TenantContext.employeeId();
         Integer schoolId = TenantContext.schoolId();
@@ -69,6 +74,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/student/{studentId}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<AttendanceResponse>> getAttendanceForStudent(
             @PathVariable Integer studentId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
@@ -82,6 +88,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/classroom/{classroomId}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<AttendanceResponse>> getAttendanceForClassroom(
             @PathVariable Integer classroomId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate date) {
@@ -94,6 +101,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/range")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<AttendanceResponse>> getAttendanceByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
@@ -106,6 +114,7 @@ public class AttendanceController {
     }
 
     @GetMapping("/student/{studentId}/range")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<AttendanceResponse>> getAttendanceByStudentAndDateRange(
             @PathVariable Integer studentId,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,

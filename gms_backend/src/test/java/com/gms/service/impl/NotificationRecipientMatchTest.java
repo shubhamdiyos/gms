@@ -45,7 +45,7 @@ class NotificationRecipientMatchTest {
 
     @BeforeEach
     void becomeACallerOfThisSchool() {
-        TenantContext.set(new TenantContext.Principal("reader", SCHOOL, 5, java.util.Set.of("ADMIN")));
+        TenantContext.set(new TenantContext.Principal("reader", 61, SCHOOL, 5, java.util.Set.of("ADMIN")));
     }
 
     @AfterEach

@@ -84,6 +84,20 @@ check() { # check <name> <expected> <actual>
   fi
 }
 
+refused() { # refused <name> <code>
+  # The property is "no straddling row is written", not the status code. `C-4` scoped the load that
+  # this card's comment used to call unchecked, so a foreign classroom id now resolves to nothing
+  # and the write is refused one layer before the database key is reached. Either refusal is a pass;
+  # a 200 is not, and the row-count checks below are what actually prove the constraint held.
+  checks=$((checks + 1))
+  if [[ "$2" == "403" || "$2" == "404" ]]; then
+    printf 'PASS  %s (refused with %s)\n' "$1" "$2"
+  else
+    printf 'FAIL  %s (expected a refusal -- 403 or 404 -- got %s)\n' "$1" "$2"
+    failures=$((failures + 1))
+  fi
+}
+
 skip() { # skip <name> <reason>
   skipped=$((skipped + 1))
   printf 'SKIP  %s (%s)\n' "$1" "$2"
@@ -326,20 +340,25 @@ else
 fi
 
 echo
-echo "=== 6. A write that straddles two schools is refused by the constraint ==="
-# /timetables reads its classroom with an unchecked findById — that is C-4's
-# problem, and this card does not fix it. What C-7 changes is what happens next:
-# the row would name school A's classroom and school B's tenant, and
-# fk_timetable_classroom_same_school (classroom_id, school_id) refuses it in the
-# database, whatever the service forgot. The handler maps that violation to 403.
+echo "=== 6. A write that straddles two schools is refused ==="
+# This card's own comment used to read "/timetables reads its classroom with an unchecked findById
+# -- that is C-4's problem, and this card does not fix it". C-4 has now fixed it, so the request is
+# refused at the load (404: school B's caller cannot resolve school A's classroom) instead of
+# reaching fk_timetable_classroom_same_school (403). Both are refusals and the constraint is proved
+# separately below, from the catalog, because a write path that never gets that far cannot prove it
+# by being refused.
 # A different academic year, because uq_timetable_classroom_year is platform-wide
 # and would refuse the insert on the duplicate key before the tenant key is ever
 # consulted; that answer is 409 for the right row shape and would hide this check.
 code=$(call POST /timetables "$TOKEN_B" \
   "{\"classroomId\":$CLASS_A,\"academicYear\":\"$CROSS_YEAR\",\"slots\":[]}")
-check "school B cannot put its timetable on school A's classroom" "403" "$code"
-MESSAGE=$(field '.message')
-check "and is told it belongs to another school" "That record belongs to another school." "$MESSAGE"
+refused "school B cannot put its timetable on school A's classroom" "$code"
+if [[ "$code" == "403" ]]; then
+  MESSAGE=$(field '.message')
+  check "and the constraint path says it belongs to another school" "That record belongs to another school." "$MESSAGE"
+else
+  printf '      refused at the load rather than the key: the load is what C-4 scoped\n'
+fi
 
 code=$(call POST /teacher-assignments "$TOKEN_B" \
   "{\"teacherId\":$EMPLOYEE_A,\"subjectId\":$SUBJECT_A,\"classroomId\":$CLASS_A,\"academicYear\":\"$ACADEMIC_YEAR\"}")
@@ -357,6 +376,8 @@ else
 fi
 
 if have_db; then
+  FK=$(sql "SELECT count(*) FROM pg_constraint WHERE conname = 'fk_timetable_classroom_same_school'")
+  check "the same-school key is still in the schema that refused this write" "1" "$(printf '%s' "$FK" | tr -d '[:space:]')"
   STRADDLE=$(sql "SELECT count(*) FROM timetables t JOIN classrooms c ON c.id = t.classroom_id WHERE t.school_id <> c.school_id")
   check "no timetable in the database names another school's classroom" "0" "$(printf '%s' "$STRADDLE" | tr -d '[:space:]')"
   B_ROWS=$(sql "SELECT count(*) FROM timetables WHERE school_id = $SCHOOL_B")

@@ -78,14 +78,10 @@ public class SchoolCalendarServiceImpl implements SchoolCalendarService {
 
     @Override
     public ResponseEntity<SchoolCalendarResponse> updateCalendarEvent(Integer id, SchoolCalendarRequest calendarRequest) {
-        // Validate calendar event exists
+        // Validate calendar event exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         SchoolCalendar calendarEvent = schoolCalendarRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Calendar event not found"));
-
-        // Validate school
-        if (!calendarEvent.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Validate updater exists
         User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
@@ -120,14 +116,10 @@ public class SchoolCalendarServiceImpl implements SchoolCalendarService {
 
     @Override
     public ResponseEntity<?> deleteCalendarEvent(Integer id) {
-        // Validate calendar event exists
+        // Validate calendar event exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         SchoolCalendar calendarEvent = schoolCalendarRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Calendar event not found"));
-
-        // Validate school
-        if (!calendarEvent.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Soft delete
         calendarEvent.setStatus("0");
@@ -149,17 +141,14 @@ public class SchoolCalendarServiceImpl implements SchoolCalendarService {
 
     @Override
     public ResponseEntity<SchoolCalendar> getCalendarEventById(Integer id) {
+        // The scoped load already confines the answer to the caller's school, so the
+        // hand-written comparison and its 403 are gone — a foreign id is 404.
         Optional<SchoolCalendar> eventOptional = schoolCalendarRepository.findById(id);
         if (eventOptional.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
 
-        SchoolCalendar event = eventOptional.get();
-        if (!event.getSchoolId().equals(TenantContext.schoolId())) {
-            return ResponseEntity.status(403).build();
-        }
-
-        return ResponseEntity.ok(event);
+        return ResponseEntity.ok(eventOptional.get());
     }
 
     @Override

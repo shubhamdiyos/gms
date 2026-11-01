@@ -11,7 +11,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface FinancialTransactionRepository extends JpaRepository<FinancialTransaction, Integer> {
+public interface FinancialTransactionRepository extends TenantScopedRepository<FinancialTransaction> {
 
     List<FinancialTransaction> findBySchoolIdAndTransactionDateBetween(Integer schoolId, LocalDate startDate, LocalDate endDate);
 

@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface TeacherAssignmentRepository extends JpaRepository<TeacherAssignment, Integer> {
+public interface TeacherAssignmentRepository extends TenantScopedRepository<TeacherAssignment> {
 
     /**
      * Every read here names a school, because {@code teacher_id} 4 is a different person in every

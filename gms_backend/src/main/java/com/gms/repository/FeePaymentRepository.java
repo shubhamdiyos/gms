@@ -12,7 +12,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface FeePaymentRepository extends JpaRepository<FeePayment, Integer> {
+public interface FeePaymentRepository extends TenantScopedRepository<FeePayment> {
 
     List<FeePayment> findByStudentFee_Student_School_IdAndPaymentDateBetween(Integer schoolId, LocalDate startDate, LocalDate endDate);
 

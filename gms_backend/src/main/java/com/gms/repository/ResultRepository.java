@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface ResultRepository extends JpaRepository<Result, Integer> {
+public interface ResultRepository extends TenantScopedRepository<Result> {
 
     /**
      * One student's result for one exam entry, scoped to the school that owns the student.

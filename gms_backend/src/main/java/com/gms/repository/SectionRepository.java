@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface SectionRepository extends JpaRepository<Section, Integer> {
+public interface SectionRepository extends TenantScopedRepository<Section> {
 
     List<Section> findBySchool_IdAndStatus(Integer schoolId, String status);
 

@@ -72,6 +72,19 @@ check() { # check <name> <expected> <actual>
   fi
 }
 
+refused() { # refused <name> <code>
+  # The property is "the caller does not get or write the row", not the status code. `C-4` moved
+  # ownership into the load, so another school's id resolves to nothing and the answer is a 404;
+  # 403 remains what a role refusal answers. A 200 carrying somebody else's row is a failure here.
+  checks=$((checks + 1))
+  if [[ "$2" == "403" || "$2" == "404" ]]; then
+    printf 'PASS  %s (refused with %s)\n' "$1" "$2"
+  else
+    printf 'FAIL  %s (expected a refusal -- 403 or 404 -- got %s)\n' "$1" "$2"
+    failures=$((failures + 1))
+  fi
+}
+
 skip() { # skip <name> <reason>
   skipped=$((skipped + 1))
   printf 'SKIP  %s (%s)\n' "$1" "$2"
@@ -157,7 +170,7 @@ echo "=== 6. The tenant is the one in the token ==="
 code=$(call GET "/students/$STUDENT_A" "$TOKEN_A")
 check "admin A reads its own student" "200" "$code"
 code=$(call GET "/students/$STUDENT_A" "$TOKEN_B")
-check "admin B refused another school's student" "403" "$code"
+refused "admin B refused another school's student" "$code"
 
 code=$(call GET "/students" "$TOKEN_B")
 check "admin B lists students" "200" "$code"
@@ -218,13 +231,14 @@ fi
 
 echo
 echo "=== 8. A cross-service check still refuses another school's row ==="
-# createStudentFromRequest asks classroomService for the classroom and then
-# compares it with the tenant. The classroom id arrives from the request body,
-# the tenant does not. The refusal is a 403: another school's row is not a
-# malformed request.
+# createStudentFromRequest asks classroomService for the classroom. Before `C-4` that load was
+# unscoped and the service compared the row's school afterwards, answering 403. Now the load is
+# scoped, so school A's caller cannot resolve school B's classroom at all and the answer is 404 --
+# a different status for the same refusal, and the check that matters is the row-count one below:
+# nothing was written.
 code=$(call POST /students/create "$TOKEN_A" \
   "{\"firstName\":\"Omar\",\"lastName\":\"Said\",\"email\":\"omar.said@eastfield.test\",\"gender\":\"MALE\",\"classId\":$CLASS_B}")
-check "student in another school's classroom refused" "403" "$code"
+refused "student in another school's classroom refused" "$code"
 if [[ -n "$VERIFY_DB" ]]; then
   CREATED=$(sql "SELECT COUNT(*) FROM students WHERE email = 'omar.said@eastfield.test'")
   check "the refused student was not written" "0" "$CREATED"
