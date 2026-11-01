@@ -8,7 +8,15 @@ Findings carry IDs defined in [`REPOSITORY_AUDIT.md`](./REPOSITORY_AUDIT.md); th
 
 ## 1. Exposure model
 
-The deployment referenced by [`gms_frontend/vercel.json:5`](../../gms_frontend/vercel.json) is a public hostname serving an API over plaintext HTTP on port 8080, with a frontend bundle that prefills the bootstrap administrator's credentials. Assume every finding below is reachable by an unauthenticated internet user today. Severity ratings reflect that, not a hypothetical intranet.
+The deployment that `gms_frontend/vercel.json:5` used to point at was a public hostname serving an API over
+plaintext HTTP on port 8080, reached by a frontend bundle that prefilled the bootstrap administrator's credentials.
+**Two of those three facts have since changed**, and the sentence above is kept because it is what §1's severities
+were rated against: the prefilled login was removed by security-M1 (verified in
+[REPOSITORY_AUDIT.md §16](REPOSITORY_AUDIT.md)), and the EC2 rewrite was **deleted** on 2026-11-01 when the host was
+confirmed permanently closed (`[INFRASTRUCTURE_AUDIT.md §10](../infrastructure/INFRASTRUCTURE_AUDIT.md)`). What has
+**not** changed is the requirement: the replacement origin must not repeat it, so plaintext HTTP from a browser to
+the API is a P0 acceptance gate for the OCI deployment, not a historical curiosity. Until a TLS-terminating proxy
+and a real hostname exist, treat any future deployment URL as exposing credentials in transit by default.
 
 Two facts make every other control moot and are therefore **P0 regardless of effort**:
 
