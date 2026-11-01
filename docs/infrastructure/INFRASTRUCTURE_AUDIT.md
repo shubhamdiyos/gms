@@ -721,6 +721,14 @@ The first audit already owns these; this table records only what Infra-M0 change
 "never allow automated tests to reach production" is satisfied today only because the credential is unrotated and
 unreachable, which is not a control.
 
+**Amended 2026-11-01 by the third mandate.** The owner states the EC2 host is *permanently closed* and is not a
+deployment target, so the rows above that describe the EC2 deploy path — OPS-01, OPS-02, OPS-03's secret half,
+OPS-04, OPS-05, OPS-06 — are **RETIRED, not fixed**: `.github/workflows/deploy-backend.yml` and
+`gms_frontend/vercel.json` are deleted on branch `infra/retire-ec2-deployment-path`. Their remediation work does
+not disappear, it moves: OPS-01's "no gate" survives as INF-10 (the CI checks are still advisory), and OPS-06's
+"no rollback" is now a requirement on the OCI pipeline that does not exist yet (ADR-017). §10 classifies the
+mandate's own historical list in the same vocabulary.
+
 ---
 
 ## 5. Zero-cost ledger (mandate §2)
@@ -875,6 +883,76 @@ one "Findings closed" column — `INF-02`, `INF-06`, `INF-09` and `INF-14` appea
 split across milestones. The only ids with no milestone are `INF-21` and `INF-22`, which are informational
 records of checks that came back clear — assigning them work would invent it.
 
-Dependency rule, and it is the most important line in this file: **do not restore EC2 connectivity or add
+Dependency rule, and it was the most important line in this file: **do not restore EC2 connectivity or add
 `EC2_SSH_KNOWN_HOSTS` before Infra-M2 and Infra-M3 land.** Today's missing secret is the only thing preventing an
 ungated production deploy; re-enabling SSH first converts a latent risk into an active one.
+
+**That rule is discharged, not obeyed** — the owner closed EC2 permanently, so there is no connectivity to restore
+and the secret is now an artefact to delete rather than one to provision. The equivalent constraint for the new
+platform, and it is the one to keep: **do not add an OCI deployment workflow until Infra-M2's required status
+checks are switched on.** The failure mode that made EC2 dangerous was a pipeline that could run on merge with no
+gate upstream; deleting the EC2 workflow removes that exposure, and building the OCI one before the gate exists
+recreates it on a host that will actually be reachable.
+
+---
+
+## 10. The third mandate's historical findings, re-classified against the repository
+
+Mandate §3 lists fourteen previously observed issues and forbids repeating them as assumptions. Each row below was
+re-checked against the working tree or a live measurement on 2026-11-01, in the vocabulary the mandate asks for —
+**OPEN · FIXED · VERIFIED · RETIRED · SUPERSEDED · NOT REPRODUCIBLE**.
+
+| Mandate §3 item | Classification | Evidence from this pass |
+|---|---|---|
+| Employee-ID vs user-ID mismatch (BKL-08) | **OPEN** | untouched by any merged branch; still tracked in [REPOSITORY_AUDIT.md §16](../audit/REPOSITORY_AUDIT.md) as *Open — new* |
+| PostgreSQL exposed on `0.0.0.0:5432` | **OPEN** | measured, not inferred: `docker ps` showed `0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp` on this machine (INF-02) |
+| Backend image runs as root | **OPEN** | `docker exec … id -u` → `0`; `Config.User` empty in both built images (INF-08) |
+| Frontend uses `npm install` | **OPEN** | `gms_frontend/Dockerfile` build stage; belongs with Infra-M1 (INF-09) |
+| Dockerfiles skip/blur test vs production stages | **OPEN** | `gms_backend/Dockerfile:11` runs `mvn -DskipTests package`, so the shipped jar is never built from a tested compile (INF-09) |
+| Makefile uses obsolete `docker-compose` | **OPEN** | 16 of 17 recipes; `make build` → `Error 1`, `make up` → exit 2 on this host (INF-12) |
+| Vercel routed API calls to the retired EC2 host over HTTP | **RETIRED (by deletion)** | `gms_frontend/vercel.json` deleted on this branch. Before deleting it, the target was probed: DNS still resolves to `65.0.109.47`, TCP connect to `:8080` times out after 8 s — the rewrite could not carry traffic, so removing it breaks no working path |
+| Old EC2 SSH deployment workflow | **RETIRED (by deletion)** | `.github/workflows/deploy-backend.yml` deleted; `gh run list` confirms its last attempt (41245769175) never reached the host |
+| CI does not validate its own workflow files | **OPEN** | proved twice: pushing a `ci.yml` edit started no run (INF-23) |
+| Lint and test checks advisory rather than enforced | **OPEN** | `required_status_checks.contexts=[]`, `enforce_admins=false`, lint step `continue-on-error: true` (INF-10) |
+| No Flyway migration foundation | **OPEN** | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` property is inert (OPS-07) |
+| No independently verified off-host backup/restore | **OPEN** | zero dumps and zero restores exist anywhere; now re-targeted at managed Neon (ADR-009) |
+| No verified production health check | **SUPERSEDED** | there is no production to check — the only target that ever had one is closed. Re-states itself as a Phase 6 gate: external HTTPS + health verification against the OCI origin |
+| No verified production deployment | **SUPERSEDED** | same cause. The rollback/deploy acceptance tests from Infra-M3 carry forward unchanged and now apply to OCI |
+
+Nothing in that table is marked FIXED on the strength of a code change, and two items moved classification for a
+reason worth stating plainly: the EC2 rows are **RETIRED**, which is not the same as **FIXED** — the exposures they
+described were deleted along with a host that had already stopped answering, and the discipline they were warning
+about still has to be built for the new platform.
+
+## 11. What I can execute directly, and the genuine human blockers
+
+Mandate §23 asks for this split explicitly, so it is recorded rather than discovered later by trial.
+
+| Capability | Reach today | Evidence |
+|---|---|---|
+| Repository, branches, PRs, workflow files | **Full** | `gh` authenticated as the owner; token scopes `gist, read:org, repo, workflow`; `workflow_dispatch` and `workflow` edits both work |
+| Branch protection / required checks / secrets inventory | **Full (admin)** | `gh api …/branches/master/protection` reads and writes; `gh secret list` works. Values are never readable, only their names — by design |
+| Backend/frontend builds, tests, container builds | **Full locally** | `mvn`, `node`, `docker`/Compose v5.6.1, BuildKit present; arm64 already matches the OCI target. Needs Colima started, which costs nothing but time |
+| Oracle Cloud provisioning | **None** | no `oci` binary, no `~/.oci/config`, no `terraform`, no OCI env vars; the embedded browser cannot boot the console — `cloud.oracle.com` fails its own manifest fetches (`TypeError: Failed to fetch` ×2) and the tab wedges. Installing `oci-cli` is possible; authenticating it is not |
+| Neon provisioning | **None** | no `neonctl`, no API key, no account session. `neonctl` installs from npm; auth needs the owner's login |
+| DNS for `bytencia.com` | **Unknown** | no registrar/DNS provider identified in the repository or in tooling. Until DNS is reachable, Caddy has no hostname to obtain a certificate for, so INF-01 cannot close |
+
+**The blockers are therefore exactly four, and all four are human-only for a named reason:**
+
+1. **Neon account** — creation needs email verification (mandate §8.1 permits stopping here and nowhere earlier).
+   After that, an API key or `neonctl auth` session lets me create `gms-production` and the least-privilege role.
+2. **OCI API credentials** — an API signing key pair plus `tenancy/user/fingerprint/region` in `~/.oci/config`, or
+   a console session I can drive. The private key must never enter chat or git (§9.3, §14); it is written locally by
+   the owner, and I only ever read the config path.
+3. **DNS access for `bytencia.com`** — which provider serves the zone, and a record I can add. Free if it is the
+   registrar's own DNS.
+4. **The branch-protection decision, stated under this table** — the one blocker that is a *choice* rather than a
+   credential.
+
+**The protection problem, stated once.** `required_approving_review_count = 1` with
+`require_last_push_approval = true` cannot be satisfied on a single-account repository, because GitHub refuses an
+author's own approval. Every PR so far has therefore needed an `--admin` override, which mandate §2 forbids and
+§43 of the new mandate implicitly contradicts by asking me to manage the PR lifecycle myself. The two are only
+reconcilable by changing the rule: make `Backend build and tests` and `Frontend lint and build` **required** with
+`strict` and `enforce_admins: true`, and set the review count to `0`. That converts a decoration into a gate that
+binds the owner too — and it is the only repository-settings change in the programme I cannot justify making alone.

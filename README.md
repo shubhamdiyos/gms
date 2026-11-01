@@ -259,7 +259,7 @@ rather than left to rot.
 | `npm test` | fails: `gms_frontend/package.json` has no `test` script and no runner is installed. CI's "Unit tests" step runs it with `continue-on-error: true`, so that step always fails and is swallowed — it proves nothing and is labelled as such (`ci.yml`) |
 | `npm run lint` | runs, and currently reports 47 errors across 22 files (FE-14); advisory in CI, with the count recorded there |
 | JaCoCo | bound to `prepare-agent` + `report` at `verify`, so coverage is measured; there is still no coverage **threshold** that can fail a build |
-| CI | **two** workflows now: `.github/workflows/ci.yml` builds and tests on PRs and on `master`, and `.github/workflows/deploy-backend.yml` deploys to production on push to `master` with no build or test job upstream of it, and none of the checks are marked **required** (OPS-01, INF-10) |
+| CI | **one** workflow: `.github/workflows/ci.yml` builds and tests on PRs and on `master`. Its checks are still not marked **required** (OPS-01, INF-10). The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` now deploys nothing anywhere |
 | `scripts/verify-security.sh` | 18 executable security assertions against a local boot — see [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md) §13.2 |
 
 What is still missing is the part that makes refactoring safe: no integration tests against a real database, no
@@ -278,7 +278,10 @@ database only.
 
 ## 📄 License
 
-This project is licensed under the MIT License - see the [LICENSE](LICENSE) file for details.
+**No license has been chosen for this project.** The repository contains no `LICENSE` file, and this section
+previously claimed MIT and linked a file that does not exist — corrected rather than quietly deleted, because
+choosing a license is an owner decision with legal effect, not a documentation detail. Until one is recorded,
+default copyright terms apply and nothing here may be assumed reusable.
 
 ## 👥 Team
 

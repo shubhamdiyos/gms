@@ -478,23 +478,113 @@ after.
 non-200 responses is reported in the runbook; SIGTERM mid-request is tested to prove in-flight work completes;
 blue/green may only be claimed after a rollback is executed by switching the upstream back.
 
+## Amendments — the third mandate (cloud infrastructure & production execution, 2026-11-01)
+
+The owner supplied the target platform the audit could only ask about: Oracle Cloud Always Free ARM64 compute, a
+fresh owner-owned Neon PostgreSQL, Caddy, and an existing domain (`bytencia.com`) that must not be repurchased.
+That is a **superseding input**, so the affected decisions are amended here rather than rewritten in place — the
+original text above stays as the record of what was known and why it was chosen then.
+
+| ADR | Amendment | New status |
+|---|---|---|
+| 001 Keep EC2 + Compose | **Superseded by ADR-015.** The owner states the EC2 infrastructure is *permanently closed* and is not a deployment target. The "host survey that cannot be performed" is no longer pending — it is moot. Compose survives; the host does not. | **Superseded** |
+| 003 Caddy + real TLS | **Un-blocked on cost, still blocked on access.** The domain exists and is owned, so the ~$10–15/yr line in the audit's cost ledger is withdrawn. What remains is DNS control: a record can only be added where `bytencia.com`'s DNS is actually hosted, and Caddy can only issue a certificate once that record resolves to the OCI public IP. | **Proposed → Accepted, pending DNS access** |
+| 005 Keep SSH, version the deployment | **Superseded by ADR-017** for the transport question. The `EC2_SSH_KNOWN_HOSTS` constraint that ordered the whole programme dies with the EC2 host, and the dead-secret inventory changes: `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY` become artefacts to delete, not to complete. | **Superseded** |
+| 006 Flyway baseline | **The blocker disappears and is replaced by a different one.** There is no production schema to export — the target database is fresh, so `baseline-on-migrate` is not the path; V1 must be *generated from the JPA model* and validated against a disposable PostgreSQL before anything connects. The audit's `ddl-auto=validate` + Flyway-enabled `prod` profile is now the intended first boot, not a migration of unknown data. | **Proposed → Accepted (fresh baseline)** |
+| 008 Staging as a second project | Capacity is no longer unknown in the abstract: the target shape is declared as 2 OCPU / 12 GB / ~100 GB. That is enough to stop deferring the question, but the numbers are *requested*, not *verified* — Always Free eligibility and Mumbai capacity must be measured on the real account (ADR-015's verification step) before staging is promised. | **Proposed (capacity declared, unverified)** |
+| 009 Encrypted dumps, tested restores | Source changes from a self-hosted container to **managed Neon**, which changes what "off-host" means: the dump leaves a third party's service rather than a volume on your own box. The mandate is explicit that Neon free-tier restore is *not* an accepted substitute, so the requirement stands and the free destination must be verified against current limits, not tutorial claims. | **Accepted, mechanism re-targeted** |
+| 013 Vercel SPA, API-only origin | The "API-only origin" half is now about OCI, not EC2. The `vercel.json` rewrite that pointed `/api/*` at `http://ec2-…:8080` is **deleted in this branch**: the host is closed (TCP connect to 65.0.109.47:8080 times out after 8 s, DNS still resolves), so the rewrite could not be carrying traffic and its removal cannot break a working path. Until the OCI origin and TLS exist, the deployed SPA has **no API route at all** — a deliberate, stated gap rather than a silent one. | **Proposed, origin re-targeted** |
+
+### ADR-015 — Oracle Cloud Always Free ARM64 as the compute target
+
+**Status:** Accepted as the target; **not provisioned**. **Date:** 2026-11-01.
+
+**Context.** The mandate names `VM.Standard.A1.Flex` (2 OCPU / 12 GB, Ubuntu 24.04 ARM64, ~100 GB boot volume) in
+India West (Mumbai) on an already-active account, free tier only. The audit's ADR-001 could not recommend a
+replacement for EC2 because the existing host could not be measured; the owner has now removed that need by
+closing it.
+
+**Decision.** GMS targets one OCI ARM64 virtual machine running Docker Compose, behind Caddy, with the database
+external (Neon). Nothing is created until eligibility, capacity and charge are read from the real account.
+
+**Alternatives rejected.** *Managed PaaS (Fly.io/Railway/Render/Paasfly)* — free tiers there are metered
+hours/credits and routinely convert to bills, which fails "₹0 infrastructure expenditure" less safely than an
+Always Free ARM shape with a declared allowance. *Kubernetes* — already rejected (ADR-007) and unjustifiable for
+one service pair. *Keeping EC2* — not available; the account is closed.
+
+**Consequences.** Every image must be built for `linux/arm64` — the audit's build evidence on this machine is
+already arm64 (Colima), but the CI build job must publish multi-arch or arm64 explicitly or the deploy pulls the
+wrong architecture. Outbound traffic and any ephemeral-public-IP policy must be checked against current OCI
+terms, not remembered ones. A self-managed VM keeps the whole hardening surface (mandate §9.4: SSH, firewall,
+unattended-upgrades, Docker daemon not exposed, non-root deploy user) that a PaaS would have absorbed.
+
+**Cost.** ₹0 target. **Verification.** `oci instance get` + the console's own eligibility flag, the shape's
+`available` capacity response in `ap-mumbai-1`, a zero line in the billing report after 24 h, and
+`uname -m` = `aarch64` over SSH.
+
+### ADR-016 — Fresh owner-owned Neon as the production database; the old Neon is retired, not migrated
+
+**Status:** Accepted; **account not created**. **Date:** 2026-11-01.
+
+**Context.** The credential committed in `application.properties` before M1 (SEC-01) belonged to a **friend's**
+Neon account. The owner does not control that account and cannot rotate, restore or migrate from it.
+
+**Decision.** Treat the old database as RETIRED: no access attempts, no recovery, no data migration, no host or
+project identifier reintroduced anywhere — including in git history, which will still contain the literal. A new
+project (`gms-production`, database `gms`, Free plan, `ap-southeast-1` if suitable) is created under the owner's
+own account, and the schema arrives only through the Flyway V1 of ADR-006.
+
+**Alternatives rejected.** *Ask the friend to rotate the credential* — it keeps production dependent on an account
+the project does not own, which is the actual risk SEC-01 was about. *Dump and restore the old data* — explicitly
+forbidden by the mandate, and the schema is not reproducible from the repository anyway (OPS-07).
+
+**Consequences.** SEC-01's remediation changes shape: the exposure can never be *revoked by the project*, only
+*abandoned*, so the finding closes as **RETIRED (unrotatable by design)** with the residual risk owned by the
+friend's account, and the repository's obligation is that no live configuration references it. A fresh database
+also means **no data exists to test against**, which makes the synthetic-fixture work (Phase 1) a prerequisite for
+every integration and tenant-isolation test rather than a nicety.
+
+**Cost.** ₹0 (Free plan) — limits to be read from the account, not from documentation. **Verification.** The
+project exists under the owner's login, the connection string is TLS-only and pooled, the app boots against it
+with `ddl-auto=validate`, and `git grep` for the retired host returns only historical documentation.
+
+### ADR-017 — Deployment transport to OCI, decided after the host exists
+
+**Status:** **Proposed** — deliberately not accepted yet. **Date:** 2026-11-01.
+
+**Context.** ADR-005 kept SSH because the alternative was to rewrite a working (if undocumented) pipeline. There is
+no pipeline now: `deploy-backend.yml` is deleted in this branch, so the question is open on a clean slate.
+
+**Options to choose between, once the VM is real:** (a) SSH + `docker compose pull && up -d` from a versioned
+`scripts/deploy.sh`, with an OCI-generated key pair and a pinned `known_hosts`; (b) a registry-pull systemd unit
+with no SSH in the deploy path at all; (c) an OCI-native mechanism if the account's free terms make one
+available. The mandate's rules apply to all three — never deploy untrusted PR code, never expose a private key,
+deployment approval before the deploy step, health verification after it.
+
+**Why not decided now.** Choosing a transport before measuring the host is how the EC2 pipeline became an
+untracked remote script. **Verification.** Whichever wins, the acceptance test is the same one Infra-M3 always
+required: one deploy observed end-to-end on a non-production target, and **one rollback executed**.
+
 ---
 
 ## Summary
 
 | ADR | Decision | Status | Needs the owner |
 |---|---|---|---|
-| 001 | Keep existing EC2 + Compose | Accepted, contingent | host access / survey |
+| 001 | Keep existing EC2 + Compose | **Superseded by 015** (host permanently closed) | — |
 | 002 | Three compose files | Accepted | — |
-| 003 | Caddy + real TLS | Proposed | **domain purchase** |
+| 003 | Caddy + real TLS | Accepted, pending DNS access | **where `bytencia.com` DNS is hosted** |
 | 004 | GHCR, SHA tags, digest pinning | Accepted | `packages: write` allowance |
-| 005 | SSH kept, deployment versioned | Accepted | `EC2_SSH_KNOWN_HOSTS`, reviewer setup |
-| 006 | Flyway, forward-only, expand-migrate-verify-contract | Proposed | **authorised prod schema export** |
+| 005 | SSH kept, deployment versioned | **Superseded by 017** | — |
+| 006 | Flyway, forward-only, expand-migrate-verify-contract | Accepted, **fresh baseline** (no prod export needed) | — |
 | 007 | No Kubernetes | Accepted | — |
-| 008 | Staging as a second project | Proposed | capacity measurement, masked fixture |
-| 009 | Encrypted dumps, tested restores | Accepted / destination blocked | **off-host destination approval** |
+| 008 | Staging as a second project | Proposed (capacity declared, unverified) | masked fixture |
+| 009 | Encrypted dumps, tested restores | Accepted, re-targeted at Neon | **off-host destination approval** |
 | 010 | Logs + health now, Prometheus later | Accepted | — |
 | 011 | Artefacts on master only | Accepted | — |
 | 012 | `Infra-M` vs security `M` naming | Accepted | — |
-| 013 | Vercel SPA, API-only origin | Proposed | domain decision |
+| 013 | Vercel SPA, API-only origin | Proposed, origin re-targeted; EC2 rewrite deleted | domain decision |
 | 014 | Declared interruption, no zero-downtime claim | Accepted | — |
+| 015 | OCI Always Free ARM64 VM + Compose | Accepted as target, **not provisioned** | **console login / MFA / API keys; free-eligibility confirmation** |
+| 016 | Fresh owner-owned Neon; old Neon retired | Accepted, **not created** | **account creation, email verification** |
+| 017 | OCI deployment transport | Proposed, deferred until the host exists | — |
