@@ -88,7 +88,13 @@ column (DB-03). Missing natural-key constraints remain: `employees.email`, `stud
 
 JSON-in-TEXT columns used for sets: `notifications.recipient_ids`, `announcements.target_ids`, `messages.recipient_ids`, `financial_reports.report_data` — unqueryable and unindexable (DB-04).
 
-Two competing audit-column conventions: `BaseAuditEntity` maps `created_on`/`updated_on`, while 8 entities inline `created_at`/`updated_at`; `Exam`, `Section`, `SchoolCalendar` declare **both** (four timestamp columns) (DB-05).
+Two competing audit-column conventions: `BaseAuditEntity` maps `created_on`/`updated_on`, while 8 entities inline `created_at`/`updated_at`; `Exam`, `Parent`, `SchoolCalendar`, `Section` declare **both** (four timestamp columns) (DB-05). *Re-measured 2026-11-01 by a source-level set intersection over `model/entity/`: 28 of 36 entities extend `BaseAuditEntity`, 12 declare a `created_at` column, so the intersection — the entities carrying both conventions — is **four**, not the three this line previously named. `Parent` was the missed one; its `@CreationTimestamp` sits at the end of the class after the `parent_student` `@JoinTable`, which is where a scan of the class header does not look.*
+
+Some natural keys that are *logically* per-school are declared `unique = true` **globally**, which lets one tenant occupy a number the next tenant needs: `designations.designation_id`, `invoices.invoice_number`, `receipts.receipt_number` and `communication_templates.template_code` (`grep -rn "unique = true" model/entity/` → **8** hits, of which those four are the defective ones; the other four — `schools.school_code`, `users.username`, `parents.email`, and `timetables.classroom_id` via `@JoinColumn(unique = true)` — are global or tenant-shaped by intent). A second school cannot be issued `INV-0001`. Numbered **DB-07** — `DB-06` was already spent on the soft-delete finding in `TECHNICAL_DEBT §1`, and `docs/README §1`'s namespace rule treats a repeated id as a defect in the index rather than a coincidence. Resolved by `ARCHITECTURE.md §5`'s composite `(school_id, …)` uniques and sequenced at Stage 2 B-3.
+
+The `timetables.classroom_id` `unique = true` is a different defect wearing the same syntax: it does not merely collide across tenants, it forbids a classroom from ever having a second academic year's timetable — which is `ACD-06`'s and MVP item 7's blocker, and `ARCHITECTURE.md §5` replaces it with `uq (classroom_id, academic_year)`.
+
+**`schools.school_id` is not a tenant key.** `School.java:24` maps a `varchar(20)` display code (`SCH001`) under the *same column name* the rest of the schema uses for the tenant FK, so the generated schema has a `school_id` column on **26** tables while only **25** carry the tenant. Any `WHERE school_id = :id` written against `schools` silently compares a string code to an integer id. Recorded as a design constraint on Stage 2's naming, not as a rename (a rename would break every generated schema in the field): the FK columns are `school_id integer REFERENCES schools(id)`, and the display code stays `schools.school_id varchar(20)`.
 
 **No schema is version-controlled.** Zero `.sql` files, no `flyway-core` or Liquibase dependency, yet `application.properties:16-17` enables Flyway against a nonexistent `classpath:db/migration`. `ddl-auto=validate` therefore validates against a schema that exists only inside the live Neon instance (DB-01).
 
@@ -133,6 +139,18 @@ Two competing audit-column conventions: `BaseAuditEntity` maps `created_on`/`upd
 *Impact:* `DELETE /api/v1/schools/{id}` is reachable by any ADMIN (path rule `SecurityConfig.java:43` grants ADMIN) and hard-deletes another tenant's school row. `GET/DELETE /api/v1/users/{id}`, `/parents/{id}` require only "authenticated", so a STUDENT can read or delete any account — while `GET /api/v1/users/{id}` also discloses cross-tenant PII.
 *Remediation:* delete the inherited endpoints; require each controller to declare explicit, tenant-checked, role-gated operations. Alternatively keep the base class but make it abstract-only and never map it.
 *Verification:* `MockMvc` matrix asserting 403/404 for cross-tenant `DELETE` on each of the 7 resources (mandate §6 scenarios).
+*Re-measured 2026-11-01, on `master` at `bcbb71c`, for [ENGINEERING_ROADMAP.md Stage 3 C-1](../ENGINEERING_ROADMAP.md):*
+the finding is right about the mechanism and stale about the surface. `grep -rl "extends AbstractCRUDController"
+controller/` returns **6**, not seven — `UserController.java:25` declares `class UserController` with no base class,
+so `/users/{id}` is its own hand-written pair of handlers (`:65`, `:70`), which is why PR #21's guard on that read did
+not touch this finding at all. Live unguarded surface today: `GET /{id}` inherited on **3** (`ParentController`,
+`StudentController`, `EmployeeController`; overridden at `SubjectController:64`, `ClassroomController:64`,
+`SchoolController:81`), `DELETE /{id}` inherited on **all 6** — `EmployeeController.java:68` maps `/toggle`, a
+different path that does not shadow `/{id}` — and the comment at `EmployeeController.java:65-67` records that a
+hand-written `getById` was deleted *because* the base class supplied one. `getAll` is overridden in all six, so the
+unfiltered-`findAll` half of this finding is **not currently reachable**: closed by six copies of a rule, not by a
+mechanism, and the reason [ARCHITECTURE.md §6](../ARCHITECTURE.md) deletes the base class instead of guarding it
+(`ADR-023`).
 
 ### P1 — major
 
@@ -217,6 +235,36 @@ code.
 *Verification:* `git grep "hasRole("` returns nothing; `scripts/verify-security.sh` §3 asserts a real SUPERADMIN token
 reaches `/users`, `/users/me` and `/actuator/info` and is refused `/students/my-fees` with 403 (checked, not assumed:
 both the allow and the deny path are exercised).
+
+**SEC-17 — Thirty-nine authorisation guards name a role the application cannot issue.**
+Found while writing the Stage-1 role matrix ([PRODUCT_REQUIREMENTS.md §3, D-1](../PRODUCT_REQUIREMENTS.md)), and the
+sibling of SEC-16 rather than a repeat of it: SEC-16 was closed by moving `hasRole` to `hasAnyAuthority` on the bare
+role code, and that fix is what makes the *contents* of those strings finally legible. Measured on 2026-11-01:
+`grep -rhoE "hasAnyAuthority\([^)]*\)" controller/ | sort | uniq -c` returns ten distinct expressions across 206
+guards on 232 mappings, and **39** of them contain `ACCOUNTANT` — all of `StudentFeeController`, `FeeController`,
+`FeePaymentController`, `FeeStructureController`, `InvoiceController`, `ReceiptController`,
+`FinancialReportController`, `FinancialDashboardController`, `FinancialTransactionController`, plus
+`config/SecurityConfig.java`. `ACCOUNTANT` is **not in `RoleEnum.java:7-11`** (SUPERADMIN, ADMIN, TEACHER, STUDENT,
+PARENT), appears **nowhere** in `gms_frontend/src`, and is unissuable by construction: the only path that assigns
+requested roles runs `RoleEnum.fromCode(code)` (`UserServiceImpl.java:109`, whose own comment reads
+*"throws for anything outside the vocabulary"*).
+*Impact:* every money endpoint is reachable **only** as `ADMIN`, so the segregation of duties those guards were
+written to express does not exist, and the person who runs a school also records, edits and reports payments.
+Fail-closed, therefore not a hole — which is exactly why it has survived unnoticed: nothing 403s, nothing breaks,
+and the module simply gets used by the wrong person. It is also a lie in the API surface, because the code advertises
+a role that no token can carry. Mirror-image defect at the same commit: `AuthController.java:162-164` assigns the
+literal `"EMPLOYEE"`, which is outside `RoleEnum` too (so it bypasses `authoriseRoles` entirely) and which **no**
+guard anywhere names — a role that can be issued and protects nothing.
+*Remediation:* a product decision first ([PRODUCT_REQUIREMENTS.md §10 D-1](../PRODUCT_REQUIREMENTS.md)): either
+`ACCOUNTANT` becomes a real role — enum value, provisioning path, frontend affordance, and the ten guards keep their
+meaning — or the 39 guards collapse to `ADMIN` and the string disappears from the codebase. Either way `EMPLOYEE` is
+resolved in the same change: add it to the vocabulary and guard with it, or stop issuing it. What is *not* an option
+is the current state, where the guard is documentation.
+*Verification:* one test per role that issues a real token and calls one endpoint guarded for that role asserting
+200, plus the mirror assertion that a role which should not reach it gets 403 — the claim set in a token decides
+access, not the string in an annotation. `grep -rn "ACCOUNTANT\|EMPLOYEE" gms_backend/src/main/java/` must then be
+either empty or fully backed by a role the JWT can carry. Sequenced in [ENGINEERING_ROADMAP.md
+Stage 3 C-6](../ENGINEERING_ROADMAP.md).
 
 ### Tenant isolation (mandate §6)
 

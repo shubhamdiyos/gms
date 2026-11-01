@@ -2,6 +2,19 @@
 
 A comprehensive School Management System built with Spring Boot and React, featuring role-based access control, multi-tenant architecture, and complete CRUD operations.
 
+> **Read this sentence before believing the one above it.** "Multi-tenant architecture" describes the *data model*
+> (25 of 36 entities carry a `school_id`), not the *enforcement*: [docs/audit/REPOSITORY_AUDIT.md](docs/audit/REPOSITORY_AUDIT.md)
+> records `TEN-01…07`, including entities with no tenant column at all and inherited endpoints with no ownership
+> check. "Complete CRUD operations" is literally true of `AbstractCRUDController`, which auto-registers an unguarded
+> `DELETE /{id}` on six resources (`SEC-05`) and is scheduled for deletion by `ADR-023`.
+>
+> **Where the authoritative documents are:** [docs/README.md](docs/README.md) is the index of who owns what. The
+> sequence and the definition of done are [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md); the frozen
+> product scope is [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md); module boundaries, the tenancy
+> mechanism and the index design are [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). **Nothing in GMS has been
+> deployed**, and no stage past Stage 1 has started. Setup commands below are real; the state of testing is stated
+> honestly in [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md).
+
 ## 🚀 Features
 
 ### 🔐 Authentication & Authorization
