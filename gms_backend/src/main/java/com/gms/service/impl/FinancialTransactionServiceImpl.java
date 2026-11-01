@@ -8,7 +8,7 @@ import com.gms.model.response.FinancialTransactionResponse;
 import com.gms.repository.FinancialTransactionRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.FinancialTransactionService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Service
-public class FinancialTransactionServiceImpl extends AbstractCRUDService<FinancialTransaction, Integer> implements FinancialTransactionService {
+public class FinancialTransactionServiceImpl implements FinancialTransactionService {
 
     private final FinancialTransactionRepository financialTransactionRepository;
     private final SchoolRepository schoolRepository;
@@ -28,20 +28,19 @@ public class FinancialTransactionServiceImpl extends AbstractCRUDService<Financi
     public FinancialTransactionServiceImpl(FinancialTransactionRepository financialTransactionRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(financialTransactionRepository);
         this.financialTransactionRepository = financialTransactionRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<FinancialTransactionResponse> createFinancialTransaction(FinancialTransactionRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FinancialTransactionResponse> createFinancialTransaction(FinancialTransactionRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create financial transaction
@@ -66,18 +65,13 @@ public class FinancialTransactionServiceImpl extends AbstractCRUDService<Financi
     }
 
     @Override
-    public ResponseEntity<FinancialTransactionResponse> updateFinancialTransaction(Integer id, FinancialTransactionRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FinancialTransactionResponse> updateFinancialTransaction(Integer id, FinancialTransactionRequest request) {
         // Validate financial transaction exists
         FinancialTransaction financialTransaction = financialTransactionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial transaction not found"));
 
-        // Validate school
-        if (!financialTransaction.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update financial transaction
@@ -99,18 +93,13 @@ public class FinancialTransactionServiceImpl extends AbstractCRUDService<Financi
     }
 
     @Override
-    public ResponseEntity<?> deleteFinancialTransaction(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteFinancialTransaction(Integer id) {
         // Validate financial transaction exists
         FinancialTransaction financialTransaction = financialTransactionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial transaction not found"));
 
-        // Validate school
-        if (!financialTransaction.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
@@ -122,37 +111,33 @@ public class FinancialTransactionServiceImpl extends AbstractCRUDService<Financi
     }
 
     @Override
-    public ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions(Integer schoolId) {
-        List<FinancialTransaction> financialTransactions = financialTransactionRepository.findBySchoolIdAndStatus(schoolId, "SUCCESS");
+    public ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions() {
+        List<FinancialTransaction> financialTransactions = financialTransactionRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "SUCCESS");
         return ResponseEntity.ok(financialTransactions);
     }
 
     @Override
-    public ResponseEntity<FinancialTransaction> getFinancialTransactionById(Integer id, Integer schoolId) {
+    public ResponseEntity<FinancialTransaction> getFinancialTransactionById(Integer id) {
         FinancialTransaction financialTransaction = financialTransactionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial transaction not found"));
-
-        if (!financialTransaction.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(financialTransaction);
     }
 
     @Override
-    public ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<FinancialTransaction> financialTransactions = financialTransactionRepository.findBySchoolIdAndTransactionDateBetween(schoolId, startDate, endDate);
+    public ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<FinancialTransaction> financialTransactions = financialTransactionRepository.findBySchoolIdAndTransactionDateBetween(TenantContext.schoolId(), startDate, endDate);
         return ResponseEntity.ok(financialTransactions);
     }
 
     @Override
-    public BigDecimal getTotalIncomeByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        return financialTransactionRepository.getTotalIncomeBySchoolIdAndDateRange(schoolId, startDate, endDate);
+    public BigDecimal getTotalIncomeByDateRange(LocalDate startDate, LocalDate endDate) {
+        return financialTransactionRepository.getTotalIncomeBySchoolIdAndDateRange(TenantContext.schoolId(), startDate, endDate);
     }
 
     @Override
-    public BigDecimal getTotalFeeCollection(Integer schoolId) {
-        return financialTransactionRepository.getTotalFeeCollectionBySchoolId(schoolId);
+    public BigDecimal getTotalFeeCollection() {
+        return financialTransactionRepository.getTotalFeeCollectionBySchoolId(TenantContext.schoolId());
     }
 
     private FinancialTransactionResponse mapToResponse(FinancialTransaction financialTransaction) {

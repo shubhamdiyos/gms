@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 @Setter
 @Entity
 @Table(name = "email_logs")
-public class EmailLog extends BaseAuditEntity {
+public class EmailLog extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

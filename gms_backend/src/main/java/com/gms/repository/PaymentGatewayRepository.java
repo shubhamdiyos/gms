@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface PaymentGatewayRepository extends JpaRepository<PaymentGateway, Integer> {
+public interface PaymentGatewayRepository extends TenantScopedRepository<PaymentGateway> {
 
     List<PaymentGateway> findBySchoolIdAndIsActive(Integer schoolId, Boolean isActive);
 

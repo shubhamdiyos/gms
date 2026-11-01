@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.*;
 import com.gms.enums.RoleEnum;
 import com.gms.exception.NotFoundException;
@@ -15,10 +16,14 @@ import com.gms.model.response.EmployeeResponse;
 import com.gms.model.response.AnnouncementResponse;
 import com.gms.model.response.NotificationResponse;
 import com.gms.repository.StudentRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
-import com.gms.util.SecurityUtil;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -27,12 +32,26 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
 import java.util.List;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.time.LocalDate;
 
 @Service
 @Transactional
-public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> implements StudentService {
+public class StudentServiceImpl implements StudentService {
+
+    /** The page size a caller gets when they omit {@code size}, and the ceiling on any {@code size}. */
+    private static final int DEFAULT_SEARCH_SIZE = 20;
+    private static final int MAX_SEARCH_SIZE = 100;
+
+    /**
+     * The {@link Student} properties a client may sort by. Anything outside this set falls back to
+     * {@link #DEFAULT_SEARCH_FIELD} rather than being handed to the query, so an unknown or hostile sort
+     * name cannot make Spring Data fail to build the {@code order by} and throw at request time.
+     */
+    private static final Set<String> SORTABLE_STUDENT_FIELDS = Set.of(
+            "id", "firstName", "lastName", "email", "studentId", "dateOfBirth", "gender");
+    private static final String DEFAULT_SEARCH_FIELD = "lastName";
 
     private final StudentRepository studentRepository;
     private final SchoolService schoolService;
@@ -49,7 +68,6 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     private final TeacherAssignmentService teacherAssignmentService;
 
     public StudentServiceImpl(StudentRepository studentRepository, SchoolService schoolService, ClassroomService classroomService, SectionService sectionService, UserService userService, PasswordEncoder passwordEncoder, ResultService resultService, StudentFeeService studentFeeService, TimetableService timetableService, AnnouncementService announcementService, SubjectService subjectService, NotificationService notificationService, TeacherAssignmentService teacherAssignmentService) {
-        super(studentRepository);
         this.studentRepository = studentRepository;
         this.schoolService = schoolService;
         this.classroomService = classroomService;
@@ -66,12 +84,12 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     }
 
     @Override
-    public ResponseEntity<StudentResponse> create(StudentRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<StudentResponse> create(StudentRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        Student student = createStudentFromRequest(request, new Student(), empId, schoolId);
+        Student student = createStudentFromRequest(request, new Student());
         Student savedStudent = studentRepository.save(student);
 
         // Create a corresponding User for the Student
@@ -80,7 +98,8 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
         return ResponseEntity.ok(toResponse(savedStudent));
     }
 
-    private void createUserForStudent(Student student) {
+    @Override
+    public void createUserForStudent(Student student) {
         if (userService.existsByEmail(student.getEmail())) {
             // Or link to existing user if that's a desired feature
             throw new IllegalStateException("A user with this email already exists.");
@@ -101,26 +120,26 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     }
 
     @Override
-    public Student createStudentFromRequest(StudentRequest request, Student student, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public Student createStudentFromRequest(StudentRequest request, Student student) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         Classroom classroom = classroomService.findById(request.getClassId())
                 .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-        if (!classroom.getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Classroom does not belong to current school");
+        if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Classroom does not belong to current school");
         }
 
         Section section = null;
         if (request.getSectionId() != null) {
             section = sectionService.findById(request.getSectionId())
                     .orElseThrow(() -> new EntityNotFoundException("Section not found"));
-            if (!section.getSchoolId().equals(schoolId)) {
-                throw new IllegalArgumentException("Section does not belong to current school");
+            if (!section.getSchoolId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Section does not belong to current school");
             }
         }
 
@@ -130,7 +149,7 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
         student.setSection(section);
 
         // Generate a simple unique studentId within the school: STD###
-        String generatedId = generateStudentId(schoolId);
+        String generatedId = nextStudentId();
         student.setStudentId(generatedId);
         student.setStatus("1");
 
@@ -139,16 +158,110 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
 
     @Override
     @Transactional(readOnly = true)
-    public List<Student> findBySchool(Integer schoolId) {
-        return studentRepository.findAllBySchool_IdAndStatusNot(schoolId, "0");
+    public List<Student> findBySchool() {
+        return studentRepository.findAllBySchool_IdAndStatusNot(TenantContext.schoolId(), "0");
+    }
+
+    /**
+     * Paged, filtered, free-text student search within the caller's tenant (MVP feature #9).
+     *
+     * <p><b>Which branch answers which caller.</b> The tenant is read from {@link TenantContext}, never
+     * from a request parameter. When {@link TenantContext#readsAcrossTenants()} is true — the platform
+     * owner ({@code SUPERADMIN}) — the query is passed a {@code null} tenant filter and its
+     * {@code :schoolId is null} arm returns every school's students, so a SUPERADMIN search is not
+     * silently empty. When it is false — a school {@code ADMIN} — the caller's own {@code schoolId} is
+     * bound into the {@code s.school.id} predicate and the search is confined to that school. A bounded
+     * caller whose token carries no tenant is failed closed here with an empty page rather than being
+     * handed the cross-tenant arm: a missing claim must never widen reach.</p>
+     *
+     * <p>The result is mapped through the existing {@link #toResponse} so a {@code Student} becomes a
+     * {@code StudentResponse} exactly the way every other student endpoint already does it, and the
+     * {@code Page} wrapper carries {@code totalElements}/{@code totalPages} to the client.</p>
+     */
+    @Override
+    @Transactional(readOnly = true)
+    public Page<StudentResponse> searchStudents(String query, Integer classId, int page, int size, String sort) {
+        Pageable pageable = buildPageable(page, size, sort);
+
+        boolean crossTenant = TenantContext.readsAcrossTenants();
+        Integer schoolId = TenantContext.schoolId();
+
+        if (!crossTenant && schoolId == null) {
+            // A school caller with no tenant claim sees nothing, not every school.
+            return Page.empty(pageable);
+        }
+
+        Integer tenantFilter = crossTenant ? null : schoolId;
+        String trimmedQuery = (query == null || query.isBlank()) ? null : query.trim();
+
+        Page<Student> students = studentRepository.findStudents(tenantFilter, classId,
+                buildSearchPattern(trimmedQuery), pageable);
+        return students.map(this::toResponse);
+    }
+
+    /**
+     * The LIKE pattern a free-text search runs on: trimmed, lowercased, escaped, and only then wrapped in
+     * wildcards — in that order, because wrapping first would have the escaper rewrite the {@code %} that
+     * makes the search a substring match.
+     *
+     * <p>{@code !} is the escape character and is doubled before {@code %} and {@code _} are escaped, so a
+     * query of {@code 100%} matches the text {@code 100%} rather than every row in the school. The pattern
+     * is built here rather than by {@code concat()} in the query because Hibernate renders the latter as
+     * {@code … escape ''}, and Postgres answers an empty escape character with
+     * {@code function lower(bytea) does not exist} — which was a 500 on every call to the endpoint.</p>
+     */
+    private String buildSearchPattern(String query) {
+        if (query == null) {
+            return null;
+        }
+        String escaped = query.toLowerCase()
+                .replace("!", "!!")
+                .replace("%", "!%")
+                .replace("_", "!_");
+        return "%" + escaped + "%";
+    }
+
+    /**
+     * A {@link Pageable} that cannot fail: the page is floored at 0, the size falls back to
+     * {@link #DEFAULT_SEARCH_SIZE} for any non-positive value and is capped at {@link #MAX_SEARCH_SIZE},
+     * and the sort is resolved through {@link #buildSort}.
+     */
+    private Pageable buildPageable(int page, int size, String sort) {
+        int safePage = Math.max(0, page);
+        int safeSize = size <= 0 ? DEFAULT_SEARCH_SIZE : Math.min(size, MAX_SEARCH_SIZE);
+        return PageRequest.of(safePage, safeSize, buildSort(sort));
+    }
+
+    /**
+     * Parses a {@code field} or {@code field,direction} sort string against
+     * {@link #SORTABLE_STUDENT_FIELDS}. An unrecognised field — or no field at all — falls back to
+     * {@link #DEFAULT_SEARCH_FIELD}; only a literal {@code desc} (any case) reverses the order.
+     */
+    private Sort buildSort(String sort) {
+        String field = DEFAULT_SEARCH_FIELD;
+        Sort.Direction direction = Sort.Direction.ASC;
+        if (sort != null && !sort.isBlank()) {
+            String[] parts = sort.split(",");
+            String candidate = parts[0].trim();
+            if (SORTABLE_STUDENT_FIELDS.contains(candidate)) {
+                field = candidate;
+            }
+            if (parts.length > 1 && "desc".equalsIgnoreCase(parts[1].trim())) {
+                direction = Sort.Direction.DESC;
+            }
+        }
+        return Sort.by(direction, field);
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Student getById(Integer id, Integer schoolId) {
+    public Student getById(Integer id) {
         Student student = studentRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId) || "0".equals(student.getStatus())) {
-            throw new IllegalArgumentException("Student does not belong to current school");
+        // The scoped load already answered the tenancy question, so the hand-written school
+        // comparison is gone; what remains is the archive rule, which is business state rather than
+        // tenancy and which the platform owner is not exempt from either.
+        if ("0".equals(student.getStatus())) {
+            throw new IllegalArgumentException("Student is archived");
         }
         return student;
     }
@@ -160,13 +273,16 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     }
 
     @Override
-    public ResponseEntity<StudentResponse> update(StudentRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<StudentResponse> update(StudentRequest request) {
         if (request.getId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Student student = studentRepository.findById(request.getId()).orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId) || "0".equals(student.getStatus())) {
+        // The scoped load above already filtered on the caller's school, so the hand-written
+        // school comparison is gone; what remains is the archive rule, which the platform owner
+        // is not exempt from either.
+        if ("0".equals(student.getStatus())) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
         }
         
@@ -180,16 +296,16 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
         if (request.getClassId() != null) {
             Classroom classroom = classroomService.findById(request.getClassId())
                     .orElseThrow(() -> new EntityNotFoundException("Classroom not found"));
-            if (!classroom.getSchool().getId().equals(schoolId)) {
-                throw new IllegalArgumentException("Classroom does not belong to current school");
+            if (!classroom.getSchool().getId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Classroom does not belong to current school");
             }
             student.setClassroom(classroom);
         }
         if (request.getSectionId() != null) {
             Section section = sectionService.findById(request.getSectionId())
                     .orElseThrow(() -> new EntityNotFoundException("Section not found"));
-            if (!section.getSchoolId().equals(schoolId)) {
-                throw new IllegalArgumentException("Section does not belong to current school");
+            if (!section.getSchoolId().equals(TenantContext.schoolId())) {
+                throw new TenantAccessDeniedException("Section does not belong to current school");
             }
             student.setSection(section);
         } else {
@@ -202,13 +318,11 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     }
 
     @Override
-    public ResponseEntity<?> toggleStudent(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleStudent(Integer id, Boolean isActive) {
         Student existing = studentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        if (!existing.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
-        }
+        // The scoped load answers the tenancy question; a foreign id never reaches here.
 
         existing.setStatus(isActive ? "1" : "0");
 
@@ -219,7 +333,7 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     @Override
     @Transactional(readOnly = true)
     public StudentResponse getMyProfile() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         User user = userService.findByUsername(username)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 
@@ -231,14 +345,15 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
         return toResponse(student);
     }
 
-    private String generateStudentId(Integer schoolId) {
+    @Override
+    public String nextStudentId() {
         int counter = (int) (studentRepository.count() + 1); // coarse; acceptable for now
         String candidate;
         int attempts = 0;
         do {
             candidate = String.format("STD%03d", counter + attempts);
             attempts++;
-        } while (studentRepository.existsBySchool_IdAndStudentId(schoolId, candidate) && attempts < 10000);
+        } while (studentRepository.existsBySchool_IdAndStudentId(TenantContext.schoolId(), candidate) && attempts < 10000);
         if (attempts >= 10000) throw new IllegalStateException("Unable to generate unique student ID");
         return candidate;
     }
@@ -308,7 +423,7 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
 
         // Get subjects for the student's classroom using service
         // Temporarily simplified - will be enhanced when proper service methods are available
-        List<Subject> subjects = subjectService.findBySchool(student.getSchoolId());
+        List<Subject> subjects = subjectService.findBySchool();
         return subjects.stream()
                 .map(this::toSubjectResponse)
                 .collect(Collectors.toList());
@@ -368,23 +483,27 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
                 .collect(Collectors.toList());
     }
 
+    /**
+     * The caller's class timetable, answered by the timetable service — the same read
+     * {@code GET /timetables/student/me} makes, so the school has one implementation of it rather than
+     * a second walk over the same rows.
+     *
+     * <p>A classroom whose timetable has not been built yet is a school still onboarding, not a
+     * student with a broken portal: that one case answers an empty list, which is what this route's
+     * contract is. A caller with no student profile still fails, because that is a broken account
+     * rather than missing data.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public List<TimetableResponse> getMyTimetable(String username) {
-        User user = userService.findByUsername(username)
-                .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
-
-        Student student = user.getStudent();
-        if (student == null) {
-            throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
+        try {
+            return List.of(timetableService.getTimetableForAuthenticatedStudent(username));
+        } catch (NotFoundException ex) {
+            if ("TIMETABLE_NOT_FOUND".equals(ex.getCode())) {
+                return List.of();
+            }
+            throw ex;
         }
-
-        // Use timetable service to get classroom timetable
-        // Temporarily using a mock implementation since TimetableService.findBySchool doesn't exist yet
-        List<Timetable> timetables = Collections.emptyList(); // TODO: Implement proper service method
-        return timetables.stream()
-                .map(this::toTimetableResponse)
-                .collect(Collectors.toList());
     }
 
     @Override
@@ -491,15 +610,6 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
         StudentFeeResponse response = new StudentFeeResponse();
         response.setId(studentFee.getId());
         response.setStudentId(studentFee.getStudent().getId());
-        // TODO: Map other fields when entity structure is confirmed
-        return response;
-    }
-
-    private TimetableResponse toTimetableResponse(Timetable timetable) {
-        // Simplified response to avoid field access issues
-        TimetableResponse response = new TimetableResponse();
-        response.setId(timetable.getId());
-        response.setClassroomId(timetable.getClassroom().getId());
         // TODO: Map other fields when entity structure is confirmed
         return response;
     }

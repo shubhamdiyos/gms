@@ -1,6 +1,7 @@
 
 package com.gms.model.entity;
 
+import com.fasterxml.jackson.annotation.JsonIgnore;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -9,11 +10,16 @@ import lombok.Setter;
 @Setter
 @Entity
 @Table(name = "timetable_slots")
-public class TimetableSlot extends BaseAuditEntity {
+public class TimetableSlot extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "school_id", nullable = false)
+    private School school;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "timetable_id", nullable = false)

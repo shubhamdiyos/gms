@@ -100,6 +100,278 @@ jobs:
             exit 1
           fi
 
+      - name: The two path filters are still complementary
+        # `ci.yml` ignores `.github/**` and this file triggers on exactly that set — the pairing that
+        # closed INF-23. `docs/**`, root `*.md` and `infra/**/*.md` are ignored by CI for the reason in
+        # that file's header: PR #20's nested prose file started three build jobs for no reason, and
+        # the same 140 seconds is what a deleted line here buys back.
+        #
+        # Every `pull_request` and `push` block has its own copy of the list, so the guard counts
+        # occurrences against the number of blocks rather than just looking for one match. Control run
+        # 2026-11-02: deleting `infra/**/*.md` from the pull_request block only — the exact mistake PR
+        # #20 fixed — passed the naive "does the string appear anywhere" check and goes red against
+        # this one.
+        run: |
+          set -euo pipefail
+          missing=0
+          blocks=$(grep -cE '^[[:space:]]+paths-ignore:' .github/workflows/ci.yml || true)
+          if [ "$blocks" -lt 1 ]; then
+            echo "::error::ci.yml has no paths-ignore block at all — every documentation PR now starts a build"
+            exit 1
+          fi
+          for pattern in 'docs/**' '*.md' 'infra/**/*.md' '.github/**' 'gms_backend/memory-bank/**'; do
+            found=$(grep -cF -- "- '${pattern}'" .github/workflows/ci.yml || true)
+            if [ "$found" -lt "$blocks" ]; then
+              echo "::error::ci.yml ignores ${pattern} in ${found} of ${blocks} trigger blocks — a filter that only covers one of them still starts jobs on the paths it should skip"
+              missing=1
+            fi
+          done
+          pblocks=$(grep -cE '^[[:space:]]+paths:' .github/workflows/validate-workflows.yml || true)
+          pcovers=$(grep -cF -- "- '.github/**'" .github/workflows/validate-workflows.yml || true)
+          if [ "$pblocks" -lt 1 ] || [ "$pcovers" -lt "$pblocks" ]; then
+            echo "::error::validate-workflows.yml triggers on .github/** in ${pcovers} of ${pblocks} blocks — this gate can no longer validate its own edits"
+            missing=1
+          fi
+          exit "$missing"
+
+      - name: Every required context still exists under the same name
+        # A required status check is matched by its job display name, so a rename is not cosmetic: it
+        # silently un-gates the rule the owner configured, and with `strict` on it stalls every PR
+        # instead. The names below are the contract; the step that enforces it fails the run when the
+        # contract is broken, and the job-name guard below catches the looser version of the same
+        # mistake (a name built from an expression, or a job that has no name at all).
+        run: |
+          set -euo pipefail
+          missing=0
+          for pair in \
+            "ci.yml|Backend build and tests" \
+            "ci.yml|Frontend lint and build" \
+            "ci.yml|Verify scripts syntax and presence" \
+            "ci.yml|Infrastructure definitions" \
+            "validate-workflows.yml|Lint every workflow" \
+            "validate-workflows.yml|Check trigger sets and permissions"; do
+            file="${pair%%|*}"
+            context="${pair#*|}"
+            if ! grep -qxF "    name: ${context}" ".github/workflows/${file}"; then
+              echo "::error::${file} no longer declares the job name '${context}' — branch protection for that context is now dead or stalling"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Every job declares a stable literal name
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -e "$f" ] || continue
+            ids=$(awk '/^jobs:/{j=1;next} j&&/^[^ ]/{exit} j&&/^  [a-zA-Z0-9_-]+:/{sub(/^  /,"");sub(/:$/,"");print}' "$f")
+            for id in $ids; do
+              line=$(awk -v id="$id" '$0=="  "id":"{found=1;next} found&&/^  [a-zA-Z0-9_-]+:/{exit} found&&/^    name: /{print;exit}' "$f")
+              if [ -z "$line" ]; then
+                echo "::error::$(basename "$f"): job ${id} has no display name, so its check context is the raw job id and drifts with any refactor"
+                missing=1
+                continue
+              fi
+              case "$line" in
+                *'${{'*)
+                  echo "::error::$(basename "$f"): job ${id} builds its display name from an expression — a required status check cannot track a name that changes per run"
+                  missing=1 ;;
+              esac
+            done
+          done
+          exit "$missing"
+
+      - name: No failure is downgraded to a pass
+        # The owner's standing rule, made mechanical. Measured 2026-11-02: zero occurrences across all
+        # workflows, so the ceiling is zero and there is no pre-existing debt for a new downgrade to
+        # hide inside — `ci.yml` used to keep two of them here (the lint step and a `npm test` call
+        # against a script that does not exist), and both are gone. Adding one back turns this gate red
+        # on the PR that adds it, which is the point: a step that cannot fail the run is not a check.
+        #
+        # The rule covers three shapes, and the second is the one a careful author still reaches for:
+        # the `|| true` that "documents" a command's non-zero exit. It is banned at statement level,
+        # because a step that ends its own command in `|| true` has decided in advance that the command
+        # may not matter. It is allowed inside `$( … )` and `< <( … )`, where a no-match grep legitimately
+        # means "nothing found" and the verdict is computed on the lines below from a value that is
+        # actually inspected (the OpenTofu guard capture, the `grep -c` counters in the two path-filter
+        # steps above). The distinction is visible in the text of the line, so it is checkable.
+        run: |
+          set -euo pipefail
+          downgrades=0
+          if hits=$(grep -rnE '^[[:space:]]*(-[[:space:]]+)?continue-on-error:[[:space:]]*true' .github/workflows/); then
+            printf '%s\n' "$hits"
+            echo "::error::a step or job set to keep going after failing is a silent pass; fix the failure or argue its irrelevance in writing"
+            downgrades=1
+          fi
+          python3 - <<'PY'
+          import glob, re, sys
+
+          SWALLOW = re.compile(r"\|\|[ \t]+(?:true|[ \t]*:[ \t]*)[ \t]*$")
+          off, seen = [], 0
+          for path in sorted(glob.glob(".github/workflows/*.y*ml")):
+              with open(path, encoding="utf-8") as fh:
+                  for lineno, line in enumerate(fh, 1):
+                      seen += 1
+                      stripped = line.strip()
+                      if stripped.startswith("#"):
+                          continue          # prose about the rule is not an instance of it
+                      if not SWALLOW.search(line):
+                          continue
+                      if "$(" in line or "<(" in line:
+                          continue          # capture of a legitimately-empty result
+                      off.append(f"{path}:{lineno}: {stripped}")
+          if off:
+              for hit in off:
+                  print(f"::error::{hit}")
+              print("::error::a statement-level `|| true` neutralises the command it is attached to; "
+                    "compute the verdict from the output instead, or capture the status in a variable "
+                    "and refuse the unexpected values (as the frontend Lint step does)")
+              sys.exit(1)
+          print(f"no statement-level exit-status swallow in {seen} workflow lines")
+          PY
+          exit "$downgrades"
+
+      - name: Every arch rule class in the tree is in the CI contract
+        # `ci.yml`'s tenancy gate lists six rule classes by fully-qualified name. That list is the
+        # contract, and a list can go stale in the dangerous direction: a seventh `*ArchTest` added to
+        # the tree without being added to the contract is compiled, executed and *uncontracted* — the
+        # named-class step never counts it, so deleting it later goes unnoticed. The guard reads the
+        # source tree (which is why it lives in this workflow, not in `ci.yml`) and fails when a rule
+        # class is missing from the contract. Adding the class name to `ci.yml` is the fix; the
+        # discovery step in the backend job independently proves whatever is in the tree actually ran.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, re, sys
+
+          with open(".github/workflows/ci.yml", encoding="utf-8") as fh:
+              contract = fh.read()
+          PKG = re.compile(r"^[ \t]*package[ \t]+([\w.]+)[ \t]*;", re.M)
+
+          missing, listed = [], 0
+          for path in sorted(glob.glob("gms_backend/src/test/java/**/*ArchTest.java", recursive=True)):
+              with open(path, encoding="utf-8") as fh:
+                  text = fh.read()
+              stem = os.path.basename(path)[: -len(".java")]
+              if not re.search(r"\bclass[ \t]+" + re.escape(stem) + r"\b", text):
+                  print(f"::error::{path}: named `{stem}` but declares no class `{stem}` - surefire "
+                        f"keys on the class, not the file")
+                  sys.exit(1)
+              pkg = PKG.search(text)
+              fqcn = (pkg.group(1) + "." if pkg else "") + stem
+              listed += 1
+              if f'"{fqcn}"' not in contract:
+                  missing.append(f"{fqcn} ({path})")
+
+          if missing:
+              for item in missing:
+                  print(f"::error::{item} is a rule class in the tree and not a member of the "
+                        f"REQUIRED list in ci.yml's `Tenancy arch gates executed` step, so no gate "
+                        f"names it")
+              sys.exit(1)
+          print(f"arch contract: {listed} rule class(es) in the tree, all named in ci.yml")
+          PY
+
+      - name: No step runs a script that is not in the tree
+        # The failure mode a parallel workstream creates: a step wired to `scripts/verify-mvp-e2e.sh`
+        # before that file is committed. The run dies on `No such file or directory`, which reads as a
+        # build regression and is really a reference to a path that does not exist. `ci.yml` handles
+        # this with a presence probe (`Which live suites are in this tree`) and a per-step `if:`; a step
+        # whose own `if:` names that probe is exempt, because the guard *is* the check. Everything else
+        # must point at a file that exists in this commit. Enumeration in a `for` list is not an
+        # invocation and is not matched, so the probe's own loop stays legal.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, re, sys
+
+          INLINE = re.compile(r"^[\s-]*run:[ \t]+(?:bash[ \t]+|sh[ \t]+)?((?:\./)?scripts/[A-Za-z0-9._/-]+\.sh)")
+          BLOCKED = re.compile(r"^[ \t]+(?:bash|sh)[ \t]+(scripts/[A-Za-z0-9._/-]+\.sh)")
+          IF_LINE = re.compile(r"^[ \t]+if:[ \t]*")
+          # A new step begins here, and an `if:` belongs to exactly one step: carrying one step's
+          # presence gate onto its neighbour would exempt a line that has no guard at all, which is the
+          # one way this check can produce a false pass. Every step-start resets it.
+          STEP_START = re.compile(r"^[ \t]*-[ \t]+(?:name|uses|run):")
+          PROBE = "steps.probe.outputs"
+
+          bad, checked = [], 0
+          for path in sorted(glob.glob(".github/workflows/*.y*ml")):
+              with open(path, encoding="utf-8") as fh:
+                  lines = fh.readlines()
+              gated = False
+              for index, line in enumerate(lines, 1):
+                  if STEP_START.match(line):
+                      gated = False
+                  if IF_LINE.match(line):
+                      gated = PROBE in line
+                      continue
+                  hit = INLINE.match(line) or BLOCKED.match(line)
+                  if not hit:
+                      continue
+                  target = hit.group(1)
+                  if target.startswith("./"):
+                      target = target[2:]
+                  checked += 1
+                  if gated:
+                      continue
+                  if not os.path.isfile(target):
+                      bad.append(f"{path}:{index}: runs `{target}`, which is not in this tree - gate "
+                                 f"the step on the presence probe or add the file")
+          if bad:
+              for item in bad:
+                  print(f"::error::{item}")
+              sys.exit(1)
+          print(f"script references: {checked} invocation(s), every target present or presence-gated")
+          PY
+
+      - name: Every job runs on a GitHub-hosted ubuntu-latest
+        # The zero-unexpected-cost rule as a line in a gate rather than a promise: `runs-on:` is the
+        # only place a workflow can start spending money, so this refuses every other label — a
+        # self-hosted runner, a larger macOS/Windows image, a `runs-on: [self-hosted, …]` array —
+        # before a PR can bill for it. Measured 2026-11-02: every job in both workflows is
+        # `ubuntu-latest`, and no job, step or service declares a container.
+        run: |
+          set -euo pipefail
+          bad=0
+          while IFS= read -r hit; do
+            [ -n "$hit" ] || continue
+            case "$hit" in
+              *'runs-on: ubuntu-latest'*) continue ;;
+            esac
+            echo "::error::$hit — only ubuntu-latest is authorised; a different label is a cost decision the owner has not taken"
+            bad=1
+          done < <(grep -rnE '^[[:space:]]*runs-on:' .github/workflows/ || true)
+          if hits=$(grep -rnE '^[[:space:]]*([a-z-]+-)?image:[[:space:]]|^[[:space:]]*container:' .github/workflows/); then
+            printf '%s\n' "$hits"
+            echo "::error::a container or service image in a workflow is the new-precedent step the owner reserved for themselves"
+            bad=1
+          fi
+          exit "$bad"
+
+      - name: A secret value can only reach the environment, never a log
+        # A `secrets.` reference is legal on exactly one shape: an `env:` or `with:` mapping whose whole
+        # value is that reference, so it lands in the process environment. Interpolated into a command
+        # it can be echoed, and `set -x` would print every argument of every command that runs. The
+        # secret *names* in ci.yml's disabled live-tenancy stub are public and stay as they are — this
+        # comment avoids the interpolation shape on purpose, because the guard reads its own file.
+        run: |
+          set -euo pipefail
+          leaked=0
+          while IFS= read -r hit; do
+            [ -n "$hit" ] || continue
+            echo "$hit"
+            leaked=1
+          done < <(awk '/\$\{\{[[:space:]]*secrets\./ && !/^[[:space:]]*[A-Za-z0-9_]+:[[:space:]]*\$\{\{[[:space:]]*secrets\.[A-Za-z0-9_]+[[:space:]]*\}\}$/ {print FILENAME":"FNR": "$0}' .github/workflows/*.yml .github/workflows/*.yaml 2>/dev/null || true)
+          if [ "$leaked" -ne 0 ]; then
+            echo "::error::a secret is interpolated into something other than an env:/with: mapping — it can reach the log"
+            exit 1
+          fi
+          if grep -rnE '^[[:space:]]*set[[:space:]]+-[a-zA-Z]*x' .github/workflows/; then
+            echo "::error::command tracing is enabled in a workflow; with any secret in the environment it prints values into the log"
+            exit 1
+          fi
+
       - name: Warn on references to retired infrastructure
         run: |
           set -uo pipefail

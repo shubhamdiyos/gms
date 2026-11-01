@@ -44,30 +44,50 @@ export const apiSlice = createApi({
     'Exam',
     'Result',
     'Notification',
-    'Announcement'
+    'Announcement',
+    'Parent',
+    // The dashboard cards aggregate every entity below, so a row that moves a count must refetch them.
+    'Dashboard'
   ],
   endpoints: (builder) => ({
-    // Auth endpoints
-    login: builder.mutation({
-      query: (credentials) => ({
-        url: '/auth/login',
-        method: 'POST',
-        body: credentials,
-      }),
-      transformResponse: (response) => ({
-        token: response.accessToken,
-        tokenType: response.tokenType,
-        expiresIn: response.expiresIn,
-        requirePasswordChange: response.requirePasswordChange,
-      }),
-    }),
-    
     changePassword: builder.mutation({
       query: (passwordData) => ({
         url: '/auth/change-password',
         method: 'POST',
         body: passwordData,
       }),
+    }),
+
+    /**
+     * This caller's school, counted in one round trip (DashboardController.getSchoolDashboard).
+     *
+     * `GET {base}/dashboard/school`, guarded `hasAnyAuthority('ADMIN', 'SUPERADMIN')`, answering
+     * SchoolDashboardResponse: `schoolId`, `totalStudents`, `totalEmployees`, `totalClassrooms`,
+     * `totalSections`, `totalExams` (all counts), `feesCollectedAmount` / `feesUncollectedAmount`
+     * (BigDecimal, so JSON numbers the service already coerces from `null` to `0`) and `generatedAt`
+     * (an ISO-8601 `Instant`).
+     *
+     * The tenant is the token's claim, never a parameter, so there is nothing to pass here. A caller
+     * whose token carries no `schoolId` is answered 401 by design: the alternative is a page of zeros
+     * that reads like a real answer. AdminDashboard renders this and must keep a failed read visible
+     * rather swallow it into `0`.
+     */
+    getSchoolDashboard: builder.query({
+      query: () => '/dashboard/school',
+      providesTags: ['Dashboard'],
+    }),
+
+    /**
+     * Every tenant on the platform, counted (DashboardController.getPlatformDashboard).
+     *
+     * `GET {base}/dashboard/platform`, guarded `hasAuthority('SUPERADMIN')` — a school ADMIN gets 403
+     * before a query runs, so callers must skip this hook unless the user holds SUPERADMIN. Answers
+     * PlatformDashboardResponse: `totalSchools`, `totalUsers`, `totalStudents`, `totalEmployees` and
+     * `generatedAt`. No money fields: cross-tenant sums have no tenant to attribute them to.
+     */
+    getPlatformDashboard: builder.query({
+      query: () => '/dashboard/platform',
+      providesTags: ['Dashboard'],
     }),
 
     // School endpoints (SuperAdmin)
@@ -82,7 +102,7 @@ export const apiSlice = createApi({
         method: 'POST',
         body: school,
       }),
-      invalidatesTags: ['School'],
+      invalidatesTags: ['School', 'Dashboard'],
     }),
     
     updateSchool: builder.mutation({
@@ -91,7 +111,7 @@ export const apiSlice = createApi({
         method: 'PUT',
         body: school,
       }),
-      invalidatesTags: ['School'],
+      invalidatesTags: ['School', 'Dashboard'],
     }),
     
     toggleSchool: builder.mutation({
@@ -99,7 +119,7 @@ export const apiSlice = createApi({
         url: `/schools/toggle?id=${id}&isActive=${isActive}`,
         method: 'PATCH',
       }),
-      invalidatesTags: ['School'],
+      invalidatesTags: ['School', 'Dashboard'],
     }),
     
     getSchoolById: builder.query({
@@ -112,6 +132,48 @@ export const apiSlice = createApi({
       query: () => '/students',
       providesTags: ['Student'],
     }),
+
+    /**
+     * Server-side student search, filtering and pagination (StudentController.search).
+     *
+     * The route is `GET /students/search?query=&classId=&page=&size=&sort=` and it answers a Spring
+     * Data `Page` of `StudentResponse` (`content[]` + `totalElements`/`totalPages`/`number`/`size`/`sort`),
+     * which is a different shape from `GET /students` (a raw `List<Student>` entity dump whose derived
+     * keys are snake_case: `full_name`, `class_id`). `getStudents` is left untouched because
+     * AdminDashboard and ResultsPage still read it.
+     *
+     * Only parameters that are actually set go into the URL: the backend declares every one of
+     * `query`/`classId`/`sort` optional and `page`/`size` defaulted, so sending `query=undefined` or an
+     * empty `classId=` would bind a blank string instead of "no filter".
+     */
+    getStudentSearch: builder.query({
+      query: (args = {}) => {
+        const { query, classId, page, size, sort } = args ?? {};
+        const params = new URLSearchParams();
+        if (query != null && String(query).trim() !== '') {
+          params.set('query', String(query).trim());
+        }
+        if (classId != null && classId !== '' && Number.isFinite(Number(classId))) {
+          params.set('classId', String(Number(classId)));
+        }
+        // `page` is 0-based server-side, so 0 is a meaningful value and must still be sent.
+        if (page != null && Number.isFinite(Number(page))) {
+          params.set('page', String(Number(page)));
+        }
+        if (size != null && Number.isFinite(Number(size))) {
+          params.set('size', String(Number(size)));
+        }
+        if (sort != null && String(sort).trim() !== '') {
+          params.set('sort', String(sort).trim());
+        }
+        // URLSearchParams encodes a space as '+'. Tomcat decodes '+' in a query string back to a
+        // space, but '%20' is unambiguous through every proxy in between; a literal '+' the user
+        // typed is already emitted as '%2B', so this substitution can only touch encoded spaces.
+        const search = params.toString().replace(/\+/g, '%20');
+        return { url: `/students/search${search ? `?${search}` : ''}`, method: 'GET' };
+      },
+      providesTags: ['Student'],
+    }),
     
     createStudent: builder.mutation({
       query: (student) => ({
@@ -119,7 +181,7 @@ export const apiSlice = createApi({
         method: 'POST',
         body: student,
       }),
-      invalidatesTags: ['Student'],
+      invalidatesTags: ['Student', 'Dashboard'],
     }),
     
     updateStudent: builder.mutation({
@@ -128,7 +190,7 @@ export const apiSlice = createApi({
         method: 'PUT',
         body: student,
       }),
-      invalidatesTags: ['Student'],
+      invalidatesTags: ['Student', 'Dashboard'],
     }),
     
     toggleStudent: builder.mutation({
@@ -136,7 +198,7 @@ export const apiSlice = createApi({
         url: `/students/toggle?id=${id}&isActive=${isActive}`,
         method: 'PATCH',
       }),
-      invalidatesTags: ['Student'],
+      invalidatesTags: ['Student', 'Dashboard'],
     }),
 
     // Student role-specific endpoints
@@ -177,7 +239,7 @@ export const apiSlice = createApi({
         method: 'POST',
         body: employee,
       }),
-      invalidatesTags: ['Employee'],
+      invalidatesTags: ['Employee', 'Dashboard'],
     }),
     
     updateEmployee: builder.mutation({
@@ -186,7 +248,7 @@ export const apiSlice = createApi({
         method: 'PUT',
         body: employee,
       }),
-      invalidatesTags: ['Employee'],
+      invalidatesTags: ['Employee', 'Dashboard'],
     }),
 
     toggleEmployee: builder.mutation({
@@ -194,7 +256,7 @@ export const apiSlice = createApi({
         url: `/employees/toggle?id=${id}&isActive=${isActive}`,
         method: 'DELETE',
       }),
-      invalidatesTags: ['Employee'],
+      invalidatesTags: ['Employee', 'Dashboard'],
     }),
 
     // Teacher role-specific endpoints
@@ -211,6 +273,11 @@ export const apiSlice = createApi({
     }),
 
     // Parents
+    getParentProfile: builder.query({
+      query: () => '/parents/profile',
+      providesTags: ['Parent'],
+    }),
+
     getParentChildren: builder.query({
       query: () => '/parents/children',
       providesTags: ['Parent'],
@@ -243,16 +310,16 @@ export const apiSlice = createApi({
         method: 'POST',
         body: classroom,
       }),
-      invalidatesTags: ['Classroom'],
+      invalidatesTags: ['Classroom', 'Dashboard'],
     }),
     
     updateClassroom: builder.mutation({
-      query: ({ id, ...classroom }) => ({
-        url: `/classrooms/${id}`,
+      query: (classroom) => ({
+        url: '/classrooms/update',
         method: 'PUT',
         body: classroom,
       }),
-      invalidatesTags: ['Classroom'],
+      invalidatesTags: ['Classroom', 'Dashboard'],
     }),
     
     deleteClassroom: builder.mutation({
@@ -260,7 +327,7 @@ export const apiSlice = createApi({
         url: `/classrooms/${id}`,
         method: 'DELETE',
       }),
-      invalidatesTags: ['Classroom'],
+      invalidatesTags: ['Classroom', 'Dashboard'],
     }),
 
     // Subject endpoints
@@ -398,8 +465,8 @@ export const apiSlice = createApi({
     
     markNotificationRead: builder.mutation({
       query: (id) => ({
-        url: `/notifications/${id}/read`,
-        method: 'PATCH',
+        url: `/notifications/${id}/mark-read`,
+        method: 'PUT',
       }),
       invalidatesTags: ['Notification'],
     }),
@@ -460,11 +527,11 @@ export const apiSlice = createApi({
     
     createSection: builder.mutation({
       query: (section) => ({
-        url: '/sections/create',
+        url: '/sections',
         method: 'POST',
         body: section,
       }),
-      invalidatesTags: ['Section'],
+      invalidatesTags: ['Section', 'Dashboard'],
     }),
 
     // Timetable endpoints
@@ -488,7 +555,7 @@ export const apiSlice = createApi({
         method: 'POST',
         body: exam,
       }),
-      invalidatesTags: ['Exam'],
+      invalidatesTags: ['Exam', 'Dashboard'],
     }),
 
     updateExam: builder.mutation({
@@ -497,7 +564,7 @@ export const apiSlice = createApi({
         method: 'PUT',
         body: exam,
       }),
-      invalidatesTags: ['Exam'],
+      invalidatesTags: ['Exam', 'Dashboard'],
     }),
 
     deleteExam: builder.mutation({
@@ -505,7 +572,7 @@ export const apiSlice = createApi({
         url: `/exams/${id}`,
         method: 'DELETE',
       }),
-      invalidatesTags: ['Exam'],
+      invalidatesTags: ['Exam', 'Dashboard'],
     }),
 
     getExamsByAcademicYear: builder.query({
@@ -563,8 +630,11 @@ export const apiSlice = createApi({
 // Export hooks for usage in functional components
 export const {
   // Auth
-  useLoginMutation,
   useChangePasswordMutation,
+
+  // Dashboards (aggregate counts and sums; never derived from a list length in the browser)
+  useGetSchoolDashboardQuery,
+  useGetPlatformDashboardQuery,
   
   // Schools
   useGetSchoolsQuery,
@@ -575,6 +645,7 @@ export const {
   
   // Students
   useGetStudentsQuery,
+  useGetStudentSearchQuery,
   useCreateStudentMutation,
   useUpdateStudentMutation,
   useToggleStudentMutation,

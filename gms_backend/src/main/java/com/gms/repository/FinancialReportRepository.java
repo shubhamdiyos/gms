@@ -8,7 +8,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface FinancialReportRepository extends JpaRepository<FinancialReport, Integer> {
+public interface FinancialReportRepository extends TenantScopedRepository<FinancialReport> {
 
     List<FinancialReport> findBySchoolIdOrderByGeneratedDateDesc(Integer schoolId);
 

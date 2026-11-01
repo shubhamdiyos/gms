@@ -11,8 +11,6 @@ import {
   Menu,
   MenuItem,
   Divider,
-  useTheme,
-  useMediaQuery,
   Badge,
   List,
   ListItem,
@@ -32,24 +30,36 @@ import {
   Circle,
 } from '@mui/icons-material';
 import { useAuth } from '../../hooks/useAuth';
+import { ROLES } from '../../constants';
 import { useGetNotificationsQuery } from '../../store/api/apiSlice';
 import Sidebar from './Sidebar';
 
 const DRAWER_WIDTH = 280;
 
+// SecurityConfig's SHARED_READS matcher excludes ACCOUNTANT from /notifications, so the bell must not ask.
+const NOTIFICATION_ROLES = [
+  ROLES.SUPERADMIN,
+  ROLES.ADMIN,
+  ROLES.TEACHER,
+  ROLES.STUDENT,
+  ROLES.PARENT,
+];
+
 const DashboardLayout = () => {
-  const theme = useTheme();
-  const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [mobileOpen, setMobileOpen] = useState(false);
   const [anchorEl, setAnchorEl] = useState(null);
   const [notificationAnchorEl, setNotificationAnchorEl] = useState(null);
-  const { user, logout } = useAuth();
-  
+  const { user, logout, hasAnyRole } = useAuth();
+
   // Fetch notifications
-  const { data: notifications = [], isLoading: notificationsLoading } = useGetNotificationsQuery();
+  const canReadNotifications = hasAnyRole(NOTIFICATION_ROLES);
+  const { data: notifications = [], isLoading: notificationsLoading } = useGetNotificationsQuery(
+    undefined,
+    { skip: !canReadNotifications }
+  );
   
   // Calculate unread notifications count
-  const unreadCount = notifications.filter(n => n.read_status !== 'read').length;
+  const unreadCount = notifications.filter(n => n.readStatus !== 'READ').length;
 
   const handleDrawerToggle = () => {
     setMobileOpen(!mobileOpen);
@@ -245,7 +255,7 @@ const DashboardLayout = () => {
                       <Circle 
                         sx={{ 
                           fontSize: 8, 
-                          color: notification.read_status === 'read' ? '#ccc' : '#ff4444' 
+                          color: notification.readStatus === 'READ' ? '#ccc' : '#ff4444' 
                         }} 
                       />
                     </ListItemIcon>
@@ -254,8 +264,8 @@ const DashboardLayout = () => {
                         <Typography 
                           variant="body2" 
                           sx={{ 
-                            fontWeight: notification.read_status === 'read' ? 'normal' : 'bold',
-                            color: notification.read_status === 'read' ? 'text.secondary' : 'text.primary'
+                            fontWeight: notification.readStatus === 'READ' ? 'normal' : 'bold',
+                            color: notification.readStatus === 'READ' ? 'text.secondary' : 'text.primary'
                           }}
                         >
                           {notification.title || 'Notification'}
@@ -268,7 +278,7 @@ const DashboardLayout = () => {
                           </Typography>
                           <br />
                           <Typography variant="caption" color="text.secondary">
-                            {notification.created_on ? new Date(notification.created_on).toLocaleDateString() : 'No date'}
+                            {notification.createdOn ? new Date(notification.createdOn).toLocaleDateString() : 'No date'}
                           </Typography>
                         </Box>
                       }

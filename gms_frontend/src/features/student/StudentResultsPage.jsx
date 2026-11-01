@@ -1,7 +1,6 @@
 import { Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip } from '@mui/material';
 import { Assessment } from '@mui/icons-material';
 import { useGetMyResultsQuery } from '../../store/api/apiSlice';
-import dayjs from 'dayjs';
 
 const StudentResultsPage = () => {
   const { data: results = [], isLoading } = useGetMyResultsQuery();

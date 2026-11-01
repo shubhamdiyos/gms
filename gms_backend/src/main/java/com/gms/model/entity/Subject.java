@@ -14,7 +14,7 @@ import java.time.Instant;
 @Setter
 @Entity
 @Table(name = "subjects")
-public class Subject {
+public class Subject extends AuthorshipEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

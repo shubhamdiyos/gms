@@ -9,7 +9,7 @@ import com.gms.repository.ParentRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.StudentRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.ParentStudentService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -39,32 +39,30 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<?> assignStudentsToParent(ParentStudentRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> assignStudentsToParent(ParentStudentRequest request) {
         // Validate parent exists
         Parent parent = parentRepository.findById(request.getParentId())
                 .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
 
         // Validate school
-        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(schoolId)) {
+        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("Parent does not belong to this school");
         }
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
-        // Validate all students exist and belong to the same school
+        // Validate all students exist. The scoped StudentRepository.findById already answers the
+        // tenancy question — a foreign id throws — so the hand-written school comparison is gone.
+        // The rows actually attached below still come from the school-filtered query.
         for (Integer studentId : request.getStudentIds()) {
-            Student student = studentRepository.findById(studentId)
+            studentRepository.findById(studentId)
                     .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-
-            if (!student.getSchoolId().equals(schoolId)) {
-                return ResponseEntity.status(403).body("Student does not belong to this school");
-            }
         }
 
         // Get all students
-        List<Student> students = studentRepository.findAllById(request.getStudentIds());
+        List<Student> students = studentRepository.findBySchool_IdAndIdIn(TenantContext.schoolId(), request.getStudentIds());
 
         // Assign students to parent
         parent.getStudents().clear();
@@ -76,27 +74,23 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<?> removeStudentFromParent(Integer parentId, Integer studentId, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> removeStudentFromParent(Integer parentId, Integer studentId) {
         // Validate parent exists
         Parent parent = parentRepository.findById(parentId)
                 .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
 
         // Validate school
-        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(schoolId)) {
+        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).body("Parent does not belong to this school");
         }
 
-        // Validate student exists
-        Student student = studentRepository.findById(studentId)
+        // Validate student exists. The scoped load already filters by the caller's school, so a
+        // foreign id throws rather than reaching a hand-written comparison.
+        studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        // Validate student belongs to the same school
-        if (!student.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).body("Student does not belong to this school");
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Remove student from parent
@@ -107,13 +101,13 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<List<Student>> getStudentsForParent(Integer parentId, Integer schoolId) {
+    public ResponseEntity<List<Student>> getStudentsForParent(Integer parentId) {
         // Validate parent exists
         Parent parent = parentRepository.findById(parentId)
                 .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
 
         // Validate school
-        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(schoolId)) {
+        if (!parent.getStudents().isEmpty() && !parent.getStudents().get(0).getSchoolId().equals(TenantContext.schoolId())) {
             return ResponseEntity.status(403).build();
         }
 
@@ -121,17 +115,13 @@ public class ParentStudentServiceImpl implements ParentStudentService {
     }
 
     @Override
-    public ResponseEntity<List<Parent>> getParentsForStudent(Integer studentId, Integer schoolId) {
-        // Validate student exists
-        Student student = studentRepository.findById(studentId)
+    public ResponseEntity<List<Parent>> getParentsForStudent(Integer studentId) {
+        // Validate student exists; the scoped load already confines the answer to the caller's
+        // school, so the hand-written comparison and its 403 are gone — a foreign id is 404.
+        studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        // Validate school
-        if (!student.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
-        List<Parent> parents = parentRepository.findByStudentsId(studentId);
+        List<Parent> parents = parentRepository.findByStudents_School_IdAndStudents_Id(TenantContext.schoolId(), studentId);
         return ResponseEntity.ok(parents);
     }
 }

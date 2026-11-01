@@ -8,6 +8,19 @@ name: CI
 # line because `*.md` matches only root-level markdown: PR #20 changed `docs/**`
 # files plus `infra/oci/README.md` and nothing else, and that one nested prose
 # file started all three jobs twice — 140 seconds of runner time.
+#
+# What this workflow is FOR, since Stage 3: the six `*ArchTest` classes are the merge gate for
+# `C-3`, `C-4`, `C-5` and `C-7`. They assert declarations — that every repository read carries the
+# tenant, that no service takes `schoolId` back as a parameter, that every mutating handler is
+# annotated — and two steps in the `backend` job prove that those declarations are actually *checked*:
+# `Tenancy arch gates executed` holds the six classes by name (a renamed, excluded, emptied or disabled
+# rule class would otherwise leave `mvn verify` green), and `No test class is silently skipped`
+# enumerates the whole test tree against surefire's discovery patterns, including the `*IT` shape that
+# needs a failsafe binding `pom.xml` does not yet have.
+# Behaviour over HTTP (a second tenant reading the first one's rows and getting 403) is NOT proved
+# here: no job in this repository has ever started a database, `Verification scripts syntax and presence`
+# checks the live suites statically only, and `live-tenancy` at the bottom is the disabled stub that
+# records what that job needs and the secret names it reads.
 
 on:
   pull_request:
@@ -52,7 +65,208 @@ jobs:
           cache: maven
 
       - name: Compile, test and package
-        run: mvn -B verify
+        # `clean` is not decoration. The roadmap records a schema run that "logged no Flyway line at
+        # all" because the jar had been built before the `pom.xml` edit: without `clean`, `package`
+        # reuses a stale artifact and reports success. `clean verify` on a fresh checkout is also what
+        # PRODUCTION_READINESS_MATRIX measures ("`mvn -B verify`"), so the local command and the gate
+        # now run the same thing. `-B` stays for batch output, and the Maven warm cache from
+        # `actions/setup-java` above is the cache-friendly half — no `-o`, because the cache holds
+        # dependencies, not a complete offline repository, and offline mode would fail resolution.
+        run: mvn -B clean verify
+
+      - name: Tenancy arch gates executed
+        # The arch tests are the CI gate, so their execution is asserted rather than assumed. All six
+        # classes end in `ArchTest`, which surefire's default include patterns (`**/Test*.java`,
+        # `**/*Test.java`, `**/*Tests.java`, `**/*TestCase.java`) already discover — verified against
+        # target/surefire-reports on this branch, where each of the six writes its own report. That is
+        # why there is no `<includes>` block to add and no duplicate test: the naming is fine, and the
+        # real risk is that the naming stops being true. Three controls, run 2026-11-02 against doctored
+        # copies of target/surefire-reports, each returned exit 1 naming its class: a report deleted (the
+        # renamed-class or `<excludes>` case), `tests="0"` (the emptied-class case), and `skipped="1"`
+        # (the `@Disabled` case). Without this step all three leave the job green.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, sys, xml.etree.ElementTree as ET
+
+          REQUIRED = (
+              "com.gms.repository.RepositoryTenantScopeArchTest",
+              "com.gms.repository.TenantScopedReadArchTest",
+              "com.gms.model.entity.EntityLazyAccessorArchTest",
+              "com.gms.model.entity.EntityTenantColumnArchTest",
+              "com.gms.security.DenyByDefaultAuthorizationArchTest",
+              "com.gms.security.TenantParameterArchTest",
+          )
+
+          reports = {}
+          for path in glob.glob("target/surefire-reports/TEST-*.xml"):
+              try:
+                  root = ET.parse(path).getroot()
+              except ET.ParseError as exc:
+                  print(f"::error::unreadable surefire report {path}: {exc}")
+                  sys.exit(1)
+              reports[root.get("name")] = root
+
+          bad, executed, methods = [], 0, 0
+          for cls in REQUIRED:
+              suite = reports.get(cls)
+              if suite is None:
+                  bad.append(f"{cls}: no surefire report - the class did not execute "
+                             f"(renamed away from *Test, excluded, disabled or deleted)")
+                  continue
+              n = int(suite.get("tests") or 0)
+              sk = int(suite.get("skipped") or 0)
+              fa = int(suite.get("failures") or 0)
+              er = int(suite.get("errors") or 0)
+              executed += 1
+              methods += n
+              print(f"ok   {cls}: tests={n} skipped={sk} failures={fa} errors={er}")
+              if n == 0:
+                  bad.append(f"{cls}: produced a report with zero tests - its assertions were "
+                             f"removed or its method names stopped matching the JUnit pattern")
+              if sk:
+                  bad.append(f"{cls}: {sk} test(s) skipped - a disabled architecture rule is an "
+                             f"unguarded rule")
+              if fa or er:
+                  bad.append(f"{cls}: {fa} failure(s) and {er} error(s)")
+
+          if bad:
+              for message in bad:
+                  print(f"::error::{message}")
+              sys.exit(1)
+          print(f"tenancy arch gate: {executed}/{len(REQUIRED)} classes, {methods} rules executed")
+          PY
+
+      - name: No test class is silently skipped
+        # The six-class gate above names the tenancy contract, so it cannot see the seventh rule class
+        # nobody has written yet, or the one a future edit renames. `mvn -B clean verify` is green in
+        # both of those cases and in four more, all of which are surefire's business rather than the
+        # build's: surefire discovers `**/Test*.java`, `**/*Test.java`, `**/*Tests.java`,
+        # `**/*TestCase.java` and nothing else, and it never touches `**/*IT.java` unless
+        # `maven-failsafe-plugin` is bound in `pom.xml` — which it is not, so Stage 5's criterion 5
+        # ("CI runs unit **and** integration jobs") has a silent-skip shape already: an `*IT` class
+        # added tomorrow compiles, runs nowhere, and reports success.
+        #
+        # This step enumerates the source tree instead of trusting the naming: every test source that
+        # declares a JUnit member must (a) carry a name surefire discovers, and (b) appear in
+        # `target/surefire-reports` with at least one test executed and none skipped. It asks nothing of
+        # a source file and duplicates no assertion: when it goes red the fix is build configuration —
+        # an `<include>` for the class, or binding failsafe to the `verify` phase — and the message
+        # says which. The abstract-base exemption is not a loophole: a base class has no test of its
+        # own, and its concrete subclasses are each enumerated in full.
+        #
+        # Run 2026-11-02 against `mvn -B clean verify` on JDK 21: 16 classes, 104 tests, 0 skipped,
+        # step green. Four controls against doctored copies of that same output, each exit 1 naming the
+        # class: the class and file renamed `TenantParameterArchCheck` (the include-pattern message),
+        # its report deleted (the `<excludes>` case), `tests="0"` (the emptied case), and a
+        # `StudentTenantIsolationIT` source with no failsafe bound. A fifth control — an
+        # `abstract class AbstractLiveProbeTest` — stayed silent, as designed.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, re, sys
+          import xml.etree.ElementTree as ET
+
+          # One top-level type per file, its modifiers captured so an abstract base can be recognised
+          # without grepping the whole text for the word -- a comment that mentions `abstract` must not
+          # be able to hide a real rule class.
+          DECL = re.compile(r"^[ \t]*((?:(?:public|private|final|abstract|sealed|strictfp|static)[ \t]+)*)"
+                            r"(?:class|interface|enum|record)[ \t]+([A-Za-z_$][\w$]*)", re.M)
+          MEMBER = re.compile(r"^[ \t]*@(?:Test|ArchTest|TestFactory|ParameterizedTest|RepeatedTest|Nested)\b", re.M)
+          PKG = re.compile(r"^[ \t]*package[ \t]+([\w.]+)[ \t]*;", re.M)
+          FAILSAFE_NAME = re.compile(r"(IT|ITest|ITCase)$")
+
+          def parse(dirglob):
+              out = {}
+              for path in glob.glob(dirglob):
+                  try:
+                      root = ET.parse(path).getroot()
+                  except ET.ParseError as exc:
+                      print(f"::error::unreadable report {path}: {exc}")
+                      sys.exit(1)
+                  out[root.get("name")] = root
+              return out
+
+          reports = parse("target/surefire-reports/TEST-*.xml")
+          fs_reports = parse("target/failsafe-reports/TEST-*.xml")
+          with open("pom.xml", encoding="utf-8") as fh:
+              failsafe_bound = "maven-failsafe-plugin" in fh.read()
+
+          def discovered(simple):
+              return simple.startswith("Test") or simple.endswith(("Test", "Tests", "TestCase"))
+
+          def tally(suite):
+              return (int(suite.get("tests") or 0), int(suite.get("skipped") or 0),
+                      int(suite.get("failures") or 0), int(suite.get("errors") or 0))
+
+          bad, checked, executed, skipped = [], 0, 0, 0
+          for path in sorted(glob.glob("src/test/java/**/*.java", recursive=True)):
+              with open(path, encoding="utf-8") as fh:
+                  text = fh.read()
+              if not MEMBER.search(text):
+                  continue
+              decl = DECL.search(text)
+              if decl is None:
+                  bad.append(f"{path}: declares a JUnit member but no top-level type - there is no "
+                             f"class for surefire to load")
+                  continue
+              modifiers, simple = decl.group(1), decl.group(2)
+              if "abstract" in modifiers:
+                  continue
+              pkg = PKG.search(text)
+              fqcn = (pkg.group(1) + "." if pkg else "") + simple
+              checked += 1
+
+              if FAILSAFE_NAME.search(simple):
+                  if not failsafe_bound:
+                      bad.append(f"{path}: `{simple}` is named for failsafe, but maven-failsafe-plugin "
+                                 f"is not bound in pom.xml. Surefire ignores this pattern, so `mvn "
+                                 f"-B clean verify` stays green with the job unrun: bind failsafe to the "
+                                 f"verify phase (Stage 5 criterion 5) or give the class a surefire name.")
+                  else:
+                      suite = fs_reports.get(fqcn)
+                      if suite is None:
+                          bad.append(f"{path}: no failsafe report for {fqcn} - the integration job did "
+                                     f"not run")
+                      else:
+                          n, sk, fa, er = tally(suite)
+                          executed += n
+                          skipped += sk
+                          if n == 0 or sk or fa or er:
+                              bad.append(f"{fqcn} (failsafe): tests={n} skipped={sk} failures={fa} "
+                                         f"errors={er}")
+                  continue
+
+              if not discovered(simple):
+                  bad.append(f"{path}: `{simple}` matches none of surefire's default include patterns "
+                             f"(**/Test*.java, **/*Test.java, **/*Tests.java, **/*TestCase.java), so it "
+                             f"is compiled and never run. Fix it in the build - add an <include> for it "
+                             f"to surefire - rather than copying its assertions into a class surefire "
+                             f"does see.")
+                  continue
+              suite = reports.get(fqcn)
+              if suite is None:
+                  bad.append(f"{fqcn}: named so surefire would discover it, yet it produced no report - "
+                             f"it did not execute (excluded, disabled, emptied, or its package does not "
+                             f"match its directory)")
+                  continue
+              n, sk, fa, er = tally(suite)
+              executed += n
+              skipped += sk
+              if n == 0:
+                  bad.append(f"{fqcn}: produced a report with zero tests")
+              if sk:
+                  bad.append(f"{fqcn}: {sk} test(s) skipped - a disabled rule is an unguarded rule")
+              if fa or er:
+                  bad.append(f"{fqcn}: {fa} failure(s) and {er} error(s)")
+
+          if bad:
+              for message in bad:
+                  print(f"::error::{message}")
+              sys.exit(1)
+          print(f"discovery gate: {checked} test classes declared, {executed} tests executed, "
+                f"{skipped} skipped")
+          PY
 
       - name: Upload jar
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
@@ -89,21 +303,196 @@ jobs:
       - run: npm ci
 
       - name: Lint
-        run: npm run lint
-        # Measured again on 2026-11-01 (`npx eslint . --format json`): 47 errors across 22 files, 0 warnings,
-        # none introduced by the security package (verified by grouping the output per file — `Login.jsx`
-        # contributes zero). Eight of them sit in the dead `api/[...path].js` proxies from SEC-14. Making this
-        # blocking now would turn the gate into noise and invite a blanket eslint-disable; it
-        # becomes a hard check with the frontend contract package (TECHNICAL_DEBT §2 row 11),
-        # which is also where the errors are actually fixed.
-        continue-on-error: true
+        # Re-measured on 2026-11-02 against this branch: 16 to 18 errors across 6 to 7 files, 0
+        # warnings, and the count moved between two runs an hour apart because the dashboard-wiring PR
+        # is editing those files right now. So the gate is NOT a total — a hardcoded ceiling would fail
+        # this run for somebody else's debt. It is a rule scope: an undefined identifier anywhere under
+        # `src/`, or a fatal parse error anywhere at all, fails the job. That is the class of mistake
+        # the `WC` icon import this session produced, and the `no-undef` hits left outside the gate are
+        # the two dead `api/[...path].js` proxies from SEC-14, which return to it when those files go.
+        #
+        # There is deliberately no continue-on-error on this step. The previous version of it swallowed
+        # every lint failure behind a downgrade justified by a 47-error baseline; a step that cannot
+        # fail is not a gate, and `Workflow validation` now refuses the key outright.
+        run: |
+          set -euo pipefail
+          json="$RUNNER_TEMP/eslint.json"
+          # The repo's own script (`eslint .`), asked for JSON. eslint exits 1 when it merely finds
+          # lint errors -- including the debt this step does not gate on -- so its status is captured
+          # here and the verdict is computed from the JSON below rather than from the exit code of a
+          # command. Anything *other* than 0 or 1 is eslint failing to run at all (a broken config, a
+          # missing plugin: exit 2), and that fails the step on its own rather than being swallowed.
+          # There is no `|| true` on this line: the standing rule is that no failing command may be
+          # neutralised in place, and `Workflow validation` now refuses the statement-level form.
+          # Four controls run 2026-11-02 against this step, each exit 1: a `no-undef` planted at
+          # `src/pages/Dashboard.jsx:41` (the exact `WC` icon shape), a fatal parse error outside `src/`,
+          # an empty `[]` result set (linted nothing), and a stubbed `npm` that exits 2 (did not lint).
+          # Against the real tree the step is green: 16 errors / 0 warnings, 0 in the gated classes.
+          rc=0
+          npm run --silent lint -- --format json > "$json" || rc=$?
+          if [ "$rc" -gt 1 ]; then
+            echo "::error::eslint exited $rc, not 0 (clean) or 1 (findings reported): it failed to run at all, so there is no verdict to compute. A broken eslint.config.js must not be allowed to look like a green lint."
+            exit 1
+          fi
+          python3 - "$json" <<'PY'
+          import json, os, sys
 
-      - name: Unit tests
-        run: npm test -- --run --watchAll=false
-        continue-on-error: true          # Vitest/RTL arrive with M3; must not block merges yet
+          BLOCKING = {"no-undef"}
+          root = os.getcwd() + os.sep
+          try:
+              with open(sys.argv[1], encoding="utf-8") as fh:
+                  reports = json.load(fh)
+          except Exception as exc:
+              print(f"::error::eslint produced no parsable JSON ({exc}); a lint step that cannot "
+                    f"read its own output cannot be trusted, so it fails")
+              sys.exit(1)
+
+          if not reports:
+              print("::error::eslint reported on zero files - the run linted nothing, which is not a "
+                    "clean frontend but an empty scan")
+              sys.exit(1)
+
+          offences, errors, warnings, dirty = [], 0, 0, 0
+          for report in reports:
+              path = report.get("filePath", "")
+              rel = path[len(root):] if path.startswith(root) else path
+              errors += report.get("errorCount", 0)
+              warnings += report.get("warningCount", 0)
+              if report.get("errorCount", 0) or report.get("warningCount", 0):
+                  dirty += 1
+              for message in report.get("messages", []):
+                  if message.get("severity") != 2:
+                      continue
+                  rule = message.get("ruleId")
+                  fatal = bool(message.get("fatal"))
+                  if (rule in BLOCKING and rel.startswith("src/")) or fatal:
+                      offences.append((f"{rel}:{message.get('line')} {rule or 'fatal parse error'}",
+                                       "an identifier used but never imported or declared throws in the "
+                                       "browser at runtime" if rule else
+                                       "the file does not parse, so nothing downstream of it is shipped"))
+
+          line = (f"frontend lint: {errors} error(s) / {warnings} warning(s) across {dirty} file(s); "
+                  f"{len(offences)} in the gated classes (`no-undef` under `src/`, any fatal parse error)")
+          print(line)
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as fh:
+                  fh.write(line + "\n")
+                  for offence, _reason in offences:
+                      fh.write(f"- {offence}\n")
+
+          if offences:
+              for offence, reason in offences:
+                  print(f"::error::{offence} - {reason}")
+              sys.exit(1)
+          PY
+
+      - name: Frontend unit tests
+        # The step this workflow used to run was `npm test -- --run` with continue-on-error, against a
+        # `package.json` that has no `test` script — measured 2026-11-02: the script set is
+        # dev/build/lint/preview. So it failed every run and the failure was discarded, which reads as
+        # a passing "Unit tests" check while nothing was tested. It now runs the suite if and when one
+        # exists and says plainly in the summary when it does not (Stage 4's criterion is a frontend
+        # test count above zero; today it is zero, and that fact belongs in the log, not in a downgrade).
+        run: |
+          set -euo pipefail
+          if python3 -c 'import json,sys; sys.exit(0 if "test" in json.load(open("package.json")).get("scripts", {}) else 1)'; then
+            npm test -- --run --watchAll=false
+          else
+            echo "::notice::no test script in gms_frontend/package.json - zero frontend unit tests ran"
+            echo "frontend unit tests: NOT PRESENT (0 tests; Vitest/RTL arrive with M3)" >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Production build
+        # The blocking step. Vite/Rollup resolves every import and every named export at build time,
+        # which is precisely what catches a bad icon import before it reaches a browser.
         run: npm run build
+
+  verification_scripts:
+    name: Verify scripts syntax and presence
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # The cheap static half of the live suite, runnable with no database and no backend.
+    #
+    # `scripts/verify-mvp-e2e.sh` and `scripts/verify-perf-50k.sh` are being written on another branch
+    # of this same effort, and were still untracked when this job was added. Two rules meet here: a gate
+    # must never reference a path that may be missing (the run would go red for the wrong reason), and a
+    # missing verification suite must never be reported as proved. So nothing below names those files in
+    # a command line: the steps glob the tree, and the presence of each live suite is *reported*, not
+    # asserted. Absent today means "not in the tree, nothing claimed"; present means the two hard checks
+    # below bind it immediately, on the same commit that adds it — a truncated heredoc from a parallel
+    # edit (`bash -n`) or a script committed at mode 644 while its own header documents running it as
+    # `./scripts/verify-mvp-e2e.sh` (`os.X_OK`) fail this job, and only this job, at merge time.
+    #
+    # GitHub cannot skip a whole job on the contents of the tree — `jobs.<id>.if` is evaluated before
+    # `actions/checkout` — which is why the absence handling is a glob plus a report rather than an
+    # `if:`. The job that *would* run these suites is `live-tenancy` at the bottom of this file, and its
+    # per-script steps are individually gated on the same presence probe, so it inherits the property:
+    # enabling it tomorrow cannot reference a file that is not there.
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Every script in the tree parses and is executable as documented
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, os, subprocess, sys
+
+          # The suites that assert behaviour over HTTP, and the seed the perf suite measures against.
+          # Listed for reporting only: none of these paths is opened, executed or required.
+          LIVE_SUITES = [
+              "scripts/verify-c1-tenancy.sh",
+              "scripts/verify-c2-tenant-context.sh",
+              "scripts/verify-c3-scoped-reads.sh",
+              "scripts/verify-c4-owned-reads.sh",
+              "scripts/verify-c7-tenant-key.sh",
+              "scripts/verify-mvp-e2e.sh",
+              "scripts/verify-perf-50k.sh",
+              "scripts/verify-security.sh",
+              "scripts/verify-schema.sh",
+              "scripts/seed/perf_seed_50k.sql",
+          ]
+
+          shell_files = sorted(glob.glob("scripts/**/*.sh", recursive=True))
+          bad, rows = [], []
+          for path in shell_files:
+              parsed = subprocess.run(["bash", "-n", path], capture_output=True, text=True)
+              if parsed.returncode != 0:
+                  detail = parsed.stderr.strip() or "no stderr"
+                  bad.append(f"{path}: `bash -n` exit {parsed.returncode} - {detail}; the script "
+                             f"cannot run at all, so no live job can trust it")
+                  continue
+              if os.path.basename(path).startswith("verify-") and not os.access(path, os.X_OK):
+                  # Every live suite's own header tells the operator to run it as `./scripts/<name>.sh`.
+                  # Git carries the mode bit, so a 644 commit is a mistake this check can see.
+                  bad.append(f"{path}: present but not executable, while its header documents "
+                             f"`./{path}` - chmod +x it before it lands, or the live job dies on "
+                             f"`Permission denied` rather than on a failed assertion")
+                  continue
+              rows.append(f"ok   {path}")
+
+          present = [p for p in LIVE_SUITES if os.path.exists(p)]
+          absent = [p for p in LIVE_SUITES if p not in present]
+
+          for line in rows:
+              print(line)
+          print(f"syntax/mode gate: {len(rows)} of {len(shell_files)} shell script(s) in scripts/ pass")
+          for path in absent:
+              print(f"absent  {path} - not in this tree, so CI claims nothing about it")
+
+          with open(os.environ["GITHUB_STEP_SUMMARY"], "a", encoding="utf-8") as fh:
+              fh.write(f"Live verification suites in the tree: {len(present)}/{len(LIVE_SUITES)}\n")
+              for path in absent:
+                  fh.write(f"- `{path}` ABSENT (being written elsewhere; nothing is claimed for it)\n")
+              fh.write("\nCI runs the **syntax and mode** half of these scripts. Their assertions are "
+                       "HTTP calls and SQL against a running backend, which no job here has a database "
+                       "for - see the `live-tenancy` job.\n")
+
+          if bad:
+              for message in bad:
+                  print(f"::error::{message}")
+              sys.exit(1)
+          PY
 
   infrastructure:
     name: Infrastructure definitions
@@ -201,4 +590,171 @@ jobs:
             echo "::error::the instance shape is no longer the Always Free ARM shape fixed in data.tf — paid shapes are excluded by construction, not by default"
             exit 1
           fi
+
+  # ─────────────────────────────────────────────────────────────────────────────
+  # DISABLED BY DEFAULT — this job is not a gate and must not be named in branch
+  # protection. `if: false` means it reports as *skipped* on every run: a skipped
+  # job satisfies nothing, and that is the honest state of live tenancy
+  # verification in CI today. It exists so the wiring is written down in the file
+  # that will own it rather than in a chat log.
+  #
+  # Why it is off: `verify-c1-tenancy.sh`, `verify-c2-tenant-context.sh`,
+  # `verify-c3-scoped-reads.sh`, `verify-c4-owned-reads.sh`, `verify-c7-tenant-key.sh`,
+  # `verify-mvp-e2e.sh`, `verify-perf-50k.sh` and `verify-security.sh` all drive a RUNNING
+  # backend over HTTP with real JWTs and, for their SQL halves, a PostgreSQL reachable
+  # through docker. Not one job in this repository starts a database — re-checked
+  # 2026-11-02: across `.github/workflows/` the only occurrences of `services:`, `postgres`
+  # and `docker` are prose in these comments, and every job runs on `runs-on: ubuntu-latest`
+  # with no container, no image and no cloud call (`Workflow validation` now refuses any
+  # other runner label outright). The owner's rule is that a `services:` Postgres is allowed
+  # only where a workflow here already does it, so there is no precedent to follow and CI
+  # stays at unit, arch and static checks. Three of those scripts
+  # (`verify-c4-owned-reads.sh`, `verify-mvp-e2e.sh`, `verify-perf-50k.sh`) were also still
+  # untracked when this stub was written, so every step below that would execute one is
+  # gated on the presence probe: referencing a missing script fails a run for the wrong
+  # reason, which is the one outcome a gate must never produce.
+  #
+  # What turning this on takes, in order:
+  #   1. `services:` with `postgres:16` (loopback on the runner, published to nothing)
+  #      plus the `gms_user` role and `gms_db` from docker-compose.yml, applied by
+  #      Flyway V1..V6 during the application's own boot — never by ddl-auto.
+  #   2. `mvn -B clean spring-boot:run -Dspring-boot.run.profiles=dev` in the
+  #      background, waited on through /actuator/health rather than a sleep.
+  #   3. `scripts/seed/` applied so the two tenants, the platform account and the
+  #      role holders the scripts log in as actually exist.
+  #   4. `GMS_REQUIRE_DB=1` (set below) so a missing database handle is a failure and not a
+  #      SKIP: these scripts report UNPROVEN rather than PASS, and a live job that tolerates
+  #      SKIP proves nothing. Each one also dies on `FATAL: no backend on $API`, so a job
+  #      wired this way cannot pass by doing nothing.
+  #   5. The secrets listed in the map below, created in Settings → Secrets and actions,
+  #      with the script that reads each named next to it. They reach the process through
+  #      `env:` only — never interpolated into a command, never echoed — which is what the
+  #      `A secret value can only reach the environment, never a log` step in
+  #      `validate-workflows.yml` enforces mechanically. `GMS_PG_PASSWORD_ENV` names the
+  #      *variable* the scripts read for the database password (`DB_PASSWORD` by default),
+  #      so `DB_PASSWORD` itself is the secret; `SECURITY_JWT_SECRET` and the
+  #      `APP_SUPERADMIN_*` pair are the application's own boot requirements
+  #      (`application.properties:48,55-59`), not suite inventions.
+  #   6. A decision the owner has not taken: `ADR-019` budgets Testcontainers in CI as
+  #      the zero-cost route for database-backed tests. A `services:` Postgres is the
+  #      same engine at the same price, but it is a new precedent and therefore an
+  #      owner call, not a silent one made in a workflow diff.
+  live-tenancy:
+    name: 'Live tenancy suites (disabled: no database exists in CI yet)'
+    if: false
+    needs: [backend, verification_scripts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      GMS_BASE_URL: http://localhost:8080
+      GMS_REQUIRE_DB: '1'
+      GMS_VERIFY_DB: gms_db
+      GMS_PG_CONTAINER: gms-postgres
+      GMS_PG_USER: gms_user
+      GMS_PG_PASSWORD_ENV: DB_PASSWORD
+      GMS_PERF_DB: gms_perf
+      GMS_PERF_RUNS: '20'
+      # Non-secret identifiers, defaulted by the scripts themselves; naming them here keeps
+      # a run reproducible rather than dependent on whoever last edited a script.
+      GMS_SCHOOL_A_ADMIN_NAME: Alice Principal
+      GMS_SCHOOL_B_ADMIN_NAME: Bob Principal
+      # ── Secrets: values reach the environment through this map and nowhere else ──
+      # verify-c1 / c2 / c3 / c4 / c7 / mvp-e2e / perf-50k all begin with
+      # `${GMS_SUPERADMIN_USERNAME:?}` and `${GMS_SUPERADMIN_PASSWORD:?}`, so an unset value
+      # stops the suite rather than skipping it.
+      GMS_SUPERADMIN_USERNAME: ${{ secrets.GMS_SUPERADMIN_USERNAME }}
+      GMS_SUPERADMIN_PASSWORD: ${{ secrets.GMS_SUPERADMIN_PASSWORD }}
+      # verify-c1, c2, mvp-e2e (least-privilege refusals); c3 uses the STAFF pair.
+      GMS_TEACHER_PASSWORD: ${{ secrets.GMS_TEACHER_PASSWORD }}
+      GMS_STAFF_PASSWORD: ${{ secrets.GMS_STAFF_PASSWORD }}
+      # verify-security.sh: `${GMS_TEST_USERNAME:?}` / `${GMS_TEST_PASSWORD:?}`.
+      GMS_TEST_USERNAME: ${{ secrets.GMS_TEST_USERNAME }}
+      GMS_TEST_PASSWORD: ${{ secrets.GMS_TEST_PASSWORD }}
+      # verify-perf-50k.sh logs in as a seeded school administrator, not as the platform
+      # account, so it needs its own identity pair; the seeded password hashes in
+      # scripts/seed/ are placeholders until these are supplied.
+      GMS_SCHOOL_ADMIN_USERNAME: ${{ secrets.GMS_SCHOOL_ADMIN_USERNAME }}
+      GMS_SCHOOL_ADMIN_PASSWORD: ${{ secrets.GMS_SCHOOL_ADMIN_PASSWORD }}
+      # The database password, read indirectly through the variable GMS_PG_PASSWORD_ENV names.
+      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+      # verify-mvp-e2e.sh creates the two tenants; the codes must be unused on that database.
+      GMS_SCHOOL_A_CODE: ${{ secrets.GMS_SCHOOL_A_CODE }}
+      GMS_SCHOOL_B_CODE: ${{ secrets.GMS_SCHOOL_B_CODE }}
+      # The application's own boot requirements (application.properties:48, 55-59).
+      SECURITY_JWT_SECRET: ${{ secrets.SECURITY_JWT_SECRET }}
+      APP_SUPERADMIN_ENABLED: 'true'
+      APP_SUPERADMIN_USERNAME: ${{ secrets.GMS_SUPERADMIN_USERNAME }}
+      APP_SUPERADMIN_PASSWORD: ${{ secrets.GMS_SUPERADMIN_PASSWORD }}
+      APP_SUPERADMIN_EMAIL: verify@invalid.example
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Which live suites are in this tree
+        id: probe
+        # The presence guard, stated once. A step that ran `scripts/verify-mvp-e2e.sh` unconditionally
+        # would fail this job on a commit that simply has not received the file yet, and a `job.if:`
+        # cannot see the tree because GitHub evaluates it before the checkout. So the probe publishes
+        # one output per suite and every step below is gated on its own.
+        run: |
+          set -euo pipefail
+          for path in scripts/verify-c1-tenancy.sh scripts/verify-c2-tenant-context.sh \
+                      scripts/verify-c3-scoped-reads.sh scripts/verify-c4-owned-reads.sh \
+                      scripts/verify-c7-tenant-key.sh scripts/verify-mvp-e2e.sh \
+                      scripts/verify-perf-50k.sh scripts/verify-security.sh; do
+            name=$(basename "$path" .sh | tr -d '-')
+            if [ -f "$path" ]; then
+              echo "${name}=present" >> "$GITHUB_OUTPUT"
+              echo "present  ${path}"
+            else
+              echo "${name}=absent" >> "$GITHUB_OUTPUT"
+              echo "ABSENT   ${path} - not in this tree; its step is skipped, nothing is claimed"
+            fi
+          done
+          if [ -f scripts/seed/perf_seed_50k.sql ]; then
+            echo "perf_seed=present" >> "$GITHUB_OUTPUT"
+          else
+            echo "perf_seed=absent" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: What this job still needs
+        run: |
+          set -euo pipefail
+          echo "Live tenancy suites are not wired: this job needs a services: PostgreSQL, a booted"
+          echo "backend, scripts/seed and the secrets named in the workflow comment above. Until then"
+          echo "C-1/C-2/C-3/C-4/C-7 are gated in CI by the arch tests only - declarations, not behaviour."
+
+      # One step per suite, each gated on the probe. `verify-perf-50k.sh` additionally needs the seed:
+      # its own count assertion refuses to measure a half-loaded table, so running it before the seed
+      # exists would report a failure that is really a missing prerequisite.
+      - name: verify-c1-tenancy
+        if: steps.probe.outputs.verifyc1tenancy == 'present'
+        run: bash scripts/verify-c1-tenancy.sh
+
+      - name: verify-c2-tenant-context
+        if: steps.probe.outputs.verifyc2tenantcontext == 'present'
+        run: bash scripts/verify-c2-tenant-context.sh
+
+      - name: verify-c3-scoped-reads
+        if: steps.probe.outputs.verifyc3scopedreads == 'present'
+        run: bash scripts/verify-c3-scoped-reads.sh
+
+      - name: verify-c4-owned-reads
+        if: steps.probe.outputs.verifyc4ownedreads == 'present'
+        run: bash scripts/verify-c4-owned-reads.sh
+
+      - name: verify-c7-tenant-key
+        if: steps.probe.outputs.verifyc7tenantkey == 'present'
+        run: bash scripts/verify-c7-tenant-key.sh
+
+      - name: verify-mvp-e2e (eleven MVP features as one journey)
+        if: steps.probe.outputs.verifymvpe2e == 'present'
+        run: bash scripts/verify-mvp-e2e.sh
+
+      - name: verify-perf-50k (DoD-2 budgets at volume)
+        if: steps.probe.outputs.verifyperf50k == 'present' && steps.probe.outputs.perf_seed == 'present'
+        run: bash scripts/verify-perf-50k.sh
+
+      - name: verify-security
+        if: steps.probe.outputs.verifysecurity == 'present'
+        run: bash scripts/verify-security.sh
 

@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.FeePayment;
 import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.FeePaymentService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -29,47 +29,38 @@ public class FeePaymentController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<FeePaymentResponse> createFeePayment(@Valid @RequestBody FeePaymentRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return feePaymentService.createFeePayment(request, schoolId, empId);
+        return feePaymentService.createFeePayment(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<FeePaymentResponse> updateFeePayment(@PathVariable Integer id,
                                                                @Valid @RequestBody FeePaymentRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return feePaymentService.updateFeePayment(id, request, schoolId, empId);
+        return feePaymentService.updateFeePayment(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteFeePayment(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return feePaymentService.deleteFeePayment(id, schoolId, empId);
+        return feePaymentService.deleteFeePayment(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeePayment>> getAllFeePayments() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feePaymentService.getAllFeePayments(schoolId);
+        return feePaymentService.getAllFeePayments();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FeePayment> getFeePaymentById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feePaymentService.getFeePaymentById(id, schoolId);
+        return feePaymentService.getFeePaymentById(id);
     }
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
     public ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(@PathVariable Integer studentId) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feePaymentService.getFeePaymentsByStudent(studentId, schoolId);
+        return feePaymentService.getFeePaymentsByStudent(studentId);
     }
 
     @GetMapping("/date-range")
@@ -77,8 +68,7 @@ public class FeePaymentController {
     public ResponseEntity<List<FeePayment>> getFeePaymentsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return feePaymentService.getFeePaymentsByDateRange(schoolId, startDate, endDate);
+        return feePaymentService.getFeePaymentsByDateRange(startDate, endDate);
     }
 
     @GetMapping("/total-payments")
@@ -86,8 +76,7 @@ public class FeePaymentController {
     public ResponseEntity<BigDecimal> getTotalPaymentsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        BigDecimal totalPayments = feePaymentService.getTotalPaymentsBySchoolIdAndDateRange(schoolId, startDate, endDate);
+        BigDecimal totalPayments = feePaymentService.getTotalPaymentsBySchoolIdAndDateRange(startDate, endDate);
         return ResponseEntity.ok(totalPayments);
     }
 
@@ -95,8 +84,7 @@ public class FeePaymentController {
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Long> getCountOfPaymentsByDate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate paymentDate) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Long paymentCount = feePaymentService.getCountOfPaymentsBySchoolIdAndDate(schoolId, paymentDate);
+        Long paymentCount = feePaymentService.getCountOfPaymentsBySchoolIdAndDate(paymentDate);
         return ResponseEntity.ok(paymentCount);
     }
 }

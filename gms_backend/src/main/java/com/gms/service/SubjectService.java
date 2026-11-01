@@ -8,14 +8,21 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 public interface SubjectService {
-    List<Subject> findBySchool(Integer schoolId);
-    Subject getById(Integer id, Integer schoolId);
-    ResponseEntity<SubjectResponse> create(SubjectRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<SubjectResponse> update(SubjectRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<SubjectResponse> updateSubject(Integer id, SubjectRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<?> toggleSubject(Integer id, Boolean isActive, Integer schoolId, Integer empId);
-    Subject createSubjectFromRequest(SubjectRequest request, Subject subject, Integer empId, Integer schoolId);
+    List<Subject> findBySchool();
+    Subject getById(Integer id);
+    ResponseEntity<SubjectResponse> create(SubjectRequest request);
+    ResponseEntity<SubjectResponse> update(SubjectRequest request);
+    ResponseEntity<SubjectResponse> updateSubject(Integer id, SubjectRequest request);
+    ResponseEntity<?> toggleSubject(Integer id, Boolean isActive);
+    Subject createSubjectFromRequest(SubjectRequest request, Subject subject);
     List<SubjectResponse> findSubjectsForAuthenticatedTeacher();
+
+    /**
+     * Deletes a subject, but only if it belongs to the caller's school.
+     *
+     * @return true when a row was deleted, false when no such subject exists in that school
+     */
+    boolean deleteWithinSchool(Integer id);
     
     // Service-to-service communication method
     java.util.Optional<Subject> findById(Integer id);

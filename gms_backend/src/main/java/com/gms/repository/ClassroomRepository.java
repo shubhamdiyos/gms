@@ -7,7 +7,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface ClassroomRepository extends JpaRepository<Classroom, Integer> {
+public interface ClassroomRepository extends TenantScopedRepository<Classroom> {
     List<Classroom> findAllBySchool_Id(Integer schoolId);
     List<Classroom> findAllBySchool_IdAndStatusNot(Integer schoolId, String status);
     boolean existsBySchool_IdAndNameAndGradeAndSection(Integer schoolId, String name, String grade, String section);

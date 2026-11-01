@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.Section;
 import com.gms.model.request.SectionRequest;
 import com.gms.model.response.SectionResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.SectionService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -24,39 +24,31 @@ public class SectionController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<SectionResponse> createSection(@Valid @RequestBody SectionRequest sectionRequest) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return sectionService.createSection(sectionRequest, schoolId, empId);
+        return sectionService.createSection(sectionRequest);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<SectionResponse> updateSection(@PathVariable Integer id, 
                                                         @Valid @RequestBody SectionRequest sectionRequest) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return sectionService.updateSection(id, sectionRequest, schoolId, empId);
+        return sectionService.updateSection(id, sectionRequest);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteSection(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return sectionService.deleteSection(id, schoolId, empId);
+        return sectionService.deleteSection(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
     public ResponseEntity<List<Section>> getAllSections() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return sectionService.getAllSections(schoolId);
+        return sectionService.getAllSections();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
     public ResponseEntity<Section> getSectionById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return sectionService.getSectionById(id, schoolId);
+        return sectionService.getSectionById(id);
     }
 }

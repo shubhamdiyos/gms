@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -21,6 +21,7 @@ import {
   Card,
   CardContent,
   Alert,
+  Tooltip,
 } from '@mui/material';
 import {
   EventNote,
@@ -30,36 +31,45 @@ import {
   CheckCircle,
   Cancel,
 } from '@mui/icons-material';
-import { useForm, Controller } from 'react-hook-form';
 import {
   useGetTeacherClassesQuery,
   useGetTeacherStudentsQuery,
-  useMarkAttendanceMutation,
   useGetAttendanceQuery,
 } from '../../store/api/apiSlice';
-import { toast } from 'react-toastify';
 import dayjs from 'dayjs';
+
+const SAVE_UNAVAILABLE_REASON =
+  'Saving is unavailable: POST /api/v1/attendance rejects a record without a timetableSlotId, and no teacher endpoint returns one.';
 
 const AttendancePage = () => {
   const [selectedClass, setSelectedClass] = useState('');
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const [attendanceData, setAttendanceData] = useState({});
-  
+
   const { data: classes = [] } = useGetTeacherClassesQuery();
   const { data: students = [] } = useGetTeacherStudentsQuery();
-  const [markAttendance, { isLoading: isMarking }] = useMarkAttendanceMutation();
-  
-  const { data: existingAttendance } = useGetAttendanceQuery({
-    classId: selectedClass,
-    date: selectedDate,
-  }, {
-    skip: !selectedClass || !selectedDate,
-  });
 
-  const { control, handleSubmit, reset } = useForm();
+  const { data: existingAttendance = [] } = useGetAttendanceQuery(
+    { classId: selectedClass, date: selectedDate },
+    { skip: !selectedClass || !selectedDate },
+  );
 
-  const classStudents = students.filter(student => 
-    selectedClass ? student.classroomId === parseInt(selectedClass) : false
+  const selectedClassId = selectedClass === '' ? null : Number(selectedClass);
+
+  const classStudents = useMemo(
+    () => students.filter((student) => student.classId === selectedClassId),
+    [students, selectedClassId],
+  );
+
+  const savedStatusByStudent = useMemo(
+    () =>
+      existingAttendance.reduce((acc, record) => {
+        if (record?.student?.id) {
+          acc[record.student.id] = record.status;
+        }
+        return acc;
+      }, {}),
+    [existingAttendance],
   );
 
   const handleClassChange = (classId) => {
@@ -68,61 +78,32 @@ const AttendancePage = () => {
   };
 
   const handleAttendanceChange = (studentId, status) => {
-    setAttendanceData(prev => ({
+    setAttendanceData((prev) => ({
       ...prev,
-      [studentId]: status
+      [studentId]: prev[studentId] === status ? undefined : status,
     }));
   };
 
-  const onSubmit = async () => {
-    if (!selectedClass || !selectedDate) {
-      toast.error('Please select class and date');
-      return;
-    }
-
-    if (Object.keys(attendanceData).length === 0) {
-      toast.error('Please mark attendance for at least one student');
-      return;
-    }
-
-    try {
-      const attendanceRecords = Object.entries(attendanceData).map(([studentId, status]) => ({
-        studentId: parseInt(studentId, 10),
-        status,
-        date: selectedDate,
-      }));
-
-      await Promise.all(
-        attendanceRecords.map((record) =>
-          markAttendance({
-            studentId: record.studentId,
-            date: record.date,
-            status: record.status,
-          }).unwrap()
-        )
-      );
-
-      toast.success('Attendance marked successfully');
-      setAttendanceData({});
-    } catch (error) {
-      toast.error('Failed to mark attendance');
-    }
-  };
+  const getStatus = (studentId) =>
+    attendanceData[studentId] ?? savedStatusByStudent[studentId];
 
   const getAttendanceStats = () => {
-    const total = classStudents.length;
-    const marked = Object.keys(attendanceData).length;
-    const present = Object.values(attendanceData).filter(status => status === 'PRESENT').length;
-    const absent = Object.values(attendanceData).filter(status => status === 'ABSENT').length;
-    
-    return { total, marked, present, absent };
+    const statuses = classStudents.map((student) => getStatus(student.id));
+    return {
+      total: classStudents.length,
+      marked: statuses.filter(Boolean).length,
+      present: statuses.filter((status) => status === 'PRESENT').length,
+      absent: statuses.filter((status) => status === 'ABSENT').length,
+    };
   };
 
   const stats = getAttendanceStats();
+  const savedCount = classStudents.filter((student) =>
+    Boolean(savedStatusByStudent[student.id]),
+  ).length;
 
   return (
     <Box>
-      {/* Header */}
       <Box sx={{ mb: 4 }}>
         <Typography variant="h4" component="h1" gutterBottom>
           Mark Attendance
@@ -132,7 +113,6 @@ const AttendancePage = () => {
         </Typography>
       </Box>
 
-      {/* Controls */}
       <Paper sx={{ p: 3, mb: 3 }}>
         <Grid container spacing={3} alignItems="center">
           <Grid item xs={12} md={4}>
@@ -145,59 +125,55 @@ const AttendancePage = () => {
               >
                 {classes.map((classItem) => (
                   <MenuItem key={classItem.id} value={classItem.id}>
-                    {classItem.className} - {classItem.section}
+                    {classItem.name} - {classItem.grade} {classItem.section}
                   </MenuItem>
                 ))}
               </Select>
             </FormControl>
           </Grid>
-          
+
           <Grid item xs={12} md={4}>
-            <FormControl fullWidth>
-              <Controller
-                name="date"
-                control={control}
-                defaultValue={selectedDate}
-                render={({ field }) => (
-                  <input
-                    {...field}
-                    type="date"
-                    value={selectedDate}
-                    onChange={(e) => setSelectedDate(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '16px',
-                      border: '1px solid #ccc',
-                      borderRadius: '4px',
-                      fontSize: '16px',
-                    }}
-                  />
-                )}
-              />
-            </FormControl>
+            <Box
+              component="input"
+              type="date"
+              value={selectedDate}
+              onChange={(e) => setSelectedDate(e.target.value)}
+              sx={{
+                width: '100%',
+                padding: '16px',
+                border: '1px solid #ccc',
+                borderRadius: '4px',
+                fontSize: '16px',
+              }}
+            />
           </Grid>
 
           <Grid item xs={12} md={4}>
-            <Button
-              variant="contained"
-              startIcon={<Save />}
-              onClick={onSubmit}
-              disabled={!selectedClass || Object.keys(attendanceData).length === 0 || isMarking}
-              fullWidth
-              sx={{
-                background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-                '&:hover': {
-                  background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
-                },
-              }}
-            >
-              {isMarking ? 'Saving...' : 'Save Attendance'}
-            </Button>
+            <Tooltip title={SAVE_UNAVAILABLE_REASON}>
+              <Box>
+                <Button
+                  variant="contained"
+                  startIcon={<Save />}
+                  disabled
+                  fullWidth
+                  sx={{
+                    background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+                  }}
+                >
+                  Save Attendance
+                </Button>
+              </Box>
+            </Tooltip>
           </Grid>
         </Grid>
       </Paper>
 
-      {/* Stats Cards */}
+      {selectedClass && (
+        <Alert severity="warning" sx={{ mb: 3 }}>
+          {SAVE_UNAVAILABLE_REASON}
+        </Alert>
+      )}
+
       {selectedClass && (
         <Grid container spacing={2} sx={{ mb: 3 }}>
           <Grid item xs={6} md={3}>
@@ -205,7 +181,9 @@ const AttendancePage = () => {
               <CardContent sx={{ textAlign: 'center' }}>
                 <Groups sx={{ fontSize: 40, color: '#1976d2', mb: 1 }} />
                 <Typography variant="h6">{stats.total}</Typography>
-                <Typography variant="body2" color="text.secondary">Total Students</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Total Students
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -214,7 +192,9 @@ const AttendancePage = () => {
               <CardContent sx={{ textAlign: 'center' }}>
                 <EventNote sx={{ fontSize: 40, color: '#f57c00', mb: 1 }} />
                 <Typography variant="h6">{stats.marked}</Typography>
-                <Typography variant="body2" color="text.secondary">Marked</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Marked
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -223,7 +203,9 @@ const AttendancePage = () => {
               <CardContent sx={{ textAlign: 'center' }}>
                 <CheckCircle sx={{ fontSize: 40, color: '#4caf50', mb: 1 }} />
                 <Typography variant="h6">{stats.present}</Typography>
-                <Typography variant="body2" color="text.secondary">Present</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Present
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
@@ -232,14 +214,15 @@ const AttendancePage = () => {
               <CardContent sx={{ textAlign: 'center' }}>
                 <Cancel sx={{ fontSize: 40, color: '#f44336', mb: 1 }} />
                 <Typography variant="h6">{stats.absent}</Typography>
-                <Typography variant="body2" color="text.secondary">Absent</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Absent
+                </Typography>
               </CardContent>
             </Card>
           </Grid>
         </Grid>
       )}
 
-      {/* Attendance Table */}
       {selectedClass ? (
         <Paper>
           <Box sx={{ p: 2, borderBottom: '1px solid #e0e0e0' }}>
@@ -248,7 +231,7 @@ const AttendancePage = () => {
               Attendance for {dayjs(selectedDate).format('MMMM DD, YYYY')}
             </Typography>
           </Box>
-          
+
           {classStudents.length === 0 ? (
             <Box sx={{ p: 4, textAlign: 'center' }}>
               <Typography variant="body1" color="text.secondary">
@@ -269,7 +252,8 @@ const AttendancePage = () => {
                 </TableHead>
                 <TableBody>
                   {classStudents.map((student) => {
-                    const attendanceStatus = attendanceData[student.id];
+                    const attendanceStatus = getStatus(student.id);
+                    const isSaved = Boolean(savedStatusByStudent[student.id]);
                     return (
                       <TableRow key={student.id}>
                         <TableCell>
@@ -279,7 +263,7 @@ const AttendancePage = () => {
                             </Avatar>
                             <Box>
                               <Typography variant="body1">
-                                {student.fullName || `${student.firstName} ${student.lastName}`}
+                                {`${student.firstName ?? ''} ${student.lastName ?? ''}`.trim()}
                               </Typography>
                               <Typography variant="body2" color="text.secondary">
                                 {student.email}
@@ -288,7 +272,7 @@ const AttendancePage = () => {
                           </Box>
                         </TableCell>
                         <TableCell>
-                          <Chip 
+                          <Chip
                             label={student.studentId || student.id}
                             variant="outlined"
                             size="small"
@@ -311,16 +295,12 @@ const AttendancePage = () => {
                         <TableCell align="center">
                           {attendanceStatus ? (
                             <Chip
-                              label={attendanceStatus}
+                              label={isSaved ? `${attendanceStatus} (saved)` : attendanceStatus}
                               color={attendanceStatus === 'PRESENT' ? 'success' : 'error'}
                               size="small"
                             />
                           ) : (
-                            <Chip
-                              label="Not Marked"
-                              variant="outlined"
-                              size="small"
-                            />
+                            <Chip label="Not Marked" variant="outlined" size="small" />
                           )}
                         </TableCell>
                       </TableRow>
@@ -343,10 +323,11 @@ const AttendancePage = () => {
         </Paper>
       )}
 
-      {existingAttendance && existingAttendance.length > 0 && (
+      {savedCount > 0 && (
         <Alert severity="info" sx={{ mt: 2 }}>
-          Attendance has already been marked for this class on {dayjs(selectedDate).format('MMMM DD, YYYY')}. 
-          You can update it by marking attendance again.
+          {savedCount} attendance record
+          {savedCount === 1 ? ' is' : 's are'} already saved for this class on{' '}
+          {dayjs(selectedDate).format('MMMM DD, YYYY')}.
         </Alert>
       )}
     </Box>

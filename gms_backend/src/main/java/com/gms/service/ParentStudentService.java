@@ -9,11 +9,11 @@ import java.util.List;
 
 public interface ParentStudentService {
 
-    ResponseEntity<?> assignStudentsToParent(ParentStudentRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<?> assignStudentsToParent(ParentStudentRequest request);
 
-    ResponseEntity<?> removeStudentFromParent(Integer parentId, Integer studentId, Integer schoolId, Integer empId);
+    ResponseEntity<?> removeStudentFromParent(Integer parentId, Integer studentId);
 
-    ResponseEntity<List<Student>> getStudentsForParent(Integer parentId, Integer schoolId);
+    ResponseEntity<List<Student>> getStudentsForParent(Integer parentId);
 
-    ResponseEntity<List<Parent>> getParentsForStudent(Integer studentId, Integer schoolId);
+    ResponseEntity<List<Parent>> getParentsForStudent(Integer studentId);
 }

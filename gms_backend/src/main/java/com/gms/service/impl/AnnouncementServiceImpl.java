@@ -7,6 +7,7 @@ import com.gms.model.request.AnnouncementRequest;
 import com.gms.model.response.AnnouncementResponse;
 import com.gms.repository.AnnouncementRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -16,7 +17,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
-public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, Integer> implements AnnouncementService {
+public class AnnouncementServiceImpl implements AnnouncementService {
 
     private final AnnouncementRepository announcementRepository;
     private final SchoolService schoolService;
@@ -25,20 +26,19 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
     public AnnouncementServiceImpl(AnnouncementRepository announcementRepository,
                                    SchoolService schoolService,
                                    UserService userService) {
-        super(announcementRepository);
         this.announcementRepository = announcementRepository;
         this.schoolService = schoolService;
         this.userService = userService;
     }
 
     @Override
-    public ResponseEntity<AnnouncementResponse> createAnnouncement(AnnouncementRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<AnnouncementResponse> createAnnouncement(AnnouncementRequest request) {
         // Validate school exists
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create announcement
@@ -55,7 +55,7 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
         announcement.setCategory(request.getCategory());
         announcement.setAttachmentUrls(request.getAttachmentUrls());
         announcement.setClickActionUrl(request.getClickActionUrl());
-        announcement.setIsPinned(request.getIsPinned());
+        announcement.setIsPinned(Boolean.TRUE.equals(request.getIsPinned()));
         announcement.setCreatedBy(creator);
         announcement.setUpdatedBy(creator);
 
@@ -65,18 +65,14 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
     }
 
     @Override
-    public ResponseEntity<AnnouncementResponse> updateAnnouncement(Integer id, AnnouncementRequest request, Integer schoolId, Integer empId) {
-        // Validate announcement exists
+    public ResponseEntity<AnnouncementResponse> updateAnnouncement(Integer id, AnnouncementRequest request) {
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
 
-        // Validate school
-        if (!announcement.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update announcement
@@ -91,7 +87,7 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
         announcement.setCategory(request.getCategory());
         announcement.setAttachmentUrls(request.getAttachmentUrls());
         announcement.setClickActionUrl(request.getClickActionUrl());
-        announcement.setIsPinned(request.getIsPinned());
+        announcement.setIsPinned(Boolean.TRUE.equals(request.getIsPinned()));
         announcement.setUpdatedBy(updater);
 
         Announcement savedAnnouncement = announcementRepository.save(announcement);
@@ -100,18 +96,14 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
     }
 
     @Override
-    public ResponseEntity<?> deleteAnnouncement(Integer id, Integer schoolId, Integer empId) {
-        // Validate announcement exists
+    public ResponseEntity<?> deleteAnnouncement(Integer id) {
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
 
-        // Validate school
-        if (!announcement.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting isPublished to false
@@ -123,96 +115,90 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getAllAnnouncements(Integer schoolId) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdOrderByPublishDateDesc(schoolId);
+    public ResponseEntity<List<Announcement>> getAllAnnouncements() {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdOrderByPublishDateDesc(TenantContext.schoolId());
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<Announcement> getAnnouncementById(Integer id, Integer schoolId) {
+    public ResponseEntity<Announcement> getAnnouncementById(Integer id) {
+        // The scoped load already confines the answer to the caller's school, so the
+        // hand-written comparison and its 403 are gone — a foreign id is 404.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
-
-        if (!announcement.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(announcement);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getPublishedAnnouncements(Integer schoolId) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdAndIsPublishedTrueOrderByPublishDateDesc(schoolId);
+    public ResponseEntity<List<Announcement>> getPublishedAnnouncements() {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdAndIsPublishedTrueOrderByPublishDateDesc(TenantContext.schoolId());
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getAnnouncementsByTargetAudience(Integer schoolId, String targetAudience) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdAndTargetAudienceOrderByPublishDateDesc(schoolId, targetAudience);
+    public ResponseEntity<List<Announcement>> getAnnouncementsByTargetAudience(String targetAudience) {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdAndTargetAudienceOrderByPublishDateDesc(TenantContext.schoolId(), targetAudience);
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getAnnouncementsByType(Integer schoolId, String announcementType) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdAndAnnouncementTypeOrderByPublishDateDesc(schoolId, announcementType);
+    public ResponseEntity<List<Announcement>> getAnnouncementsByType(String announcementType) {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdAndAnnouncementTypeOrderByPublishDateDesc(TenantContext.schoolId(), announcementType);
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getAnnouncementsByCategory(Integer schoolId, String category) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdAndCategoryOrderByPublishDateDesc(schoolId, category);
+    public ResponseEntity<List<Announcement>> getAnnouncementsByCategory(String category) {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdAndCategoryOrderByPublishDateDesc(TenantContext.schoolId(), category);
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getAnnouncementsByPriority(Integer schoolId, String priority) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdAndPriorityOrderByPublishDateDesc(schoolId, priority);
+    public ResponseEntity<List<Announcement>> getAnnouncementsByPriority(String priority) {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdAndPriorityOrderByPublishDateDesc(TenantContext.schoolId(), priority);
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getActiveAnnouncements(Integer schoolId) {
-        List<Announcement> announcements = announcementRepository.findActiveAnnouncementsBySchoolId(schoolId, LocalDateTime.now());
+    public ResponseEntity<List<Announcement>> getActiveAnnouncements() {
+        List<Announcement> announcements = announcementRepository.findActiveAnnouncementsBySchoolId(TenantContext.schoolId(), LocalDateTime.now());
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<List<Announcement>> getPinnedAnnouncements(Integer schoolId) {
-        List<Announcement> announcements = announcementRepository.findBySchoolIdAndIsPublishedTrueAndIsPinnedTrueOrderByPublishDateDesc(schoolId);
+    public ResponseEntity<List<Announcement>> getPinnedAnnouncements() {
+        List<Announcement> announcements = announcementRepository.findBySchoolIdAndIsPublishedTrueAndIsPinnedTrueOrderByPublishDateDesc(TenantContext.schoolId());
         return ResponseEntity.ok(announcements);
     }
 
     @Override
-    public ResponseEntity<Long> countPublishedAnnouncements(Integer schoolId) {
-        Long count = announcementRepository.countPublishedAnnouncementsBySchoolId(schoolId);
+    public ResponseEntity<Long> countPublishedAnnouncements() {
+        Long count = announcementRepository.countPublishedAnnouncementsBySchoolId(TenantContext.schoolId());
         return ResponseEntity.ok(count);
     }
 
     @Override
-    public ResponseEntity<Long> countPinnedAnnouncements(Integer schoolId) {
-        Long count = announcementRepository.countPinnedAnnouncementsBySchoolId(schoolId);
+    public ResponseEntity<Long> countPinnedAnnouncements() {
+        Long count = announcementRepository.countPinnedAnnouncementsBySchoolId(TenantContext.schoolId());
         return ResponseEntity.ok(count);
     }
 
     @Override
-    public ResponseEntity<?> publishAnnouncement(Integer id, Integer schoolId, Integer empId) {
-        // Validate announcement exists
+    public ResponseEntity<?> publishAnnouncement(Integer id) {
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
 
-        // Validate school
-        if (!announcement.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate publisher exists
-        User publisher = userService.findByEmployee_Id(empId)
+        User publisher = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Publisher user not found"));
 
         // Publish announcement
         announcement.setIsPublished(true);
         announcement.setPublishedAt(LocalDateTime.now());
-        announcement.setPublishedBy(empId);
+        announcement.setPublishedBy(TenantContext.employeeId());
 
         announcementRepository.save(announcement);
 
@@ -220,18 +206,14 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
     }
 
     @Override
-    public ResponseEntity<?> unpublishAnnouncement(Integer id, Integer schoolId, Integer empId) {
-        // Validate announcement exists
+    public ResponseEntity<?> unpublishAnnouncement(Integer id) {
+        // Validate announcement exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
 
-        // Validate school
-        if (!announcement.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate unpublisher exists
-        User unpublisher = userService.findByEmployee_Id(empId)
+        User unpublisher = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Unpublisher user not found"));
 
         // Unpublish announcement

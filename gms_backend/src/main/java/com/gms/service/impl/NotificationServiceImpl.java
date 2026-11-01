@@ -8,7 +8,7 @@ import com.gms.model.response.NotificationResponse;
 import com.gms.repository.NotificationRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.NotificationService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +19,7 @@ import java.util.Comparator;
 import java.util.List;
 
 @Service
-public class NotificationServiceImpl extends AbstractCRUDService<Notification, Integer> implements NotificationService {
+public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final SchoolRepository schoolRepository;
@@ -28,20 +28,19 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     public NotificationServiceImpl(NotificationRepository notificationRepository,
                                    SchoolRepository schoolRepository,
                                    UserRepository userRepository) {
-        super(notificationRepository);
         this.notificationRepository = notificationRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<NotificationResponse> createNotification(NotificationRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<NotificationResponse> createNotification(NotificationRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create notification
@@ -71,18 +70,14 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     }
 
     @Override
-    public ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request, Integer schoolId, Integer empId) {
-        // Validate notification exists
+    public ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request) {
+        // Validate notification exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        // Validate school
-        if (!notification.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update notification
@@ -107,18 +102,14 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     }
 
     @Override
-    public ResponseEntity<?> deleteNotification(Integer id, Integer schoolId, Integer empId) {
-        // Validate notification exists
+    public ResponseEntity<?> deleteNotification(Integer id) {
+        // Validate notification exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        // Validate school
-        if (!notification.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting delivery status to CANCELLED
@@ -130,33 +121,31 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getAllNotifications(Integer schoolId) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndDeliveryStatusOrderByCreatedOnDesc(schoolId, "PENDING");
+    public ResponseEntity<List<Notification>> getAllNotifications() {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndDeliveryStatusOrderByCreatedOnDesc(TenantContext.schoolId(), "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<Notification> getNotificationById(Integer id, Integer schoolId) {
+    public ResponseEntity<Notification> getNotificationById(Integer id) {
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        if (!notification.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The load that produced this row was scoped by the claim, so a caller from another school
+        // never reaches here; the platform owner does, and it is the caller this row is meant for.
         return ResponseEntity.ok(notification);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByRecipientType(Integer schoolId, String recipientType) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(schoolId, recipientType, "PENDING");
+    public ResponseEntity<List<Notification>> getNotificationsByRecipientType(String recipientType) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(TenantContext.schoolId(), recipientType, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByUserId(Integer schoolId, Integer userId) {
+    public ResponseEntity<List<Notification>> getNotificationsByUserId(Integer userId) {
         List<Notification> notifications = notificationRepository
-                .findBySchoolIdAndRecipientTypeAndDeliveryStatus(schoolId, "INDIVIDUAL", "PENDING")
+                .findBySchoolIdAndRecipientTypeAndDeliveryStatus(TenantContext.schoolId(), "INDIVIDUAL", "PENDING")
                 .stream()
                 .filter(notification -> addressesUser(notification.getRecipientIds(), userId))
                 // the deleted query carried ORDER BY created_on DESC; the sort moves here rather than disappearing
@@ -189,45 +178,41 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getScheduledNotifications(Integer schoolId, LocalDateTime scheduledTime) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(schoolId, scheduledTime, "PENDING");
+    public ResponseEntity<List<Notification>> getScheduledNotifications(LocalDateTime scheduledTime) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(TenantContext.schoolId(), scheduledTime, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByType(Integer schoolId, String notificationType) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndNotificationTypeAndDeliveryStatus(schoolId, notificationType, "PENDING");
+    public ResponseEntity<List<Notification>> getNotificationsByType(String notificationType) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndNotificationTypeAndDeliveryStatus(TenantContext.schoolId(), notificationType, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<List<Notification>> getNotificationsByPriority(Integer schoolId, String priority) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndPriorityAndDeliveryStatus(schoolId, priority, "PENDING");
+    public ResponseEntity<List<Notification>> getNotificationsByPriority(String priority) {
+        List<Notification> notifications = notificationRepository.findBySchoolIdAndPriorityAndDeliveryStatus(TenantContext.schoolId(), priority, "PENDING");
         return ResponseEntity.ok(notifications);
     }
 
     @Override
-    public ResponseEntity<Long> countPendingNotifications(Integer schoolId) {
-        Long count = notificationRepository.countPendingNotificationsBySchoolId(schoolId);
+    public ResponseEntity<Long> countPendingNotifications() {
+        Long count = notificationRepository.countPendingNotificationsBySchoolId(TenantContext.schoolId());
         return ResponseEntity.ok(count);
     }
 
     @Override
-    public ResponseEntity<Long> countUnreadNotifications(Integer schoolId) {
-        Long count = notificationRepository.countUnreadNotificationsBySchoolId(schoolId);
+    public ResponseEntity<Long> countUnreadNotifications() {
+        Long count = notificationRepository.countUnreadNotificationsBySchoolId(TenantContext.schoolId());
         return ResponseEntity.ok(count);
     }
 
     @Override
-    public ResponseEntity<?> markNotificationAsRead(Integer id, Integer schoolId) {
-        // Validate notification exists
+    public ResponseEntity<?> markNotificationAsRead(Integer id) {
+        // Validate notification exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
-
-        // Validate school
-        if (!notification.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Mark as read
         notification.setReadStatus("READ");
@@ -237,9 +222,9 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     }
 
     @Override
-    public ResponseEntity<?> sendScheduledNotifications(Integer schoolId) {
+    public ResponseEntity<?> sendScheduledNotifications() {
         LocalDateTime now = LocalDateTime.now();
-        List<Notification> scheduledNotifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(schoolId, now, "PENDING");
+        List<Notification> scheduledNotifications = notificationRepository.findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(TenantContext.schoolId(), now, "PENDING");
         
         // In a complete implementation, we would actually send these notifications
         // For now, we'll just return the list

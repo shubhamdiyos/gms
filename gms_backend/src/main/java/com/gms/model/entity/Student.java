@@ -15,7 +15,7 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "students")
-public class Student {
+public class Student extends AuthorshipEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

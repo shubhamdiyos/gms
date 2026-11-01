@@ -31,6 +31,7 @@ import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import {
   useGetExamsQuery,
+  useGetAcademicYearsQuery,
   useCreateExamMutation,
   useUpdateExamMutation,
   useDeleteExamMutation,
@@ -76,6 +77,8 @@ const ExamsPage = () => {
   const [createExam] = useCreateExamMutation();
   const [updateExam] = useUpdateExamMutation();
   const [deleteExam] = useDeleteExamMutation();
+
+  const { data: academicYears = [] } = useGetAcademicYearsQuery();
 
   const {
     register,
@@ -326,14 +329,27 @@ const ExamsPage = () => {
                 </FormControl>
               </Grid>
               <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('academicYear')}
-                  fullWidth
-                  label="Academic Year"
-                  placeholder="e.g., 2024-2025"
-                  error={!!errors.academicYear}
-                  helperText={errors.academicYear?.message}
-                />
+                <FormControl fullWidth error={!!errors.academicYear}>
+                  <InputLabel>Academic Year</InputLabel>
+                  <Controller
+                    name="academicYear"
+                    control={control}
+                    render={({ field }) => (
+                      <Select {...field} label="Academic Year">
+                        {academicYears.map((ay) => (
+                          <MenuItem key={ay.id} value={ay.name}>
+                            {ay.name}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    )}
+                  />
+                  {errors.academicYear && (
+                    <Typography variant="caption" color="error" sx={{ mt: 1, ml: 2 }}>
+                      {errors.academicYear.message}
+                    </Typography>
+                  )}
+                </FormControl>
               </Grid>
               <Grid item xs={12} md={6}>
                 <TextField

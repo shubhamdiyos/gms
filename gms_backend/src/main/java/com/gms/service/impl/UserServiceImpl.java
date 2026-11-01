@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.config.TenantContextAuditorAware;
 import com.gms.enums.RoleEnum;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
@@ -8,9 +9,9 @@ import com.gms.exception.NotFoundException;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import com.gms.util.PasswordValidator;
-import com.gms.util.SecurityUtil;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -27,14 +28,13 @@ import java.util.Set;
 
 @Service
 @Transactional
-public class UserServiceImpl extends AbstractCRUDService<User, Integer> implements UserService {
+public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final SchoolService schoolService;
     private final PasswordEncoder passwordEncoder;
 
     public UserServiceImpl(UserRepository userRepository, SchoolService schoolService, PasswordEncoder passwordEncoder) {
-        super(userRepository);
         this.userRepository = userRepository;
         this.schoolService = schoolService;
         this.passwordEncoder = passwordEncoder;
@@ -45,36 +45,51 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
     }
 
     @Override
-    public ResponseEntity<UserResponse> create(UserRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<UserResponse> create(UserRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        User user = createUserFromRequest(request, new User(), empId, schoolId);
+        User user = createUserFromRequest(request, new User());
         User saved = this.create(user);
         return ResponseEntity.ok(toResponse(saved));
     }
 
-    public User createUserFromRequest(UserRequest request, User user, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public User createUserFromRequest(UserRequest request, User user) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        if (userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsBySchool_IdAndEmail(TenantContext.schoolId(), request.getEmail())) {
             throw new IllegalArgumentException("Email already in use");
         }
 
         // Find school and creator user
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
-        
-        User creatorUser = this.findByEmployee_Id(empId)
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
-        org.springframework.beans.BeanUtils.copyProperties(request, user, "schoolId");
+        // BKL-08: the auditor is the principal the verified token names, not an employee pointer. The
+        // empId claim is the employee primary key for staff and the user primary key for the bootstrapped
+        // platform owner (AuthController:98), so resolving the creator through it either failed outright
+        // for that caller or, when the two id spaces happened to collide, recorded a stranger as the
+        // creator. The employee lookup stays as the fallback so the endpoint keeps answering the same way
+        // for a caller no identifier resolves at all.
+        User employeeCreator = this.findByEmployee_Id().orElse(null);
+        User creator = TenantContextAuditorAware.currentAuditor(userRepository).orElse(employeeCreator);
+        if (creator == null) {
+            throw new EntityNotFoundException("Creator user not found");
+        }
+
+        // "id" and the audit/bookkeeping columns are ignored on the way in: a create must not accept a
+        // primary key from the body, and a caller must never be able to name the account a row is
+        // attributed to. No UserRequest field carries those names today, which is why the list is
+        // explicit rather than merely correct -- a future field is exactly what an ignore list is for.
+        org.springframework.beans.BeanUtils.copyProperties(
+                request, user, "id", "schoolId", "createdBy", "updatedBy", "createdAt", "updatedAt", "version"
+        );
         user.setSchool(school);
-        user.setUpdatedBy(creatorUser);
-        user.setCreatedBy(creatorUser);
+        user.setUpdatedBy(creator);
+        user.setCreatedBy(creator);
         if (!PasswordValidator.isValid(request.getPassword())) {
             throw new IllegalArgumentException("Password does not meet policy requirements");
         }
@@ -101,9 +116,15 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
      * unauthorisable role, and SUPERADMIN may only be granted by a caller who already holds it
      * (finding AP-4: any school ADMIN could create a platform owner, or promote themselves).</p>
      *
+     * <p>This is the only role validator in the application and it is part of the service contract:
+     * {@code /auth/self-register} mints its role through it as well, so no endpoint can write a code
+     * outside the vocabulary straight onto the entity (findings SEC-17, EMPLOYEE half, closed by
+     * Stage 3 C-6).</p>
+     *
      * @throws IllegalArgumentException when a role is unknown or the caller may not grant it
      */
-    private Set<String> authoriseRoles(Set<String> requested) {
+    @Override
+    public Set<String> authoriseRoles(Set<String> requested) {
         Set<String> validated = new HashSet<>();
         for (String code : requested) {
             RoleEnum role = RoleEnum.fromCode(code);   // throws for anything outside the vocabulary
@@ -116,34 +137,33 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
     }
 
     private static boolean currentCallerHas(RoleEnum role) {
-        Set<String> callerRoles = SecurityUtil.getRolesFromToken();
-        return callerRoles != null && callerRoles.contains(role.getCode());
+        return TenantContext.roles().contains(role.getCode());
     }
 
     @Override
-    public ResponseEntity<UserResponse> update(UserRequest request, Integer empId, Integer schoolId) {
+    public ResponseEntity<UserResponse> update(UserRequest request) {
         if (request.getId() == null) {
             throw new IllegalArgumentException("User ID must be provided for update");
         }
 
         User user = userRepository.findById(request.getId())
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
-        
-        // Enforce tenant boundary
-        if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND).build();
+
+        User employeeUpdater = this.findByEmployee_Id().orElse(null);
+        User updater = TenantContextAuditorAware.currentAuditor(userRepository).orElse(employeeUpdater);
+        if (updater == null) {
+            throw new EntityNotFoundException("Updater user not found");
         }
 
-        User updaterUser = this.findByEmployee_Id(empId)
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
-
+        // The ignore list is the audit-loss guard: a copy that named createdBy would write null over
+        // the creator, and the row would silently lose the one fact the trail cannot be rebuilt from.
         org.springframework.beans.BeanUtils.copyProperties(
                 request,
                 user,
                 "id", "createdBy", "createdAt", "school", "schoolId", "updatedBy", "updatedAt",
                 "password", "version", "roles"
         );
-        user.setUpdatedBy(updaterUser);
+        user.setUpdatedBy(updater);
         if (request.getRoles() != null && !request.getRoles().isEmpty()) {
             user.setRoles(authoriseRoles(request.getRoles()));
         }
@@ -163,21 +183,34 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
     @Override
     @Transactional(readOnly = true)
     public UserResponse getById(Integer id) {
-        User user = userRepository.findById(id)
+        // The scoped findById already answers the tenancy question: a school administrator gets
+        // 404 here for a foreign id, and the platform owner's cross-tenant branch gets the row.
+        return userRepository.findById(id)
+                .map(this::toResponse)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found with ID: " + id));
-        return toResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteWithinSchool(Integer id) {
+        User user = userRepository.findById(id).orElse(null);
+        if (user == null) {
+            return false;
+        }
+        userRepository.delete(user);
+        return true;
     }
 
     @Override
     @Transactional(readOnly = true)
-    public Page<UserResponse> listBySchool(Integer schoolId, Pageable pageable) {
-        Page<User> users = userRepository.findAllBySchool_Id(schoolId, pageable);
+    public Page<UserResponse> listBySchool(Pageable pageable) {
+        Page<User> users = userRepository.findAllBySchool_Id(TenantContext.schoolId(), pageable);
         return users.map(this::toResponse);
     }
 
     @Override
-    public List<User> findBySchool(Integer schoolId) {
-        return userRepository.findBySchool_Id(schoolId);
+    public List<User> findBySchool() {
+        return userRepository.findBySchool_Id(TenantContext.schoolId());
     }
     
     // Additional methods needed for service-to-service communication
@@ -187,13 +220,18 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
     }
     
     @Override
-    public Optional<User> findByEmployee_Id(Integer employeeId) {
-        return userRepository.findByEmployee_Id(employeeId);
+    public Optional<User> findByEmployee_Id() {
+        return userRepository.findByEmployee_Id(TenantContext.employeeId());
     }
-    
+
+    @Override
+    public boolean existsByEmployee_Id(Integer subjectEmployeeId) {
+        return userRepository.existsByEmployee_Id(subjectEmployeeId);
+    }
+
     @Override
     public boolean existsByEmail(String email) {
-        return userRepository.existsByEmail(email);
+        return userRepository.existsBySchool_IdAndEmail(TenantContext.schoolId(), email);
     }
     
     @Override

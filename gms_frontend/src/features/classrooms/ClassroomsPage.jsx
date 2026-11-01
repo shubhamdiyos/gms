@@ -34,11 +34,9 @@ import {
 import { toast } from 'react-toastify';
 
 const schema = yup.object({
-  className: yup.string().required('Class name is required'),
-  section: yup.string().required('Section is required'),
-  capacity: yup.number().positive('Capacity must be positive').required('Capacity is required'),
-  roomNumber: yup.string().required('Room number is required'),
-  description: yup.string(),
+  name: yup.string().required('Class name is required').max(100, 'Name must be at most 100 characters'),
+  grade: yup.string().required('Grade is required').max(20, 'Grade must be at most 20 characters'),
+  section: yup.string().required('Section is required').max(20, 'Section must be at most 20 characters'),
 });
 
 const ClassroomsPage = () => {
@@ -105,7 +103,7 @@ const ClassroomsPage = () => {
 
   const columns = [
     {
-      field: 'className',
+      field: 'name',
       headerName: 'Class Name',
       width: 150,
       renderCell: (params) => (
@@ -116,31 +114,14 @@ const ClassroomsPage = () => {
       ),
     },
     {
+      field: 'grade',
+      headerName: 'Grade',
+      width: 100,
+    },
+    {
       field: 'section',
       headerName: 'Section',
       width: 100,
-    },
-    {
-      field: 'roomNumber',
-      headerName: 'Room Number',
-      width: 130,
-    },
-    {
-      field: 'capacity',
-      headerName: 'Capacity',
-      width: 100,
-      renderCell: (params) => `${params.value} students`,
-    },
-    {
-      field: 'currentStrength',
-      headerName: 'Current Strength',
-      width: 150,
-      renderCell: (params) => `${params.value || 0} students`,
-    },
-    {
-      field: 'description',
-      headerName: 'Description',
-      width: 200,
     },
     {
       field: 'status',
@@ -239,11 +220,20 @@ const ClassroomsPage = () => {
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12} md={6}>
                 <TextField
-                  {...register('className')}
+                  {...register('name')}
                   fullWidth
                   label="Class Name"
-                  error={!!errors.className}
-                  helperText={errors.className?.message}
+                  error={!!errors.name}
+                  helperText={errors.name?.message}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  {...register('grade')}
+                  fullWidth
+                  label="Grade"
+                  error={!!errors.grade}
+                  helperText={errors.grade?.message}
                 />
               </Grid>
               <Grid item xs={12} md={6}>
@@ -253,36 +243,6 @@ const ClassroomsPage = () => {
                   label="Section"
                   error={!!errors.section}
                   helperText={errors.section?.message}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('roomNumber')}
-                  fullWidth
-                  label="Room Number"
-                  error={!!errors.roomNumber}
-                  helperText={errors.roomNumber?.message}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('capacity')}
-                  fullWidth
-                  label="Capacity"
-                  type="number"
-                  error={!!errors.capacity}
-                  helperText={errors.capacity?.message}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  {...register('description')}
-                  fullWidth
-                  label="Description"
-                  multiline
-                  rows={3}
-                  error={!!errors.description}
-                  helperText={errors.description?.message}
                 />
               </Grid>
             </Grid>

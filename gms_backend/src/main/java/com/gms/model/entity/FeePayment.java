@@ -13,11 +13,16 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "fee_payments")
-public class FeePayment extends BaseAuditEntity {
+public class FeePayment extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "school_id", nullable = false)
+    private School school;
 
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

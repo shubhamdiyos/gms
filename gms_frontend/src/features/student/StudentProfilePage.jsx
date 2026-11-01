@@ -43,7 +43,7 @@ const StudentProfilePage = () => {
   const [editOpen, setEditOpen] = useState(false);
   
   const { data: profile, isLoading } = useGetStudentProfileQuery();
-  const { data: classes = [] } = useGetMyClassesQuery();
+  const { data: myClass } = useGetMyClassesQuery();
   const { data: subjects = [] } = useGetMySubjectsQuery();
   const [updateStudent] = useUpdateStudentMutation();
 
@@ -71,7 +71,7 @@ const StudentProfilePage = () => {
       await updateStudent({ id: profile.id, ...data }).unwrap();
       toast.success('Profile updated successfully');
       handleEditClose();
-    } catch (error) {
+    } catch {
       toast.error('Failed to update profile');
     }
   };
@@ -232,22 +232,20 @@ const StudentProfilePage = () => {
                 <CardContent>
                   <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
                     <Class sx={{ mr: 1 }} />
-                    My Classes
+                    My Class
                   </Typography>
                   <Divider sx={{ mb: 2 }} />
                   
-                  {classes.length === 0 ? (
-                    <Typography color="text.secondary">No classes assigned</Typography>
+                  {!myClass ? (
+                    <Typography color="text.secondary">No class assigned</Typography>
                   ) : (
                     <List dense>
-                      {classes.map((classItem, index) => (
-                        <ListItem key={index} disablePadding>
-                          <ListItemText
-                            primary={classItem.className || `Class ${index + 1}`}
-                            secondary={`Section: ${classItem.section || 'A'}`}
-                          />
-                        </ListItem>
-                      ))}
+                      <ListItem disablePadding>
+                        <ListItemText
+                          primary={myClass.name || 'Class'}
+                          secondary={`Grade: ${myClass.grade || '-'} • Section: ${myClass.section || '-'}`}
+                        />
+                      </ListItem>
                     </List>
                   )}
                 </CardContent>
@@ -270,8 +268,8 @@ const StudentProfilePage = () => {
                       {subjects.map((subject, index) => (
                         <ListItem key={index} disablePadding>
                           <ListItemText
-                            primary={subject.subjectName || `Subject ${index + 1}`}
-                            secondary={`Code: ${subject.subjectCode || 'N/A'}`}
+                            primary={subject.name || `Subject ${index + 1}`}
+                            secondary={`Code: ${subject.code || 'N/A'}`}
                           />
                         </ListItem>
                       ))}

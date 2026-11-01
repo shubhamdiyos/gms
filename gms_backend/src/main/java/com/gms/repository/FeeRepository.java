@@ -10,7 +10,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface FeeRepository extends JpaRepository<Fee, Integer> {
+public interface FeeRepository extends TenantScopedRepository<Fee> {
 
     List<Fee> findBySchoolIdAndStatus(Integer schoolId, String status);
 

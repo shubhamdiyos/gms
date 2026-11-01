@@ -425,6 +425,13 @@ protection rules.
 (OPS-07), no TLS and no gate. `ddl-auto=validate` against a Hibernate-`update`-created schema is likely to fail
 at boot, which converts "deploy" into "outage" until the baseline exists.
 
+**Re-measured, Stage 2 (branch `feat/stage2-flyway-baseline`, unmerged).** The "until the baseline exists" clause is
+half satisfied: the baseline now exists *as files* (`V1`–`V5`) and `OPS-07` is closed on that branch, so a `prod` boot
+against a Flyway-migrated database has something to validate against. What has **not** changed is this finding's actual
+subject — `prod` has still never booted, and `application-prod.properties:15` now makes that worse in one specific
+way: it runs Flyway *on boot*, so the first production start is simultaneously a schema migration and a service start.
+The staging stack below is still the only way to find out which of those two fails first.
+
 **Remediation.** Create a compose-based staging stack on the existing host (or a second container set with its
 own volume) fed by a **masked sample dataset** (first mandate §25 item 16 forbids fabricated data in production dashboards;
 a staging-only fixture is not a dashboard); boot `prod` there; require a green staging boot before the deploy
@@ -773,7 +780,7 @@ The first audit already owns these; this table records only what Infra-M0 change
 | OPS-04 hostname echoed in logs | **Largely not real** | the failing run's log shows `EC2_HOST: ***` and `***@***`; GitHub masks secret *values*. `:67` still prints the first 10 characters deliberately. Downgraded; the committed DNS name in `vercel.json:5` is the actual exposure (INF-01) |
 | OPS-05 `cancel-in-progress: true` on deploy | Still open | `:27` confirmed; belongs with Infra-M3's deploy rewrite |
 | OPS-06 no rollback | Still open | root cause named: INF-03 (no artefact lineage) + INF-09 (no immutable tags) |
-| OPS-07 no migrations | Still open, re-verified | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` key is inert; dev defaults to `ddl-auto=${JPA_DDL_AUTO:update}` (`application-dev.properties:20`) |
+| OPS-07 no migrations | **Closed on branch, still open on `master`** | `feat/stage2-flyway-baseline`: `flyway-core` + `flyway-database-postgresql` in `pom.xml`, `V1`–`V5` in `db/migration`, `scripts/verify-schema.sh` green in six sections, and the three profiles literal `validate`. On `master`, `grep -i flyway gms_backend/pom.xml` → absent and `ddl-auto=${JPA_DDL_AUTO:update}` (`application-dev.properties:20`) — re-run either command to see which side of the merge you are standing on |
 | OPS-08 compose cannot boot from a fresh clone | **Partially closed** | INF-22: config validates; the `env_file: .env` requirement on both services remains, and ports/networks remain — INF-19 |
 | OPS-09 EOL `docker-compose` in Makefile | Still open, escalated | measured as **16 of the 17 recipes** (`help` is the only exception); proved broken on this machine (`make build` → `Error 1`, `make up` → exit 2) — INF-12 |
 | OPS-10 frontend image cannot reach an API | Still open | `nginx.conf` re-read: no `/api` block; combined with INF-14 the container path has no health gate either |
@@ -998,7 +1005,7 @@ re-checked against the working tree or a live measurement on 2026-11-01, in the 
 | Old EC2 SSH deployment workflow | **RETIRED (by deletion)** | `.github/workflows/deploy-backend.yml` deleted; `gh run list` confirms its last attempt (41245769175) never reached the host |
 | CI does not validate its own workflow files | **FIXED (capability) — enforcement still INF-10** | the defect was measured, not inferred: `6198d86` edited `ci.yml` and started no run anywhere. `validate-workflows.yml` is on `master` as `13bc2ed` and validated that very commit on push (41283981839, both jobs green); its acceptance test was executed on the PR, red on a deliberately broken trigger (41283176919) and green on the revert (41283277168) |
 | Lint and test checks advisory rather than enforced | **OPEN** | `required_status_checks.contexts=[]`, `enforce_admins=false`, lint step `continue-on-error: true` (INF-10) |
-| No Flyway migration foundation | **OPEN** | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` property is inert (OPS-07) |
+| No Flyway migration foundation | **FIXED ON BRANCH** | `feat/stage2-flyway-baseline` carries both Flyway 10 artifacts and `V1`–`V5`; `scripts/verify-schema.sh` is the re-runnable proof. On `master` the row reads **OPEN** unchanged — the dependency is absent there, so every `spring.flyway.*` property is still inert (OPS-07) |
 | No independently verified off-host backup/restore | **OPEN** | zero dumps and zero restores exist anywhere; now re-targeted at managed Neon (ADR-009) |
 | No verified production health check | **SUPERSEDED** | there is no production to check — the only target that ever had one is closed. Re-states itself as a Phase 6 gate: external HTTPS + health verification against the OCI origin |
 | No verified production deployment | **SUPERSEDED** | same cause. The rollback/deploy acceptance tests from Infra-M3 carry forward unchanged and now apply to OCI |

@@ -3,13 +3,17 @@ package com.gms.exception;
 import jakarta.persistence.EntityNotFoundException;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.core.MethodParameter;
 import org.springframework.mock.web.MockHttpServletRequest;
+import org.springframework.security.access.AccessDeniedException;
 import org.springframework.validation.BeanPropertyBindingResult;
 import org.springframework.validation.FieldError;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 import java.util.Map;
 
@@ -75,6 +79,111 @@ class GlobalExceptionHandlerTest {
                 .doesNotContain("jdbc")
                 .doesNotContain("hunter2")
                 .doesNotContain("IllegalStateException");
+    }
+
+    /**
+     * A method the resource does not support is a client error, not a server fault. Stage 3's C-1
+     * removed the inherited {@code DELETE /{id}} routes, so the paths they occupied still answer
+     * {@code GET}; measured live on 2026-11-01, {@code DELETE /api/v1/students/1} answered 500
+     * before this handler existed.
+     */
+    @Test
+    void unsupportedMethodIsMethodNotAllowedNotServerError() {
+        ResponseEntity<Map<String, Object>> response = handler.handleMethodNotSupported(
+                new HttpRequestMethodNotSupportedException("DELETE"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.METHOD_NOT_ALLOWED);
+        assertThat(response.getBody()).containsEntry("error", "Method Not Allowed");
+    }
+
+    /**
+     * A row another row still references is a conflict the caller can resolve. Measured live on
+     * 2026-11-01, {@code DELETE /api/v1/classrooms/1} for a classroom with one student answered 500
+     * before this handler existed.
+     */
+    @Test
+    void referencedRowIsAConflictNotServerError() {
+        DataIntegrityViolationException ex = new DataIntegrityViolationException(
+                "update or delete on table \"classrooms\" violates foreign key constraint "
+                        + "\"fkn4i882kjg6fdyg2e641yh3jmk\" on table \"students\"",
+                new RuntimeException("constraint violation"));
+
+        ResponseEntity<Map<String, Object>> response = handler.handleConflict(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.CONFLICT);
+        assertThat(response.getBody()).containsEntry("error", "Conflict");
+        assertThat(String.valueOf(asMap(response.getBody())))
+                .doesNotContain("fkn4i882kjg6fdyg2e641yh3jmk")
+                .doesNotContain("classrooms");
+    }
+
+    /**
+     * A row whose tenant disagrees with its parent's cannot exist, and the refusal is the caller's
+     * problem, not the server's. This is the shape {@code C-7} produces: {@code POST /timetables}
+     * reads its classroom with an unchecked {@code findById}, so school B naming school A's classroom
+     * reaches the database, and {@code fk_timetable_classroom_same_school} is what stops it. Measured
+     * live on 2026-11-01: the request answered 403 with no row written.
+     */
+    @Test
+    void crossTenantWriteRefusedByTheDatabaseIsForbiddenNotConflict() {
+        DataIntegrityViolationException ex = new DataIntegrityViolationException(
+                "could not execute statement",
+                new RuntimeException("ERROR: insert or update on table \"timetables\" violates "
+                        + "foreign key constraint \"fk_timetable_classroom_same_school\""));
+
+        ResponseEntity<Map<String, Object>> response = handler.handleConflict(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).containsEntry("error", "Forbidden");
+        assertThat(String.valueOf(asMap(response.getBody())))
+                .doesNotContain("fk_timetable_classroom_same_school")
+                .doesNotContain("timetables");
+    }
+
+    /**
+     * The method-level refusal that {@code @PreAuthorize} raises arrives as
+     * {@code AuthorizationDeniedException}, a subclass of {@code AccessDeniedException}; before the
+     * handler existed it fell through to the catch-all and answered 500 instead of 403.
+     */
+    @Test
+    void methodLevelRefusalIsForbiddenNotServerError() {
+        ResponseEntity<Map<String, Object>> response = handler.handleAccessDenied(
+                new AccessDeniedException("Access Denied"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).containsEntry("error", "Forbidden");
+    }
+
+    /**
+     * A request that named another school's row is refused, not malformed. The services threw
+     * {@code IllegalArgumentException} for this, which the handler answers with 400 — so the same
+     * refusal answered 403 on the read path and 400 on the write path. Measured live on
+     * 2026-11-01, {@code POST /api/v1/students/create} naming another school's classroom answered
+     * 400 before {@link TenantAccessDeniedException} existed.
+     */
+    @Test
+    void aRowInAnotherSchoolIsForbiddenNotABadRequest() {
+        ResponseEntity<Map<String, Object>> response = handler.handleAccessDenied(
+                new TenantAccessDeniedException("Classroom does not belong to current school"), request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).containsEntry("error", "Forbidden");
+    }
+
+    /**
+     * An id that is not an integer is a malformed request, not a server fault. Measured live on
+     * 2026-11-01, {@code PUT /api/v1/subjects/update/} answered 500 before this handler existed.
+     */
+    @Test
+    void aPathVariableOfTheWrongTypeIsABadRequestNotServerError() throws Exception {
+        ResponseEntity<Map<String, Object>> response = handler.handleTypeMismatch(
+                new MethodArgumentTypeMismatchException("not-a-number", Integer.class, "id",
+                        new MethodParameter(UserRequestDto.class.getMethod("setEmail", String.class), 0),
+                        new RuntimeException("conversion failed")),
+                request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
+        assertThat(response.getBody()).containsEntry("error", "Invalid request");
     }
 
     @SuppressWarnings("unchecked")

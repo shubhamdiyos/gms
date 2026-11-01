@@ -9,6 +9,7 @@ import com.gms.model.request.ExamSubjectRequest;
 import com.gms.model.response.ExamResponse;
 import com.gms.model.response.ExamSubjectResponse;
 import com.gms.repository.ExamRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +19,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implements ExamService {
+public class ExamServiceImpl implements ExamService {
 
     private final ExamRepository examRepository;
     private final SchoolService schoolService;
@@ -29,7 +30,6 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
                           SchoolService schoolService,
                           SubjectService subjectService,
                           UserService userService) {
-        super(examRepository);
         this.examRepository = examRepository;
         this.schoolService = schoolService;
         this.subjectService = subjectService;
@@ -37,13 +37,13 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
     }
 
     @Override
-    public ResponseEntity<ExamResponse> createExam(ExamRequest examRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<ExamResponse> createExam(ExamRequest examRequest) {
         // Validate school exists
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create exam
@@ -65,6 +65,7 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
         if (examRequest.getExamSubjects() != null) {
             for (ExamSubjectRequest subjectRequest : examRequest.getExamSubjects()) {
                 ExamSubject examSubject = new ExamSubject();
+                examSubject.setSchool(school);
                 examSubject.setExam(exam);
                 examSubject.setSubject(subjectService.findById(subjectRequest.getSubjectId())
                         .orElseThrow(() -> new EntityNotFoundException("Subject not found")));
@@ -86,18 +87,16 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
     }
 
     @Override
-    public ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest) {
         // Validate exam exists
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        // Validate school
-        if (!exam.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped load proved this row is the caller's. The school comparison this line replaces
+        // was a second copy of that predicate, and because the bootstrapped platform owner carries
+        // its own SYSTEM school id it refused that owner too.
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update exam
@@ -117,21 +116,18 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
     }
 
     @Override
-    public ResponseEntity<?> deleteExam(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteExam(Integer id) {
         // Validate exam exists
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        // Validate school
-        if (!exam.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // No school comparison here: the load above filtered by the caller's school, so a foreign id
+        // yielded nothing, and the platform owner's cross-tenant branch is the caller this serves.
         // Soft delete
         exam.setStatus("0");
 
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         exam.setUpdatedBy(updater);
 
@@ -140,26 +136,25 @@ public class ExamServiceImpl extends AbstractCRUDService<Exam, Integer> implemen
     }
 
     @Override
-    public ResponseEntity<List<Exam>> getAllExams(Integer schoolId) {
-        List<Exam> exams = examRepository.findBySchool_IdAndStatus(schoolId, "1");
+    public ResponseEntity<List<Exam>> getAllExams() {
+        List<Exam> exams = examRepository.findBySchool_IdAndStatus(TenantContext.schoolId(), "1");
         return ResponseEntity.ok(exams);
     }
 
     @Override
-    public ResponseEntity<Exam> getExamById(Integer id, Integer schoolId) {
+    public ResponseEntity<Exam> getExamById(Integer id) {
         Exam exam = examRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
 
-        if (!exam.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped findById answered the tenancy question at the point of load: a school caller
+        // never reaches here for a foreign id, and the platform owner's cross-tenant branch gets
+        // the row it is meant to see.
         return ResponseEntity.ok(exam);
     }
 
     @Override
-    public ResponseEntity<List<Exam>> getExamsByAcademicYear(Integer schoolId, String academicYear) {
-        List<Exam> exams = examRepository.findBySchool_IdAndAcademicYearAndStatus(schoolId, academicYear, "1");
+    public ResponseEntity<List<Exam>> getExamsByAcademicYear(String academicYear) {
+        List<Exam> exams = examRepository.findBySchool_IdAndAcademicYearAndStatus(TenantContext.schoolId(), academicYear, "1");
         return ResponseEntity.ok(exams);
     }
 

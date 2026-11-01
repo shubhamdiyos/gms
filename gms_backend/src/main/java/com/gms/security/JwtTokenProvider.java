@@ -18,6 +18,7 @@ import java.util.Arrays;
 import java.util.Date;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Objects;
 import java.util.Set;
 
 @Component
@@ -103,7 +104,7 @@ public class JwtTokenProvider {
         Instant exp = now.plusSeconds(validitySeconds);
         return Jwts.builder()
                 .setSubject(subject)
-                .claim("roles", roles)
+                .claim("roles", rolesClaim(roles))
                 .setIssuer(issuer)
                 .setIssuedAt(Date.from(now))
                 .setExpiration(Date.from(exp))
@@ -111,19 +112,56 @@ public class JwtTokenProvider {
                 .compact();
     }
 
-    public String createToken(String subject, Set<String> roles, Integer schoolId, Integer empId) {
+    /**
+     * The token an authenticated login gets: who, in which tenant, acting as which employee, and as which
+     * account.
+     *
+     * <p>{@code uid} is {@code users.id} and exists for one purpose — the audit trail has to name the account
+     * that wrote the row, and it is the only identifier on this claim set that does. {@code empId} cannot do
+     * that job: {@code AuthController:98} fills it with the employee primary key for staff and the user primary
+     * key for a principal with no employee row, so one claim holds two id spaces (finding BKL-08). Reading the
+     * auditor off {@code uid} is also what keeps the trail query-free: an auditor resolved by username has to
+     * be looked up, and when the entity listener asks for it that lookup happens <em>inside</em> the flush,
+     * whose auto-flush re-enters the flush, and the write is lost.</p>
+     */
+    public String createToken(String subject, Set<String> roles, Integer schoolId, Integer empId, Integer uid) {
         Instant now = Instant.now();
         Instant exp = now.plusSeconds(validitySeconds);
         return Jwts.builder()
                 .setSubject(subject)
-                .claim("roles", roles)
+                .claim("roles", rolesClaim(roles))
                 .claim("schoolId", schoolId)
                 .claim("empId", empId)
+                .claim("uid", uid)
                 .setIssuer(issuer)
                 .setIssuedAt(Date.from(now))
                 .setExpiration(Date.from(exp))
                 .signWith(key, SignatureAlgorithm.HS256)
                 .compact();
+    }
+
+    /**
+     * The {@code roles} claim in the form it goes on the wire: the role codes, sorted, as a list.
+     *
+     * <p>Both callers hand over a {@code Set} — {@code AuthController.login} builds one with
+     * {@code Collectors.toSet()}, whose iteration order is unspecified — and a {@code Set} of role
+     * codes serialises in whatever order that particular hash happened to produce. Two logins for the
+     * same two-role user could therefore carry the same set in a different order, and every consumer
+     * that needed "the" role had to guess a precedence. Emitting a sorted array here, at the one
+     * place the claim is written, makes the token self-describing.</p>
+     *
+     * <p>The JSON type is unchanged: a list serialises to the same array of strings a set did, and
+     * both readers ({@code JwtAuthenticationFilter.roles} and {@link #getRoles(String)}) parse a list
+     * back into a set, so nothing on the validation side moves.</p>
+     */
+    private static List<String> rolesClaim(Set<String> roles) {
+        if (roles == null || roles.isEmpty()) {
+            return List.of();
+        }
+        return roles.stream()
+                .filter(Objects::nonNull)
+                .sorted()
+                .toList();
     }
 
     public Claims parseClaims(String token) {

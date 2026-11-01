@@ -5,6 +5,7 @@ import com.gms.model.entity.School;
 import com.gms.model.request.AcademicYearRequest;
 import com.gms.repository.AcademicYearRepository;
 import com.gms.repository.SchoolRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.AcademicYearService;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
@@ -23,13 +24,13 @@ public class AcademicYearServiceImpl implements AcademicYearService {
     private SchoolRepository schoolRepository;
 
     @Override
-    public ResponseEntity<?> createAcademicYear(AcademicYearRequest academicYearRequest, Integer schoolId) {
-        School school = schoolRepository.findById(schoolId).orElse(null);
+    public ResponseEntity<?> createAcademicYear(AcademicYearRequest academicYearRequest) {
+        School school = schoolRepository.findById(TenantContext.schoolId()).orElse(null);
         if (school == null) {
             return ResponseEntity.badRequest().body("School not found");
         }
 
-        if (academicYearRepository.existsBySchool_IdAndName(schoolId, academicYearRequest.getName())) {
+        if (academicYearRepository.existsBySchool_IdAndName(TenantContext.schoolId(), academicYearRequest.getName())) {
             return ResponseEntity.badRequest().body("Academic year with the same name already exists");
         }
 
@@ -44,17 +45,15 @@ public class AcademicYearServiceImpl implements AcademicYearService {
     }
 
     @Override
-    public ResponseEntity<?> updateAcademicYear(Integer id, AcademicYearRequest academicYearRequest, Integer schoolId) {
+    public ResponseEntity<?> updateAcademicYear(Integer id, AcademicYearRequest academicYearRequest) {
+        // The load is scoped to the caller's school, so a foreign id yields nothing and the
+        // hand-written school comparison the mechanism supersedes is gone with it.
         Optional<AcademicYear> academicYearOptional = academicYearRepository.findById(id);
         if (academicYearOptional.isEmpty()) {
-            return ResponseEntity.badRequest().body("Academic year not found");
+            return ResponseEntity.notFound().build();
         }
 
         AcademicYear academicYear = academicYearOptional.get();
-        if (!academicYear.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).body("You are not authorized to update this academic year");
-        }
-
         academicYear.setName(academicYearRequest.getName());
         academicYear.setStartDate(academicYearRequest.getStartDate());
         academicYear.setEndDate(academicYearRequest.getEndDate());
@@ -64,39 +63,34 @@ public class AcademicYearServiceImpl implements AcademicYearService {
     }
 
     @Override
-    public ResponseEntity<?> deleteAcademicYear(Integer id, Integer schoolId) {
+    public ResponseEntity<?> deleteAcademicYear(Integer id) {
+        // Same scoped load as the update path: absent for a foreign id, so notFound rather than
+        // a 400 that tells the caller the request was malformed when it was merely not theirs.
         Optional<AcademicYear> academicYearOptional = academicYearRepository.findById(id);
         if (academicYearOptional.isEmpty()) {
-            return ResponseEntity.badRequest().body("Academic year not found");
+            return ResponseEntity.notFound().build();
         }
 
         AcademicYear academicYear = academicYearOptional.get();
-        if (!academicYear.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).body("You are not authorized to delete this academic year");
-        }
-
         academicYear.setStatus("0");
         academicYearRepository.save(academicYear);
         return ResponseEntity.ok("Academic year deleted successfully");
     }
 
     @Override
-    public ResponseEntity<List<AcademicYear>> getAllAcademicYears(Integer schoolId) {
-        return ResponseEntity.ok(academicYearRepository.findBySchool_IdAndStatus(schoolId, "1"));
+    public ResponseEntity<List<AcademicYear>> getAllAcademicYears() {
+        return ResponseEntity.ok(academicYearRepository.findBySchool_IdAndStatus(TenantContext.schoolId(), "1"));
     }
 
     @Override
-    public ResponseEntity<AcademicYear> getAcademicYearById(Integer id, Integer schoolId) {
+    public ResponseEntity<AcademicYear> getAcademicYearById(Integer id) {
+        // The scoped load already confines the answer to the caller's school, so the
+        // hand-written comparison and its 403 are gone — a foreign id is 404.
         Optional<AcademicYear> academicYearOptional = academicYearRepository.findById(id);
         if (academicYearOptional.isEmpty()) {
-            return ResponseEntity.badRequest().build();
+            return ResponseEntity.notFound().build();
         }
 
-        AcademicYear academicYear = academicYearOptional.get();
-        if (!academicYear.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
-        return ResponseEntity.ok(academicYear);
+        return ResponseEntity.ok(academicYearOptional.get());
     }
 }

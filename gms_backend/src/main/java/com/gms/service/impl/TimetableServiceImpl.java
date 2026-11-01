@@ -6,6 +6,7 @@ import com.gms.exception.NotFoundException;
 import com.gms.model.request.TimetableRequest;
 import com.gms.model.response.*;
 import com.gms.repository.*;
+import com.gms.security.TenantContext;
 import com.gms.service.TimetableService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -20,18 +21,24 @@ public class TimetableServiceImpl implements TimetableService {
     private final ClassroomRepository classroomRepository;
     private final TeacherAssignmentRepository teacherAssignmentRepository;
     private final StudentRepository studentRepository;
+    private final SchoolRepository schoolRepository;
     private final UserRepository userRepository;
+    private final TimetableSlotRepository timetableSlotRepository;
 
     public TimetableServiceImpl(TimetableRepository timetableRepository, 
                                 ClassroomRepository classroomRepository, 
                                 TeacherAssignmentRepository teacherAssignmentRepository, 
                                 StudentRepository studentRepository,
-                                UserRepository userRepository) {
+                                SchoolRepository schoolRepository,
+                                UserRepository userRepository,
+                                TimetableSlotRepository timetableSlotRepository) {
         this.timetableRepository = timetableRepository;
         this.classroomRepository = classroomRepository;
         this.teacherAssignmentRepository = teacherAssignmentRepository;
         this.studentRepository = studentRepository;
+        this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
+        this.timetableSlotRepository = timetableSlotRepository;
     }
 
     @Override
@@ -40,9 +47,11 @@ public class TimetableServiceImpl implements TimetableService {
         Classroom classroom = classroomRepository.findById(request.getClassroomId())
                 .orElseThrow(() -> new NotFoundException("CLASSROOM_NOT_FOUND", "Classroom not found"));
 
-        Timetable timetable = timetableRepository.findByClassroom_Id(request.getClassroomId())
+        Timetable timetable = timetableRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), request.getClassroomId())
                 .orElse(new Timetable());
 
+        School school = schoolRepository.getReferenceById(TenantContext.schoolId());
+        timetable.setSchool(school);
         timetable.setClassroom(classroom);
         timetable.setAcademicYear(request.getAcademicYear());
         timetable.getSlots().clear();
@@ -56,6 +65,7 @@ public class TimetableServiceImpl implements TimetableService {
             }
 
             TimetableSlot slot = new TimetableSlot();
+            slot.setSchool(school);
             slot.setTimetable(timetable);
             slot.setDayOfWeek(slotRequest.getDayOfWeek());
             slot.setPeriod(slotRequest.getPeriod());
@@ -70,24 +80,30 @@ public class TimetableServiceImpl implements TimetableService {
     @Override
     @Transactional(readOnly = true)
     public TimetableResponse getTimetableForClassroom(Integer classroomId) {
-        Timetable timetable = timetableRepository.findByClassroom_Id(classroomId)
+        Timetable timetable = timetableRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), classroomId)
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_NOT_FOUND", "Timetable not found for the given classroom"));
         return mapToResponse(timetable);
     }
 
+    /**
+     * A teacher's own periods, read with the tenant in the query — the version this replaced walked
+     * every timetable in the platform in Java to reach the same rows, and then threw them away.
+     *
+     * <p>The schedule stays in the slots: a teacher teaches across several classrooms, so there is no
+     * single timetable row to name, and each slot already carries the assignment's subject and
+     * classroom. The identifier and classroom columns of the response are therefore null by design.</p>
+     */
     @Override
     @Transactional(readOnly = true)
     public TimetableResponse getTimetableForTeacher(Integer teacherId) {
-        // This is a simplified implementation. A more performant version might involve a custom query.
-        List<Timetable> allTimetables = timetableRepository.findAll();
-        List<TimetableSlot> teacherSlots = allTimetables.stream()
-                .flatMap(t -> t.getSlots().stream())
-                .filter(s -> s.getAssignment().getTeacher().getId().equals(teacherId))
+        List<TimetableSlot> teacherSlots = timetableSlotRepository
+                .findByAssignment_Teacher_School_IdAndAssignment_Teacher_Id(TenantContext.schoolId(), teacherId);
+
+        List<TimetableSlotResponse> slotResponses = teacherSlots.stream()
+                .map(this::mapToSlotResponse)
                 .collect(Collectors.toList());
-        
-        // We don't have a single timetable for a teacher, so we can't return a TimetableResponse directly.
-        // For now, we will return an empty response. A more complete implementation is needed.
-        return new TimetableResponse();
+
+        return new TimetableResponse(null, null, null, null, slotResponses);
     }
 
     @Override

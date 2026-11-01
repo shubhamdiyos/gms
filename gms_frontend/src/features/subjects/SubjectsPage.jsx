@@ -34,10 +34,8 @@ import {
 import { toast } from 'react-toastify';
 
 const schema = yup.object({
-  subjectName: yup.string().required('Subject name is required'),
-  subjectCode: yup.string().required('Subject code is required'),
-  credits: yup.number().positive('Credits must be positive').required('Credits is required'),
-  description: yup.string(),
+  name: yup.string().max(120).required('Subject name is required'),
+  code: yup.string().max(30).required('Subject code is required'),
 });
 
 const SubjectsPage = () => {
@@ -104,31 +102,20 @@ const SubjectsPage = () => {
 
   const columns = [
     {
-      field: 'subjectCode',
+      field: 'code',
       headerName: 'Subject Code',
       width: 130,
     },
     {
-      field: 'subjectName',
+      field: 'name',
       headerName: 'Subject Name',
-      width: 200,
+      width: 240,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Subject sx={{ mr: 1, color: '#7b1fa2' }} />
           {params.value}
         </Box>
       ),
-    },
-    {
-      field: 'credits',
-      headerName: 'Credits',
-      width: 100,
-      renderCell: (params) => `${params.value} credits`,
-    },
-    {
-      field: 'description',
-      headerName: 'Description',
-      width: 300,
     },
     {
       field: 'status',
@@ -227,41 +214,20 @@ const SubjectsPage = () => {
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12} md={6}>
                 <TextField
-                  {...register('subjectName')}
+                  {...register('name')}
                   fullWidth
                   label="Subject Name"
-                  error={!!errors.subjectName}
-                  helperText={errors.subjectName?.message}
+                  error={!!errors.name}
+                  helperText={errors.name?.message}
                 />
               </Grid>
               <Grid item xs={12} md={6}>
                 <TextField
-                  {...register('subjectCode')}
+                  {...register('code')}
                   fullWidth
                   label="Subject Code"
-                  error={!!errors.subjectCode}
-                  helperText={errors.subjectCode?.message}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  {...register('credits')}
-                  fullWidth
-                  label="Credits"
-                  type="number"
-                  error={!!errors.credits}
-                  helperText={errors.credits?.message}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  {...register('description')}
-                  fullWidth
-                  label="Description"
-                  multiline
-                  rows={4}
-                  error={!!errors.description}
-                  helperText={errors.description?.message}
+                  error={!!errors.code}
+                  helperText={errors.code?.message}
                 />
               </Grid>
             </Grid>

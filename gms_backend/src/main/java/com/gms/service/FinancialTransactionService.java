@@ -11,19 +11,19 @@ import java.util.List;
 
 public interface FinancialTransactionService {
 
-    ResponseEntity<FinancialTransactionResponse> createFinancialTransaction(FinancialTransactionRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FinancialTransactionResponse> createFinancialTransaction(FinancialTransactionRequest request);
 
-    ResponseEntity<FinancialTransactionResponse> updateFinancialTransaction(Integer id, FinancialTransactionRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FinancialTransactionResponse> updateFinancialTransaction(Integer id, FinancialTransactionRequest request);
 
-    ResponseEntity<?> deleteFinancialTransaction(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteFinancialTransaction(Integer id);
 
-    ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions(Integer schoolId);
+    ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions();
 
-    ResponseEntity<FinancialTransaction> getFinancialTransactionById(Integer id, Integer schoolId);
+    ResponseEntity<FinancialTransaction> getFinancialTransactionById(Integer id);
 
-    ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(LocalDate startDate, LocalDate endDate);
 
-    BigDecimal getTotalIncomeByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    BigDecimal getTotalIncomeByDateRange(LocalDate startDate, LocalDate endDate);
 
-    BigDecimal getTotalFeeCollection(Integer schoolId);
+    BigDecimal getTotalFeeCollection();
 }

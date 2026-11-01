@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.Notification;
 import com.gms.model.request.NotificationRequest;
 import com.gms.model.response.NotificationResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.NotificationService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -28,47 +28,38 @@ public class NotificationController {
     @PostMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<NotificationResponse> createNotification(@Valid @RequestBody NotificationRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return notificationService.createNotification(request, schoolId, empId);
+        return notificationService.createNotification(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<NotificationResponse> updateNotification(@PathVariable Integer id,
                                                                    @Valid @RequestBody NotificationRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return notificationService.updateNotification(id, request, schoolId, empId);
+        return notificationService.updateNotification(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<?> deleteNotification(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return notificationService.deleteNotification(id, schoolId, empId);
+        return notificationService.deleteNotification(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Notification>> getAllNotifications() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getAllNotifications(schoolId);
+        return notificationService.getAllNotifications();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<Notification> getNotificationById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getNotificationById(id, schoolId);
+        return notificationService.getNotificationById(id);
     }
 
     @GetMapping("/recipient-type/{recipientType}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Notification>> getNotificationsByRecipientType(@PathVariable String recipientType) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getNotificationsByRecipientType(schoolId, recipientType);
+        return notificationService.getNotificationsByRecipientType(recipientType);
     }
 
     // Admin-only because nothing on this path ever compared the id in it to the caller: a TEACHER or
@@ -78,57 +69,49 @@ public class NotificationController {
     @GetMapping("/user/{userId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<Notification>> getNotificationsByUserId(@PathVariable Integer userId) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getNotificationsByUserId(schoolId, userId);
+        return notificationService.getNotificationsByUserId(userId);
     }
 
     @GetMapping("/scheduled")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<Notification>> getScheduledNotifications(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE_TIME) LocalDateTime scheduledTime) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getScheduledNotifications(schoolId, scheduledTime);
+        return notificationService.getScheduledNotifications(scheduledTime);
     }
 
     @GetMapping("/type/{notificationType}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Notification>> getNotificationsByType(@PathVariable String notificationType) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getNotificationsByType(schoolId, notificationType);
+        return notificationService.getNotificationsByType(notificationType);
     }
 
     @GetMapping("/priority/{priority}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Notification>> getNotificationsByPriority(@PathVariable String priority) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.getNotificationsByPriority(schoolId, priority);
+        return notificationService.getNotificationsByPriority(priority);
     }
 
     @GetMapping("/pending-count")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<Long> countPendingNotifications() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.countPendingNotifications(schoolId);
+        return notificationService.countPendingNotifications();
     }
 
     @GetMapping("/unread-count")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<Long> countUnreadNotifications() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.countUnreadNotifications(schoolId);
+        return notificationService.countUnreadNotifications();
     }
 
     @PutMapping("/{id}/mark-read")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<?> markNotificationAsRead(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.markNotificationAsRead(id, schoolId);
+        return notificationService.markNotificationAsRead(id);
     }
 
     @PostMapping("/send-scheduled")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<?> sendScheduledNotifications() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return notificationService.sendScheduledNotifications(schoolId);
+        return notificationService.sendScheduledNotifications();
     }
 }

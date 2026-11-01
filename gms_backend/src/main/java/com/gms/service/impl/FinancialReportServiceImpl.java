@@ -8,7 +8,7 @@ import com.gms.model.response.FinancialReportResponse;
 import com.gms.repository.FinancialReportRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.FinancialReportService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +18,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Service
-public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialReport, Integer> implements FinancialReportService {
+public class FinancialReportServiceImpl implements FinancialReportService {
 
     private final FinancialReportRepository financialReportRepository;
     private final SchoolRepository schoolRepository;
@@ -27,20 +27,19 @@ public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialRep
     public FinancialReportServiceImpl(FinancialReportRepository financialReportRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(financialReportRepository);
         this.financialReportRepository = financialReportRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<FinancialReportResponse> createFinancialReport(FinancialReportRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FinancialReportResponse> createFinancialReport(FinancialReportRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create financial report
@@ -67,18 +66,13 @@ public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialRep
     }
 
     @Override
-    public ResponseEntity<FinancialReportResponse> updateFinancialReport(Integer id, FinancialReportRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FinancialReportResponse> updateFinancialReport(Integer id, FinancialReportRequest request) {
         // Validate financial report exists
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
 
-        // Validate school
-        if (!financialReport.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update financial report
@@ -102,18 +96,13 @@ public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialRep
     }
 
     @Override
-    public ResponseEntity<?> deleteFinancialReport(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteFinancialReport(Integer id) {
         // Validate financial report exists
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
 
-        // Validate school
-        if (!financialReport.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to ARCHIVED or similar
@@ -124,32 +113,28 @@ public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialRep
     }
 
     @Override
-    public ResponseEntity<List<FinancialReport>> getAllFinancialReports(Integer schoolId) {
-        List<FinancialReport> financialReports = financialReportRepository.findBySchoolIdOrderByGeneratedDateDesc(schoolId);
+    public ResponseEntity<List<FinancialReport>> getAllFinancialReports() {
+        List<FinancialReport> financialReports = financialReportRepository.findBySchoolIdOrderByGeneratedDateDesc(TenantContext.schoolId());
         return ResponseEntity.ok(financialReports);
     }
 
     @Override
-    public ResponseEntity<FinancialReport> getFinancialReportById(Integer id, Integer schoolId) {
+    public ResponseEntity<FinancialReport> getFinancialReportById(Integer id) {
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
-
-        if (!financialReport.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(financialReport);
     }
 
     @Override
-    public ResponseEntity<List<FinancialReport>> getFinancialReportsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<FinancialReport> financialReports = financialReportRepository.findBySchoolIdAndGeneratedDateBetween(schoolId, startDate, endDate);
+    public ResponseEntity<List<FinancialReport>> getFinancialReportsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<FinancialReport> financialReports = financialReportRepository.findBySchoolIdAndGeneratedDateBetween(TenantContext.schoolId(), startDate, endDate);
         return ResponseEntity.ok(financialReports);
     }
 
     @Override
-    public ResponseEntity<List<FinancialReport>> getFinancialReportsByAcademicYear(Integer schoolId, String academicYear) {
-        List<FinancialReport> financialReports = financialReportRepository.findBySchoolIdAndAcademicYear(schoolId, academicYear);
+    public ResponseEntity<List<FinancialReport>> getFinancialReportsByAcademicYear(String academicYear) {
+        List<FinancialReport> financialReports = financialReportRepository.findBySchoolIdAndAcademicYear(TenantContext.schoolId(), academicYear);
         return ResponseEntity.ok(financialReports);
     }
 
