@@ -15,6 +15,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
 
 import java.time.LocalDateTime;
+import java.util.Comparator;
 import java.util.List;
 
 @Service
@@ -154,8 +155,37 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
 
     @Override
     public ResponseEntity<List<Notification>> getNotificationsByUserId(Integer schoolId, Integer userId) {
-        List<Notification> notifications = notificationRepository.findBySchoolIdAndUserIdAndDeliveryStatus(schoolId, userId, "PENDING");
+        List<Notification> notifications = notificationRepository
+                .findBySchoolIdAndRecipientTypeAndDeliveryStatus(schoolId, "INDIVIDUAL", "PENDING")
+                .stream()
+                .filter(notification -> addressesUser(notification.getRecipientIds(), userId))
+                // the deleted query carried ORDER BY created_on DESC; the sort moves here rather than disappearing
+                .sorted(Comparator.comparing(Notification::getCreatedOn,
+                        Comparator.nullsLast(Comparator.reverseOrder())))
+                .toList();
         return ResponseEntity.ok(notifications);
+    }
+
+    /**
+     * {@code recipient_ids} is free text copied verbatim from the request body, so membership is decided by
+     * comparing the numeric tokens it contains. The query this replaces matched with
+     * {@code recipientIds LIKE %:userId%}, which handed user 1 every notification addressed to 11, 21, 100
+     * or 1234 (finding TEN-03).
+     */
+    static boolean addressesUser(String recipientIds, Integer userId) {
+        if (recipientIds == null || userId == null) {
+            return false;
+        }
+        for (String token : recipientIds.split("[^0-9]+")) {
+            try {
+                if (!token.isEmpty() && Integer.parseInt(token) == userId) {
+                    return true;
+                }
+            } catch (NumberFormatException notAnId) {
+                // a run of digits longer than an int cannot be this user's id
+            }
+        }
+        return false;
     }
 
     @Override

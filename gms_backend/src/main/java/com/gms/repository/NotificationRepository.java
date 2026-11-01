@@ -18,9 +18,6 @@ public interface NotificationRepository extends JpaRepository<Notification, Inte
 
     List<Notification> findBySchoolIdAndRecipientTypeAndDeliveryStatus(Integer schoolId, String recipientType, String deliveryStatus);
 
-    @Query("SELECT n FROM Notification n WHERE n.school.id = :schoolId AND n.recipientType = 'INDIVIDUAL' AND n.recipientIds LIKE %:userId% AND n.deliveryStatus = :status ORDER BY n.createdOn DESC")
-    List<Notification> findBySchoolIdAndUserIdAndDeliveryStatus(@Param("schoolId") Integer schoolId, @Param("userId") Integer userId, @Param("status") String status);
-
     List<Notification> findBySchoolIdAndScheduledAtBeforeAndDeliveryStatus(Integer schoolId, LocalDateTime scheduledTime, String deliveryStatus);
 
     List<Notification> findBySchoolIdAndNotificationTypeAndDeliveryStatus(Integer schoolId, String notificationType, String deliveryStatus);
