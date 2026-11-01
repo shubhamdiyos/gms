@@ -342,14 +342,14 @@ refused by the workflow.
 `enforce_admins.enabled = false`. Reviews are configured (`required_approving_review_count = 1`,
 `require_last_push_approval = true`, `dismiss_stale_reviews = true`) but admins bypass them — and PR #10 was in
 fact merged with `--admin` on 2026-10-31, which is on the record in
-[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It has now happened twice**: PR #11 (this audit) hit
-`mergeStateStatus: BLOCKED` / `reviewDecision: REVIEW_REQUIRED`, and after the blocker was reported to the owner
-was merged with an owner-authorized `--admin` override on 2026-11-01T04:42:25Z as `483a41c`. The structural cause
-is worth naming for the remediation below: on a single-account repository `required_approving_review_count = 1`
-with `require_last_push_approval = true` is **unsatisfiable by construction** — GitHub refuses an author's own
-approval — so the rule as configured can only ever be met by an override or by relaxing it, and an override is not
-a gate. The first time (PR #10) that happened silently; the second time it was reported and explicitly authorized
-by the owner before the merge.
+[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It is now the normal path rather than the exception**: seven
+consecutive PRs (#10–#16) merged with zero recorded reviews, the last pair nine seconds apart, and the full count with
+its merge SHAs and timestamps is carried in [§11 below](#11-what-i-can-execute-directly-and-the-genuine-human-blockers)
+rather than restated here. The structural cause is worth naming for the remediation below: on a single-account
+repository `required_approving_review_count = 1` with `require_last_push_approval = true` is **unsatisfiable by
+construction** — GitHub refuses an author's own approval — so the rule as configured can only ever be met by an
+override or by relaxing it, and an override is not a gate. The first time (PR #10) that happened silently; from PR #11
+on it was reported and explicitly authorized by the owner before the merge.
 `gh api …/environments/Production` and `/Preview` both
 return `protection_rules: []` with `can_admins_bypass: true`. Neither workflow declared `environment:`
 (`grep -n environment .github/workflows/*.yml` → no match), and `deploy-backend.yml` had no top-level
@@ -880,6 +880,7 @@ These are not M0 results, so they are kept separate rather than retro-fitted int
 | Each pinned SHA against its upstream tag | **verified before pinning**: `11d5960`=checkout v4.4.0, `cf277c6`=setup-java v4.9.1, `ea165f8`=upload-artifact v4.6.2, `49933ea`=setup-node v4.4.0, `3d3c42e`=checkout v7.0.1, `914e7df`=actionlint v1.7.12 |
 | A documentation-only PR after the gate reached `master` | **no Actions run at all** — measured on PR #15 (4 files, all `docs/**`): `gh run list --branch docs/record-inf23-gate-merge` is empty and `gh pr checks 15` shows only the Vercel app's two contexts. Correct for both path filters, and the reason neither filter can be left in place while its jobs are marked required (INF-10) |
 | CI on `master` after `gms_frontend/vercel.json` was deleted | **run 41283928312, success** on merge commit `964acad`. Notable because it contradicts an assumption carried into the retirement: `vercel.json` is not in `ci.yml`'s `paths-ignore`, so deleting a frontend config file *is* a CI-relevant change, and the frontend job passing is the evidence that nothing depended on it |
+| `Workflow validation` on a `master` merge commit | **run 41284869478, success** on `7fb25b8` (PR #16, both jobs green). PR #16 edited the two workflow files' *comments* only (`git show --stat`: `ci.yml` ±1, `validate-workflows.yml` ±2), so this is the first time the push trigger — not a PR trigger — had to fire on `master`, and it did. It pairs with #15, which touched only `docs/**` and correctly produced **no run anywhere**: the two path filters are now each observed doing the opposite thing on adjacent merges |
 
 ### 7.1 Image build result
 
@@ -1025,15 +1026,18 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 **The protection problem, stated once.** `required_approving_review_count = 1` with
 `require_last_push_approval = true` cannot be satisfied on a single-account repository, because GitHub refuses an
-author's own approval. Every PR so far has therefore needed an `--admin` override. Four now carry one: #10
-(2026-10-31), #11 (`483a41c`, 2026-11-01T04:42:25Z), #13 (`964acad`, 07:13:33Z) and #14 (`13bc2ed`, 07:14:21Z) —
-the last two merged minutes apart, which is what a stack looks like when the reviewer is also the author. The
-mandate contradicts itself in a **single section**: §2 says both "Never bypass branch protection, required reviews,
-CI checks" and "Do not ask me to manually review or merge every routine engineering PR. You should manage the PR
-lifecycle yourself where repository permissions and protections allow it". The clause is conditional — *where
-protections allow* — and this configuration does not allow it, so the two readings are only reconcilable by
-changing the rule. The contradiction sits in one section, not across two mandates (an earlier draft of this
-paragraph cited "§43"; the current mandate has 23 sections).
+author's own approval. Every PR so far has therefore needed an `--admin` override. **Seven now carry one** — #10
+(2026-10-31), #11 (`483a41c`, 2026-11-01T04:42:25Z), #12 (`e9c6b3d`, 06:20:39Z), #13 (`964acad`, 07:13:33Z), #14
+(`13bc2ed`, 07:14:21Z), #15 (`d274ebc`, 07:27:32Z) and #16 (`7fb25b8`, 07:27:41Z) — measured as
+`GET /pulls/N/reviews` returning an empty array for each while the rule required one. The cadence is the finding, not
+the count: #13 and #14 went in eighty-eight seconds apart, #15 and #16 nine seconds apart, and the second pair was a
+documentation PR recording the first pair's overrides. A rule that is met by being bypassed twice a minute is not a
+gate; it is a prompt. The mandate contradicts itself in a **single section**: §2 says both "Never bypass branch
+protection, required reviews, CI checks" and "Do not ask me to manually review or merge every routine engineering
+PR. You should manage the PR lifecycle yourself where repository permissions and protections allow it". The clause is
+conditional — *where protections allow* — and this configuration does not allow it, so the two readings are only
+reconcilable by changing the rule. The contradiction sits in one section, not across two mandates (an earlier draft of
+this paragraph cited "§43"; the current mandate has 23 sections).
 
 What reconciles them: make `Backend build and tests`, `Frontend lint and build` and the two
 `Workflow validation` jobs **required** with `strict` and `enforce_admins: true`, and set the review count to `0`.
