@@ -4,13 +4,17 @@ name: CI
 # ubuntu-latest only — no paid runners, no cloud services, no managed databases
 # (third mandate §20 and the founder's standing zero-unexpected-cost rule).
 # Documentation-only changes do not start a build; a change to `.github/**` is
-# checked by `validate-workflows.yml` instead.
+# checked by `validate-workflows.yml` instead. `infra/**/*.md` needs its own
+# line because `*.md` matches only root-level markdown: PR #20 changed `docs/**`
+# files plus `infra/oci/README.md` and nothing else, and that one nested prose
+# file started all three jobs twice — 140 seconds of runner time.
 
 on:
   pull_request:
     paths-ignore:
       - 'docs/**'
       - '*.md'
+      - 'infra/**/*.md'
       - 'gms_backend/memory-bank/**'
       - '.github/**'
   push:
@@ -19,6 +23,7 @@ on:
     paths-ignore:
       - 'docs/**'
       - '*.md'
+      - 'infra/**/*.md'
       - 'gms_backend/memory-bank/**'
       - '.github/**'
 
