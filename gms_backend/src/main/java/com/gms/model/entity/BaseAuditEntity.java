@@ -16,7 +16,7 @@ import java.time.Instant;
  * <p>The <em>who</em> of the trail is {@link AuthorshipEntity}'s, and this class adds the <em>when</em> and the
  * {@code @Version} to it. {@link AuditingEntityListener} writes both halves: {@code AuditConfiguration}'s
  * {@code @EnableJpaAuditing} supplies the auditor from the verified request context. Before that, the columns
- * existed and thirty-four tables' rows went out with them null unless the service in front of them happened to
+ * existed and twenty-eight tables' rows went out with them null unless the service in front of them happened to
  * remember — the mechanism is what makes "every write records who wrote it" a property of the schema rather
  * than a habit of twenty files.</p>
  *

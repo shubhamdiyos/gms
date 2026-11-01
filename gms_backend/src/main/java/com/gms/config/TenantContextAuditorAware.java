@@ -42,9 +42,10 @@ import org.springframework.data.domain.AuditorAware;
  * running</em>, the lookup is a query, a query auto-flushes, and the flush re-enters itself. Every
  * {@code PUT}/{@code PATCH} on a school, a pupil, a classroom and an admission then answered 500 with
  * {@code org.hibernate.AssertionFailure: collection was processed twice by flush()} and a
- * {@code StackOverflowError} in this class's own log line — including the thirty-four tables that had been
- * listener-audited all along, whose exposure was latent only for entities that own a collection
- * ({@code Parent.students} being the one the codebase already has). Removing the select removes the
+ * {@code StackOverflowError} in this class's own log line — and the re-entered flush is the <em>session's</em>, not the
+ * written row's, so the twenty-eight {@code BaseAuditEntity} tables and the five added by this card were
+ * exposed whenever the same session had already touched one of the three entities that own a collection
+ * ({@code Parent.students}, {@code Exam.subjects}, {@code Timetable.slots}). Removing the select removes the
  * re-entry, and with it the per-transaction memo the select needed.</p>
  *
  * <p><b>Outside a request there is no auditor, and that is the point.</b> The platform-owner bootstrap

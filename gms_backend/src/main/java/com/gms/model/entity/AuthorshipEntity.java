@@ -20,7 +20,7 @@ import org.springframework.data.jpa.domain.support.AuditingEntityListener;
  * The <em>who</em> of the audit trail, declared once for every table that has the two columns.
  *
  * <p>{@link BaseAuditEntity} is this pair plus {@code version} and the {@code created_on} / {@code updated_on}
- * timestamps, and thirty-four tables are shaped exactly like that. Five more — {@code schools},
+ * timestamps, and twenty-eight tables are shaped exactly like that. Five more — {@code schools},
  * {@code students}, {@code classrooms}, {@code subjects} and {@code student_admissions} — stamp time into
  * {@code created_at} / {@code updated_at} instead (V1), so extending {@code BaseAuditEntity} would have given
  * them two pairs of timestamps for one event. They take the authorship alone, and {@code BaseAuditEntity}

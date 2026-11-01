@@ -2,9 +2,10 @@
 --
 -- MVP feature 11 is "audit logging: the write records WHO wrote it". The application has the mechanism
 -- since the JPA-auditing card — `AuditConfiguration`'s `AuditorAware` plus `@CreatedBy` /
--- `@LastModifiedBy` on `BaseAuditEntity` — and thirty-four tables were already shaped for it. Five of the
--- busiest were not: `schools` carried `created_by` / `updated_by` in the baseline but no entity annotation,
--- and `students`, `classrooms`, `subjects` and `student_admissions` had no such column at all, so the
+-- `@LastModifiedBy` on `BaseAuditEntity` — and 31 of V1's 38 tables already had the columns. Five of the
+-- busiest were not fully shaped: `schools` carried `created_by` / `updated_by` in the baseline but no entity
+-- annotation wrote them, and `students`, `classrooms`, `subjects` and `student_admissions` had no such column
+-- at all, so the
 -- question "who registered this pupil" had no answer in the database to give. Measured by
 -- `scripts/verify-mvp-e2e.sh` before this file, over the four tables the MVP journey writes through:
 --
@@ -27,7 +28,7 @@ ALTER TABLE public.student_admissions ADD COLUMN IF NOT EXISTS created_by intege
 ALTER TABLE public.student_admissions ADD COLUMN IF NOT EXISTS updated_by integer;
 
 -- ── 2. The keys ───────────────────────────────────────────────────────────────────────────────────
--- The same shape as the thirty-four already in `V1`: `REFERENCES public.users(id)` with the default
+-- The same shape as the 62 audit keys already in `V1`, on those 31 tables: `REFERENCES public.users(id)` with the default
 -- `NO ACTION`, so an account that has written rows cannot be deleted out from under them. That is a
 -- deliberate difference from `ON DELETE SET NULL`, which would let a deletion erase the trail while leaving
 -- the rows standing. The baseline's rule is that history outranks the account that made it; these four

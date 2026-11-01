@@ -12,7 +12,7 @@ import org.springframework.data.jpa.repository.config.EnableJpaAuditing;
  * Turns {@code created_by} / {@code updated_by} from columns into an audit trail.
  *
  * <p>MVP feature 11 is "audit logging: the write records WHO wrote it", and until this class existed the
- * answer for most rows was that it records nobody: the columns were mapped on thirty-four tables
+ * answer for most rows was that it records nobody: the columns were mapped on twenty-eight tables
  * ({@code BaseAuditEntity}), and nothing in the application wrote them. There was no
  * {@code @PrePersist}/{@code @PreUpdate} in the mapped superclass, no Hibernate interceptor, no
  * {@code AuditorAware} and no {@code @EnableJpaAuditing} anywhere in {@code src/main} — the twenty services
