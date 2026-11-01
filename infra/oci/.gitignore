@@ -1,0 +1,30 @@
+# Terraform/OpenTofu working files.
+#
+# terraform.tfstate is ignored for two reasons, not one: it holds the whole
+# dependency graph with real OCIDs and the assigned public IPv4, and it embeds
+# the instance's `metadata`, which includes the SSH public key. None of that
+# belongs in a public repository.
+.terraform/
+*.tfstate
+*.tfstate.*
+crash.log
+crash.*.log
+
+# Operator-supplied values. The .example file is tracked; the real one is not.
+terraform.tfvars
+terraform.tfvars.json
+*.auto.tfvars
+*.auto.tfvars.json
+
+# Anything that could become a credential if someone "just puts it here".
+*.pem
+*.key
+*.pub
+.env
+oci-preflight*.txt
+
+# Override files change resource arguments silently at plan time.
+override.tf
+override.tf.json
+*_override.tf
+*_override.tf.json

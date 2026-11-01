@@ -565,6 +565,66 @@ deployment approval before the deploy step, health verification after it.
 untracked remote script. **Verification.** Whichever wins, the acceptance test is the same one Infra-M3 always
 required: one deploy observed end-to-end on a non-production target, and **one rollback executed**.
 
+### ADR-018 — OpenTofu, not Terraform, and guards written in HCL rather than in prose
+
+**Status:** **Accepted**. **Date:** 2026-11-01.
+
+**Context.** Withdrawing the OCI Console browser route in favour of the CLI or infrastructure-as-code makes a
+tool decision unavoidable: the §9 topology (VCN, IGW, subnet, security list, one flexible-shape instance) had
+been described in prose in four places and executed nowhere. Prose describing a network is also how §9.2's
+"never expose 5432/8080/3000" survives — or does not — the next person who edits it.
+
+**Decision.** Infrastructure definitions live in [`infra/oci/`](../../infra/oci/README.md), written in
+OpenTofu v1.13.2 against the `oracle/oci` provider pinned to **9.11.0** in the committed
+`.terraform.lock.hcl`. Two halves: the tool, and the discipline that the *rules* in §9 are encoded as
+`validation` blocks and locals instead of comments.
+
+**Alternatives rejected.** *Terraform* — BUSL-1.1 since Aug 2023; OpenTofu is the MPL-2.0 fork and resolves the
+same upstream provider, so nothing is given up for a licence that is not free. *Pulumi* — a second runtime and
+a dependency on a vendor cloud for state, for a stack this size. *Ansible or shell against the Console* — the
+route just withdrawn, and it holds no state, so it cannot answer "does this already exist", which is the
+question that prevents a second VCN.
+
+**The part that matters more than the tool choice.** Four of §9's rules are enforced by construction rather
+than by care, and every row below was executed on this machine, not assumed:
+
+| Rule in §9 | Mechanism | Measured |
+|---|---|---|
+| "Do not select paid shapes" | `local.shape = "VM.Standard.A1.Flex"` — the shape is **not a variable** | no argument can select another shape |
+| "SSH port 22: restrict to my current public IP /32" | `validation` requiring a `/32` prefix | `ssh_source_cidr=0.0.0.0/0` → plan fails; `203.0.113.0/24` → plan fails |
+| "Never upload, transmit, or expose my private SSH key" | `validation` requiring a `.pub` path, because the value is read by `file()` into `metadata` | `ssh_public_key_path=/Users/x/.ssh/id_rsa` → plan fails |
+| "verify … storage allocation" (200 GB block allowance) | `validation` bounds: boot 50–200 GB, OCPUs 1–4, RAM 1–24 GB | `boot_volume_size_gb=400` → plan fails; `shape_ocpus=8` → plan fails |
+| "Never expose 5432 / 8080 / 3000" | those ingress rules do not exist; the list is closed at 22/80/443 plus ICMP type 3 code 4 inside the VCN | no such port appears in `network.tf` |
+
+Plus `lifecycle.prevent_destroy` on the instance, and a `check` block that fails with a readable message when
+the region has no Ubuntu 24.04 ARM64 image instead of an index-out-of-range.
+
+**Consequences.** `tofu validate` does **not** evaluate `variable` validation blocks; `tofu plan` does.
+Measured: all seven invalid values above return `exit=0` and `Success! The configuration is valid` from
+`tofu validate`, while the same values each produce one `Error: Invalid value for variable` under `tofu plan`
+(with no OCI credentials present — the guard fires alongside the `open ~/.oci/config: no such file or
+directory` error, not after it, which is what lets the guards be demonstrated before the tenancy is reachable).
+So the command that is safe to run without credentials is also the command that proves nothing about the guards,
+and anyone documenting this stack has to say which of the two they ran.
+
+One caveat belongs in the record because it happened: a first pass of that test reported all seven as *caught*
+by `tofu validate`, and three later reproductions of the same command — including the identical piping — report
+all seven as *not* caught, with captured exit codes. The discrepancy is in the harness (a pipe-then-`grep -q`
+loop in an interactive zsh), not in OpenTofu, and it is not resolved. The exit-code runs are the ones cited, and
+a claim that flips when the test is written differently is a reason to write the test down, not to pick the
+convenient answer.
+
+State is local and gitignored. That is honest for one operator on one laptop and unsafe the moment a second
+exists: two working copies against one local `terraform.tfstate` is how production gets two VCNs. Remote state
+is a migration to plan, not a backend block to add on hope.
+
+**Cost.** ₹0 — OpenTofu and the provider are downloads, and nothing in this decision contacts OCI.
+**Verification.** `tofu version` = v1.13.2 (archive SHA-256 checked against the published `SHA256SUMS`),
+`tofu init` resolving `registry.opentofu.org/oracle/oci` 9.11.0, `tofu validate` →
+`Success! The configuration is valid`, and the guard table above reproduced by running the plans.
+**Not verified, and not claimable yet: any plan or apply against the real tenancy**, because
+`oci setup config` is interactive-only and the owner has not run it. See ADR-015.
+
 ---
 
 ## Summary
@@ -585,6 +645,7 @@ required: one deploy observed end-to-end on a non-production target, and **one r
 | 012 | `Infra-M` vs security `M` naming | Accepted | — |
 | 013 | Vercel SPA, API-only origin | Proposed, origin re-targeted; EC2 rewrite deleted | domain decision |
 | 014 | Declared interruption, no zero-downtime claim | Accepted | — |
-| 015 | OCI Always Free ARM64 VM + Compose | Accepted as target, **not provisioned** | **console login / MFA / API keys; free-eligibility confirmation** |
+| 015 | OCI Always Free ARM64 VM + Compose | Accepted as target, **not provisioned**; stack now exists in `infra/oci` and validates, but nothing has been applied | **`oci setup config` (interactive); free-eligibility + public-IP cost confirmation** |
 | 016 | Fresh owner-owned Neon; old Neon retired | Accepted, **not created** | **account creation, email verification** |
 | 017 | OCI deployment transport | Proposed, deferred until the host exists | — |
+| 018 | OpenTofu for OCI infra; §9 rules encoded as HCL guards | **Accepted** | — |

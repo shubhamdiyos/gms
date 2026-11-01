@@ -24,8 +24,10 @@ Infra mandate, which is `third mandate §12` ("Workflow self-validation"). Colli
 DR is Infra §12 but third-mandate §15; CI/CD is Infra §6 but third-mandate §12; cost policy is Infra §2 but
 third-mandate §20.
 
-66 Markdown files were scanned (`docs/**`, `gms_backend/memory-bank/**`, root and `gms_frontend/README.md`,
-`.github/pull_request_template.md`). Two internal links were broken; both are fixed and listed in §3.
+Markdown files are counted by the scan in §3, which is the command that produces the number rather than a claim
+about it. Re-run it after adding any document: it currently covers `docs/**`, `infra/**`, root `*.md`,
+`gms_backend/memory-bank/*.md` and `gms_frontend/README.md` — **67 files, 0 broken links**. The two broken links
+this index was written to fix are listed in §3.
 
 ## 1. Canonical — the source of truth
 
@@ -39,7 +41,8 @@ Read these first. If any other document contradicts one of them, the other docum
 | [audit/BASELINE_STATUS.md](audit/BASELINE_STATUS.md) | The measured baseline, the verification matrix, and the ordered owner action list | `B*`, `F*`, `R*`, `I*` evidence tags | Current |
 | [infrastructure/INFRASTRUCTURE_AUDIT.md](infrastructure/INFRASTRUCTURE_AUDIT.md) | **The central platform findings register** — containers, CI/CD, runtime, network, cost, and the milestone plan | `INF-01…23` | Current |
 | [infrastructure/PRODUCTION_READINESS_MATRIX.md](infrastructure/PRODUCTION_READINESS_MATRIX.md) | The scorecard: ten areas, five statuses, and what would change the verdict | area → finding ids | Current |
-| [infrastructure/INFRASTRUCTURE_DECISIONS.md](infrastructure/INFRASTRUCTURE_DECISIONS.md) | Architecture decisions and the alternatives rejected | `ADR-001…017` | Current, including the third-mandate amendments |
+| [infrastructure/INFRASTRUCTURE_DECISIONS.md](infrastructure/INFRASTRUCTURE_DECISIONS.md) | Architecture decisions and the alternatives rejected | `ADR-001…018` | Current, including the third-mandate amendments |
+| [../infra/oci/README.md](../infra/oci/README.md) | **How to run the OCI stack** — the first-time authentication step, the order of commands, what the HCL guards enforce, and the four cost numbers that must be read from the account before `apply` | implements `ADR-015`, `ADR-018` | Current, **and nothing in it has been applied** |
 | [../README.md](../README.md) | Setup, commands, and the honest state of testing | links out | Current |
 
 **Rule:** a new finding goes into the register that owns its namespace, not into a new file. New namespaces are
@@ -66,12 +69,12 @@ Read these first. If any other document contradicts one of them, the other docum
 | AWS EC2 host `65.0.109.47` | **Permanently closed by the owner.** Confirmed dead from this machine: DNS resolves, TCP connect to `:8080` times out after 8 s | `INFRASTRUCTURE_AUDIT.md` §10; workflow and Vercel rewrite deleted on `infra/retire-ec2-deployment-path` |
 | `.github/workflows/deploy-backend.yml` | **Deleted 2026-11-01** | `INFRASTRUCTURE_AUDIT.md` §4 amendment, `ADR-017` |
 | Friend-owned Neon database | **Retired, unrecoverable by design** — no access, no migration, no credential reuse | `ADR-016` |
-| Oracle Cloud Always Free ARM64 + Neon (owner-owned) + Caddy | **Target, not provisioned** | `ADR-015`, `ADR-016`, `ADR-003` |
+| Oracle Cloud Always Free ARM64 + Neon (owner-owned) + Caddy | **Target, not provisioned.** The infrastructure *definitions* exist and validate in [`infra/oci/`](../infra/oci/README.md); the account has never been read and no resource has been created | `ADR-015`, `ADR-016`, `ADR-003`, `ADR-018` |
 
 ## 3. Link validation
 
-`docs/**` and the memory-bank were scanned for relative Markdown links: 66 files, **2 broken**, both fixed in the
-branch that added this index.
+`docs/**`, `infra/**`, root and the memory-bank were scanned for relative Markdown links. **2** were broken when
+this index was written, both fixed in the branch that added it; the same scan now reports **0** across 67 files.
 
 | Broken link | Cause | Fix |
 |---|---|---|
@@ -84,7 +87,9 @@ Re-run the scan with:
 python3 - <<'PY'
 import re,os,glob
 files=[f for f in glob.glob('docs/**/*.md',recursive=True)+glob.glob('*.md')
+       +glob.glob('infra/**/*.md',recursive=True)
        +glob.glob('gms_backend/memory-bank/*.md')+['gms_frontend/README.md']]
+files=[f for f in dict.fromkeys(files) if os.path.exists(f)]
 bad=[]
 for f in files:
     d=os.path.dirname(f)

@@ -1,0 +1,31 @@
+# Copy to terraform.tfvars (gitignored) and fill in the three values below.
+# Nothing here is a secret: an OCID, a public key path and a public IP /32.
+# Credentials live in ~/.oci/config on the machine running tofu, never here.
+
+# ── Required ────────────────────────────────────────────────────────────────
+
+# From `oci iam compartment list` (preflight.sh prints the tree). Use a child
+# compartment, not the root tenancy OCID.
+compartment_ocid = "ocid1.compartment.REPLACE_ME"
+
+# Absolute path to a PUBLIC key. The .pub suffix is enforced by variables.tf —
+# a private key path here would write that key into terraform.tfstate.
+ssh_public_key_path = "/Users/YOU/.ssh/gms_oci.pub"
+
+# Your current public IPv4 as a /32. Find it with `curl -4 https://ifconfig.me`.
+# Re-run this on every plan when your ISP reassigns you; a stale /32 locks you
+# out quietly, because tofu will happily re-open 22 to the old address.
+ssh_source_cidr = "203.0.113.7/32"
+
+# ── Optional (defaults match third mandate §9) ──────────────────────────────
+
+region             = "ap-mumbai-1"
+oci_config_profile = "DEFAULT"
+
+vcn_cidr            = "10.0.0.0/16"
+public_subnet_cidr  = "10.0.1.0/24"
+instance_name       = "gms-prod-api-01"
+shape_ocpus         = 2
+shape_memory_gb     = 12
+boot_volume_size_gb = 100
+deploy_user         = "gmsdeploy"
