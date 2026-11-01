@@ -5,6 +5,15 @@ would lose it. Written on 2026-11-01 under the third MASTER ENGINEERING MANDATE 
 reconciliation matrix and forbids duplicate documentation — so this file is the **only** place that classifies the
 docs, and every other file stays responsible for its own subject.
 
+**Citation key.** Three mandates have contributed to these documents and their section numbers do not line up, so a
+bare `§` is ambiguous. The convention: **an unqualified `mandate §n` means the mandate that register was written
+under** — for `INFRASTRUCTURE_AUDIT.md` and `PRODUCTION_READINESS_MATRIX.md` that is the second one (865 lines,
+infrastructure/DevOps/CI-CD, the author of every `INF-*` id); for `REPOSITORY_AUDIT.md`, `SECURITY_AUDIT.md` and
+`BASELINE_STATUS.md` it is the first (1,763 lines, the security programme, author of `SEC-*` and the M1 record).
+Anything cited from the current execution mandate (1,551 lines) is written **`third mandate §n`**, because its
+numbering collides with both predecessors — `Infra mandate §6.1 stage 1` ("Workflow validation") is
+`third mandate §12`, and `first mandate §25`'s prohibition list is now `third mandate §2`.
+
 66 Markdown files were scanned (`docs/**`, `gms_backend/memory-bank/**`, root and `gms_frontend/README.md`,
 `.github/pull_request_template.md`). Two internal links were broken; both are fixed and listed in §3.
 
@@ -79,7 +88,7 @@ PY
 
 ## 4. Not yet written
 
-Mandate §4 lists these documents as required, and §19 Phase 7 is the phase that says "Document deployment and
+The third mandate's §4 lists these documents as required, and its §19 Phase 7 says "Document deployment and
 recovery runbooks". They do not exist yet, and they will be written by the milestone that makes them true, not
 before — a runbook for a pipeline that does not exist would be fiction:
 
