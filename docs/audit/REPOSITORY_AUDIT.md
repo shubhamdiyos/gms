@@ -225,7 +225,11 @@ both the allow and the deny path are exercised).
 
 **TEN-02 — Raw-id loads with no ownership check.** `StudentServiceImpl.java:158`, `ClassroomServiceImpl.java:88`, `SectionServiceImpl.java:159`, `SubjectServiceImpl.java:94`, `EmployeeServiceImpl.java:99`, `ParentServiceImpl.java:309`.
 
-**TEN-03 — Notification audience resolved by substring match.** `NotificationRepository.java:21-22` uses `recipientIds LIKE %:userId%` against a JSON TEXT column, so user 1 matches 11, 21, 100 and 1234 — an intra-tenant disclosure plus a full-table scan. `NotificationServiceImpl.java:156-159` never compares the path `userId` to the caller, so `GET /notifications/user/{userId}` (`NotificationController.java:74`) exposes any user's notifications, and `markNotificationAsRead` (`:192-207`) mutates a single shared read flag for all recipients.
+**TEN-03 — Notification audience resolved by substring match.** `NotificationRepository.java:21-22` used `recipientIds LIKE %:userId%` against a JSON TEXT column, so user 1 matches 11, 21, 100 and 1234 — an intra-tenant disclosure plus a full-table scan. `NotificationServiceImpl.java:156-159` never compared the path `userId` to the caller, so `GET /notifications/user/{userId}` (`NotificationController.java:74`) exposed any user's notifications, and `markNotificationAsRead` (`:192-207`) mutates a single shared read flag for all recipients.
+
+*Partial remediation, `fix/tenant-notification-recipients` (2026-11-01): the LIKE query is gone and membership is now
+numeric-token equality; that route is `ADMIN`/`SUPERADMIN` only. The shared read flag and the unvalidated write of
+`recipient_ids` (DB-04) are untouched — see §16.1 for what that leaves open.*
 
 **TEN-04 — Entities with no tenant column** (see §4) make "filter by school" a multi-join the service must remember; none of them do. `TimetableServiceImpl.java:40` takes `classroomId` from the request body with no `schoolId` parameter in the signature at all (`TimetableController.java:26-30`) — one tenant can rebuild another's timetable, and the method `clear()`s existing slots first (`:48-64`), so the attack is destructive, not merely read-only.
 
@@ -557,11 +561,25 @@ outside the repository.
 | BKL-08 bootstrap admin cannot create users | **Open** — new | Discovered while probing BKL-07; deliberately not patched in a security branch because the fix is a schema/audit-trail decision (§13's missing audit trail). |
 | OPS-08 Compose cannot boot from a fresh clone | **Changed** | Obsolete `version:` key removed, `${DB_PASSWORD:?}` now fails loudly, `DB_URL`/credentials/`SPRING_PROFILES_ACTIVE` are passed, healthcheck moved to `/actuator/health/readiness`. Still `env_file: .env` on both services, so a clone without a `.env` still fails at `docker compose config` — the full fix belongs to the M4 Docker package. |
 | OPS-11 debug logging in every profile | **Verified** | Base and prod default to INFO (`application.properties:95-98`); DEBUG is only what `application-dev.properties` opts into, and `StartupSecurityValidator` refuses to boot with `com.gms` at DEBUG/TRACE outside `dev`. |
-| OPS-14 no test suite | **Changed** | 36 backend tests now execute under `mvn test` and JaCoCo writes a report; `mvn -DskipTests` is no longer the only command that works. Frontend still has zero tests (FE-14) and no Playwright/Testcontainers coverage — that is M3. |
+| OPS-14 no test suite | **Changed** | 42 backend tests now execute under `mvn verify` (36 from M1, plus the 6 recipient-matching cases in §16.1) and JaCoCo writes a report; `mvn -DskipTests` is no longer the only command that works. Frontend still has zero tests (FE-14) and no Playwright/Testcontainers coverage — that is M3. |
 | FE Quick-Login default credential button | **Verified** | Removed from `Login.jsx`, along with the blank `defaultValues`; the "Clear Storage & Logout" escape hatch is retained. |
 | Deploy workflow triggered by documentation edits | **Verified** | `deploy-backend.yml` `paths:` narrowed to backend/runtime inputs and `ci.yml` ignores docs. Two observations: run 41245769175 proves a `master` push touching `gms_backend/src/**` triggers the deploy, and PR #11 — documentation-only — started **no** `ci.yml` run at all, which is the `paths-ignore` contract seen from the negative side. Still unproven: a docs-only *push to `master`* not triggering the deploy (the workflow fires on push, so that case needs a docs commit on `master` to observe). |
 | SSH host-key verification disabled in deploy | **Verified** | `SSH_OPTS` pins `StrictHostKeyChecking=yes` with a `known_hosts` file, and the job fails when `EC2_SSH_KNOWN_HOSTS` is unset. Run 41245769175 log: `##[error]secret EC2_SSH_KNOWN_HOSTS is not set … Deploy is refused rather than run with host-key checking disabled`. This is the only control in this table with a **production-path** runtime proof rather than a local one. |
 | Dead password utilities packaged in the jar | **Verified** | `util/PasswordEncoderTest.java`, `util/PasswordVerificationTest.java`, `util/PasswordTestUtil.java`, the committed `PasswordVerificationTest.class` and the top-level `JwtDecoder.java` are deleted; the tracked-file list contains no `.class` entry. |
+
+### 16.1 `fix/tenant-notification-recipients` — TEN-03, same vocabulary
+
+| Finding | Status | Evidence |
+|---|---|---|
+| TEN-03 recipient matching | **Verified** (unit) | The `LIKE %:userId%` query is deleted, and `getNotificationsByUserId` filters the school-scoped `INDIVIDUAL`/`PENDING` finder on numeric-token equality. `NotificationRecipientMatchTest` (6 cases; `mvn verify` → **42 tests, 0 failures**) asserts that user 1 does **not** collect `[11]`, `[21]`, `[210]`, `[100]`, `[1234]`, that `[1,7]` **is** collected, that `null`/`""`/`[abc]`/`[99999999999]` match nobody, that the repository is asked only for this school's individual pending rows, and that `ORDER BY created_on DESC` survived being moved out of SQL. **Not observed against PostgreSQL:** there is still no integration harness (§17), so the query plan and what the 1000-character column really contains in production remain unmeasured. |
+| TEN-03 `/notifications/user/{id}` | **Changed** | Now `ADMIN`/`SUPERADMIN` only. Nothing on the path ever compared the id to the caller, and the SPA has no call site (`apiSlice.js` uses `/notifications/{id}/read` alone), so this removes the surface by narrowing rather than by resolving the principal — a defensible trade only while no non-admin consumer exists, and the day one does the fix is a caller check, not a wider `@PreAuthorize`. |
+| TEN-03 shared `readStatus` | **Open** | `markNotificationAsRead` still flips one flag for every recipient of a multi-recipient notification. Per-recipient state is a schema change, and the Flyway baseline has not been cut, so editing it now means changing a schema no migration owns yet. |
+| DB-04 (the root cause) | **Open** | `recipient_ids` remains a validated-nowhere `String` copied verbatim from `NotificationRequest` at `NotificationServiceImpl:55,94`. That is why the reader parses tolerantly instead of assuming `[1,2]`, and why normalising the column into a join table is still the real fix. |
+
+The cost note belongs here because the change moves work rather than removing it: the predicate used to run inside SQL
+as a text scan, and now a school's individual pending notifications are fetched and filtered in the service. Correct
+where the `LIKE` was not, bounded by that school's unread volume rather than by an index on an unqueryable column. If
+that volume ever makes it slow, the answer is DB-04's join table — not the `LIKE` coming back.
 
 ## 17. What M1 could not verify, and why
 

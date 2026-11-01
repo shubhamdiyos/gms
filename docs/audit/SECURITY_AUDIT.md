@@ -60,7 +60,7 @@ Integer primary keys plus ~15 endpoints that accept a `schoolId` and ignore it (
 | `GET /results/student/{id}` | STUDENT | any student's marks |
 | `GET /student-exams/student/{id}` | STUDENT | any student's exam registrations |
 | `GET /attendance/student/{id}`, `/classroom/{id}` | TEACHER | any school's attendance |
-| `GET /notifications/user/{id}` | PARENT | any user's notifications (**TEN-03**) |
+| `GET /notifications/user/{id}` | ~~PARENT~~ **ADMIN/SUPERADMIN** | was any user's notifications (**TEN-03**); the route is narrowed in `fix/tenant-notification-recipients` and the recipient match is now exact, but the shared read flag is still open (§16.1) |
 | `GET /users`, `GET /users/{id}` | any authenticated (**SEC-04**) | usernames, emails, phones, roles, enabled/lock state |
 | `GET /parents`, `GET /parents/{id}` | mixed | parent contact details; `Parent` is a global table (**TEN-05**) |
 
