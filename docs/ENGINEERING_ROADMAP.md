@@ -122,7 +122,11 @@ two audit-column conventions (`DB-05`).
 ### Stage 2 — A schema someone can own
 
 **Goal:** the database is defined by migrations, on a stack that boots from a clean clone.
-**State:** In progress on `feat/stage2-flyway-baseline`. **Depends on:** Stage 1's index design.
+**State:** Executed and evidenced — committed as `231bdab`, opened as **PR #25**, `mergeStateStatus: BLOCKED`
+(`REVIEW_REQUIRED`). CI on that PR is green: run `41310639236`, `Backend build and tests` 52 s, `Frontend lint and
+build` 30 s, `Infrastructure definitions` 20 s, Vercel preview deployed. **Depends on:** Stage 1's index design. This
+stage closes when that PR merges; the migrations existing on a branch is not the same fact, and `master` still boots
+with `ddl-auto=${JPA_DDL_AUTO:update}`. Green checks do not merge a PR — no check is a required check (`INF-10`).
 
 | # | Work | Closes | State |
 |---|---|---|---|
@@ -405,7 +409,7 @@ system, the remaining `DOC-*`).
 | Stage | Gate | State | Cost | Oracle |
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
-| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **In progress** — criteria 2, 3, 6, 7, 8 met on `feat/stage2-flyway-baseline`; 1 open; 4, 5 moved to 5 | $0 | No |
+| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
 | 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | Open | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | Open | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
@@ -413,10 +417,10 @@ system, the remaining `DOC-*`).
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 
 **Reading this honestly:** Stage 1 is `Closed` on `master`. Stage 2 is not — its migrations, its verification
-script and its Compose repair exist only on `feat/stage2-flyway-baseline`, and the branch cannot merge itself:
-`master` requires one approving review with last-push approval, the founder cannot approve their own PR, and the
-delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
-branches got in. So as of this writing `master` still describes a project with **0 migrations and `ddl-auto=update`
-in dev**, and that is the state a fresh clone receives. Nothing above Stage 2 has started, and no stage above 1 is
-`Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two disagree,
-the proof wins and this table is wrong.
+script and its Compose repair exist only on `feat/stage2-flyway-baseline` (`231bdab`, PR #25), and the branch cannot
+merge itself: `master` requires one approving review with last-push approval, the founder cannot approve their own PR,
+and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
+branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
+still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
+receives. Nothing above Stage 2 has started, and no stage above 1 is `Closed`. The roadmap is the plan; the evidence
+sections of `BASELINE_STATUS.md` are the proof. If the two disagree, the proof wins and this table is wrong.
