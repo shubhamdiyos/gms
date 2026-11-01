@@ -4,7 +4,6 @@ import com.gms.model.entity.School;
 import com.gms.model.request.SchoolRequest;
 import com.gms.model.response.SchoolResponse;
 import com.gms.service.SchoolService;
-import com.gms.service.impl.SchoolServiceImpl;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
@@ -15,19 +14,25 @@ import org.springframework.web.bind.annotation.RequestMethod;
 
 import java.util.List;
 
+/**
+ * School provisioning and the platform's school list.
+ *
+ * <p>This controller no longer extends {@code AbstractCRUDController}, which supplied an unguarded
+ * {@code GET /{id}} and {@code DELETE /{id}}. The read is declared below and is scoped to the
+ * caller: a school administrator reaches only its own school, the platform owner reaches any.
+ * The delete is not declared — {@code PATCH /schools/toggle} is the domain's own way to retire a
+ * school, and a physical delete would orphan every row that references it.</p>
+ */
 @RestController
-@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"}, 
+@CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"},
             methods = {RequestMethod.GET, RequestMethod.POST, RequestMethod.PUT, RequestMethod.PATCH, RequestMethod.DELETE, RequestMethod.OPTIONS})
 @RequestMapping(Constants.API_BASE_V1 + "/schools")
-public class SchoolController extends AbstractCRUDController<School, Integer> {
+public class SchoolController {
 
     private final SchoolService schoolService;
-    private final SchoolServiceImpl schoolServiceImpl;
 
-    public SchoolController(SchoolService schoolService, SchoolServiceImpl schoolServiceImpl) {
-        super(schoolServiceImpl);
+    public SchoolController(SchoolService schoolService) {
         this.schoolService = schoolService;
-        this.schoolServiceImpl = schoolServiceImpl;
     }
 
     @PostMapping("/create")
@@ -63,10 +68,10 @@ public class SchoolController extends AbstractCRUDController<School, Integer> {
         }
         
         List<School> list;
-        
+
         // SuperAdmin can see all schools, others see only their school
         if (roles.contains("SUPERADMIN")) {
-            list = schoolServiceImpl.findAll();
+            list = schoolService.findAll();
         } else {
             Integer schoolId = SecurityUtil.getSchoolIdFromToken();
             if (schoolId == null) {

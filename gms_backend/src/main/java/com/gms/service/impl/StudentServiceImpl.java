@@ -32,7 +32,7 @@ import java.time.LocalDate;
 
 @Service
 @Transactional
-public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> implements StudentService {
+public class StudentServiceImpl implements StudentService {
 
     private final StudentRepository studentRepository;
     private final SchoolService schoolService;
@@ -49,7 +49,6 @@ public class StudentServiceImpl extends AbstractCRUDService<Student, Integer> im
     private final TeacherAssignmentService teacherAssignmentService;
 
     public StudentServiceImpl(StudentRepository studentRepository, SchoolService schoolService, ClassroomService classroomService, SectionService sectionService, UserService userService, PasswordEncoder passwordEncoder, ResultService resultService, StudentFeeService studentFeeService, TimetableService timetableService, AnnouncementService announcementService, SubjectService subjectService, NotificationService notificationService, TeacherAssignmentService teacherAssignmentService) {
-        super(studentRepository);
         this.studentRepository = studentRepository;
         this.schoolService = schoolService;
         this.classroomService = classroomService;

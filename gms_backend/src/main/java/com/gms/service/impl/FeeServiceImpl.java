@@ -15,7 +15,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Service
-public class FeeServiceImpl extends AbstractCRUDService<Fee, Integer> implements FeeService {
+public class FeeServiceImpl implements FeeService {
 
     private final FeeRepository feeRepository;
     private final SchoolService schoolService;
@@ -24,7 +24,6 @@ public class FeeServiceImpl extends AbstractCRUDService<Fee, Integer> implements
     public FeeServiceImpl(FeeRepository feeRepository,
                          SchoolService schoolService,
                          UserService userService) {
-        super(feeRepository);
         this.feeRepository = feeRepository;
         this.schoolService = schoolService;
         this.userService = userService;

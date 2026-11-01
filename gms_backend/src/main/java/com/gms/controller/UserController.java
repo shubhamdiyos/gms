@@ -3,7 +3,7 @@ package com.gms.controller;
 import com.gms.model.entity.User;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
-import com.gms.service.impl.UserServiceImpl;
+import com.gms.service.UserService;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
@@ -15,18 +15,19 @@ import java.util.List;
 /**
  * User administration for the caller's tenant.
  *
- * <p>This controller no longer extends {@code AbstractCRUDController}: that template answers
- * {@code GET /} and {@code GET /{id}} with the JPA entity, and mandating a DTO there would change
- * the response type of all nine inherited controllers at once. The two affected endpoints are
- * declared here against {@code UserResponse} instead (mandate §10.2).</p>
+ * <p>This controller answers {@code GET /} and {@code GET /{id}} with {@link UserResponse} rather
+ * than with the JPA entity, because the entity's lazy {@code School} proxy failed JSON writing and
+ * answered 500 for every caller — reproduced in {@code docs/audit/BASELINE_STATUS.md} §4.5. Every
+ * read and write here is scoped to the caller's school: an administrator sees and deletes only its
+ * own school's accounts.</p>
  */
 @RestController
 @RequestMapping(Constants.API_BASE_V1 + "/users")
 public class UserController {
 
-    private final UserServiceImpl userService;
+    private final UserService userService;
 
-    public UserController(UserServiceImpl userService) {
+    public UserController(UserService userService) {
         this.userService = userService;
     }
 
@@ -64,15 +65,34 @@ public class UserController {
 
     @GetMapping("/{id}")
     public ResponseEntity<UserResponse> getById(@PathVariable Integer id) {
-        return ResponseEntity.ok(userService.getById(id));
+        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        try {
+            return ResponseEntity.ok(userService.getById(id, schoolId));
+        } catch (com.gms.exception.NotFoundException ex) {
+            return ResponseEntity.status(404).build();
+        }
     }
 
+    /**
+     * Deletes one of the caller's own accounts.
+     *
+     * <p>The inherited {@code existsById}/{@code deleteById} pair reached
+     * {@code repository.deleteById(id)} with no tenant predicate, so any administrator could
+     * delete any other school's account; the replacement takes the caller's school and refuses
+     * the row if it belongs to another one.</p>
+     */
     @DeleteMapping("/{id}")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
-        if (!userService.existsById(id)) {
+        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!userService.deleteWithinSchool(id, schoolId)) {
             return ResponseEntity.notFound().build();
         }
-        userService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 

@@ -44,6 +44,10 @@ Same entry point reaches `PUT /api/v1/users/update`, which sets another user's p
 
 ### AP-3 · Destroy another tenant
 
+> **Closed 2026-11-01 on `feat/stage2-flyway-baseline` (Stage 3 `C-1`).** The inherited `DELETE /{id}` no longer
+> exists; the deletes the frontend calls are declared explicitly, guarded `ADMIN`/`SUPERADMIN`, and refuse another
+> school's row. Evidence in [§5.2](#52-status-after-stage-3-c-1-2026-11-01-featstage2-flyway-baseline).
+
 `DELETE /api/v1/schools/{id}` is never overridden, so it is inherited from `AbstractCRUDController.java:52` and lands on `AbstractCRUDService.deleteById` — a real `repository.delete` with no tenant predicate and no role annotation. The only gate is `SecurityConfig.java:43`, which grants **ADMIN** as well as SUPERADMIN. An administrator of any school, created cheaply via AP-2, deletes schools by integer id. The same shape applies to `/students/{id}`, `/parents/{id}`, `/users/{id}`, `/employees/{id}`, `/classrooms/{id}`, `/subjects/{id}` (**SEC-05**).
 
 `POST /api/v1/timetables` is worse in one respect and better in another: it is destructive (`timetable.getSlots().clear()`, `TimetableServiceImpl.java:48-64`) and takes `classroomId` from the body with no tenant parameter at all (**TEN-04**), but `@PreAuthorize` does gate it — so it needs a compromised admin rather than any authenticated user.
@@ -94,11 +98,11 @@ Legend — **P** = matched by a `SecurityConfig` path rule; **M** = has method s
 |---|---|---|---|---|---|
 | Auth | `/auth` | permitAll | none | partial | **SEC-09** — 2 of 3 endpoints should not be public |
 | User | `/users` | only `/users/me` | **none** | partial | **SEC-04/05** — create/update/list/by-id/delete open to any role |
-| AbstractCRUD (base) | inherited | varies | **none** | **no** | **SEC-05** — 7 subclasses inherit unguarded `GET /{id}` + `DELETE /{id}` |
-| School | `/schools` | ADMIN+ | yes | yes | **SEC-05** — inherited delete reachable by any ADMIN |
+| AbstractCRUD (base) | ~~inherited~~ | ~~varies~~ | ~~none~~ | ~~no~~ | **SEC-05 — closed 2026-11-01 (`C-1`)**: the base class is deleted, so no subclass inherits a mapping |
+| School | `/schools` | ADMIN+ | yes | yes | ~~**SEC-05** — inherited delete reachable by any ADMIN~~ → `C-1`: the delete is not declared; the read is platform-owner-or-own-school |
 | Student | `/students` | ADMIN+ | 15 | mostly | **SEC-06** — the 10 `my-*` STUDENT grants are shadowed |
-| Parent | `/parents` | only `/profile`,`/children` | 14 | partial | inherited read/delete open; **ACD-01** create is broken |
-| Employee | `/employees` | ADMIN+ | 4 | yes | inherited `GET /{id}` cross-tenant (**TEN-02**) |
+| Parent | `/parents` | only `/profile`,`/children` | 14 | partial | ~~inherited read/delete open~~ → `C-1`: neither read nor delete is declared; **ACD-01** create is broken |
+| Employee | `/employees` | ADMIN+ | 4 | yes | ~~inherited `GET /{id}` cross-tenant (**TEN-02**)~~ → `C-1`: the read is declared and school-scoped |
 | Teacher | `/teachers` | 3 specific paths | **none** | partial | other methods fall to `authenticated()` |
 | TeacherAssignment | `/teacher-assignments` | **none** | 8 | yes | path rule absent → role gate only |
 | Classroom | `/classrooms` | ADMIN+ | 6 | yes | **SEC-06** — TEACHER grants shadowed |
@@ -174,6 +178,38 @@ Two things this audit must not let the reader conclude:
   now means something, a denied request now says so); it did not make the *tenancy invariant* true. A caller who
   legitimately holds a SUPERADMIN token can still address another school's rows through the unfiltered repositories,
   which is exactly what the tenant-isolation package and mandate §6's cross-tenant matrix exist to close.
+
+### 5.2 Status after Stage 3 `C-1` (2026-11-01, `feat/stage2-flyway-baseline`)
+
+**SEC-05 is closed on the branch** and **AP-3 is closed with it**. The mechanism the finding named — an inherited,
+unguarded, tenant-blind `DELETE /{id}` reachable by any administrator — no longer exists in the code at all:
+`AbstractCRUDController` and `AbstractCRUDService` are deleted, `grep -rl "extends AbstractCRUDController"
+controller/` returns nothing, and every delete the frontend actually calls (`DELETE /api/v1/subjects/{id}`,
+`DELETE /api/v1/classrooms/{id}`) is now declared explicitly, guarded `hasAnyAuthority('ADMIN', 'SUPERADMIN')`, and
+refuses a row belonging to another school. The read side is the same story: `GET /{id}` on `Student`, `Employee` and
+`School` is tenant-scoped, `Parent`'s is not declared at all, and `User`'s read and delete no longer reach
+`repository.findById`/`deleteById` with no predicate.
+
+*Evidence:* `EndpointInheritanceTest` (33 cases) and `scripts/verify-c1-tenancy.sh` (29 live checks against the
+packaged jar on PostgreSQL 16.15, 0 failures); the deliberate-failure control red on exactly the two guarded
+assertions; full suite **78 green**.
+
+Two facts about this closure that belong in the record rather than in a footnote:
+
+* **The first draft of `ADR-023` was wrong about the frontend.** It claimed no frontend call site existed for
+  `DELETE` on these resources. `apiSlice.js:258` and `:290` do call it. The inherited delete was therefore live
+  application behaviour, not a latent route — which is why the two deletes are re-declared rather than dropped, and
+  why the ADR now carries the correction in the open.
+* **AP-3's shape survives in a narrower form.** The platform owner still holds a SUPERADMIN token that reaches across
+  tenants by design, and `TEN-01…07` — tenancy resolved server-side from the authenticated principal rather than
+  trusted from the token — is still open. `C-1` closed the *unauthenticated* destruction path; it did not close the
+  *trusted-but-wrong-tenant* one. That is `C-2`, `C-3` and `C-4`.
+
+One unrelated defect was found and fixed on the way, and it was not a Stage 3 finding: every method-level
+`@PreAuthorize` refusal was answering **500** instead of **403**, because `AuthorizationDeniedException` (a subclass of
+`AccessDeniedException`) reached the catch-all `@ExceptionHandler(Exception.class)`. A client-mistake mapping was wrong
+in the same way — a method mismatch answered 500 instead of 405, and a delete the database refused because another row
+still referenced it answered 500 instead of 409. `GlobalExceptionHandler` now maps all three.
 
 
 ### SEC-REMED — the invariant to introduce

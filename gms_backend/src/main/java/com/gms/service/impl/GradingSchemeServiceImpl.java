@@ -8,7 +8,6 @@ import com.gms.model.response.GradingSchemeResponse;
 import com.gms.repository.GradingSchemeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.GradingSchemeService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme, Integer> implements GradingSchemeService {
+public class GradingSchemeServiceImpl implements GradingSchemeService {
 
     private final GradingSchemeRepository gradingSchemeRepository;
     private final SchoolRepository schoolRepository;
@@ -26,7 +25,6 @@ public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme,
     public GradingSchemeServiceImpl(GradingSchemeRepository gradingSchemeRepository,
                                   SchoolRepository schoolRepository,
                                   UserRepository userRepository) {
-        super(gradingSchemeRepository);
         this.gradingSchemeRepository = gradingSchemeRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

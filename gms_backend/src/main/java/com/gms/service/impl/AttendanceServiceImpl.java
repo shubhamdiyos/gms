@@ -24,7 +24,7 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integer> implements AttendanceService {
+public class AttendanceServiceImpl implements AttendanceService {
 
     private final AttendanceRepository attendanceRepository;
     private final StudentService studentService;
@@ -35,7 +35,6 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
                                StudentService studentService, 
                                TimetableService timetableService,
                                UserService userService) {
-        super(attendanceRepository);
         this.attendanceRepository = attendanceRepository;
         this.studentService = studentService;
         this.timetableService = timetableService;

@@ -27,14 +27,13 @@ import java.util.Set;
 
 @Service
 @Transactional
-public class UserServiceImpl extends AbstractCRUDService<User, Integer> implements UserService {
+public class UserServiceImpl implements UserService {
 
     private final UserRepository userRepository;
     private final SchoolService schoolService;
     private final PasswordEncoder passwordEncoder;
 
     public UserServiceImpl(UserRepository userRepository, SchoolService schoolService, PasswordEncoder passwordEncoder) {
-        super(userRepository);
         this.userRepository = userRepository;
         this.schoolService = schoolService;
         this.passwordEncoder = passwordEncoder;
@@ -162,10 +161,27 @@ public class UserServiceImpl extends AbstractCRUDService<User, Integer> implemen
 
     @Override
     @Transactional(readOnly = true)
-    public UserResponse getById(Integer id) {
+    public UserResponse getById(Integer id, Integer schoolId) {
         User user = userRepository.findById(id)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found with ID: " + id));
+        if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId)) {
+            throw new NotFoundException("USER_NOT_FOUND", "User not found with ID: " + id);
+        }
         return toResponse(user);
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteWithinSchool(Integer id, Integer schoolId) {
+        User user = userRepository.findById(id).orElse(null);
+        if (user == null) {
+            return false;
+        }
+        if (user.getSchool() == null || !user.getSchool().getId().equals(schoolId)) {
+            return false;
+        }
+        userRepository.delete(user);
+        return true;
     }
 
     @Override

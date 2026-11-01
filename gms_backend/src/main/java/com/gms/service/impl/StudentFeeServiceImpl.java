@@ -12,7 +12,6 @@ import com.gms.repository.StudentRepository;
 import com.gms.repository.FeeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.StudentFeeService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -22,7 +21,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Service
-public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integer> implements StudentFeeService {
+public class StudentFeeServiceImpl implements StudentFeeService {
 
     private final StudentFeeRepository studentFeeRepository;
     private final StudentRepository studentRepository;
@@ -35,7 +34,6 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
                                 FeeRepository feeRepository,
                                 SchoolRepository schoolRepository,
                                 UserRepository userRepository) {
-        super(studentFeeRepository);
         this.studentFeeRepository = studentFeeRepository;
         this.studentRepository = studentRepository;
         this.feeRepository = feeRepository;

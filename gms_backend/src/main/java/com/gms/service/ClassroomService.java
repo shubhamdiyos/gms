@@ -14,6 +14,13 @@ public interface ClassroomService {
     ResponseEntity<ClassroomResponse> update(ClassroomRequest request, Integer empId, Integer schoolId);
     ResponseEntity<?> toggleClassroom(Integer id, Boolean isActive, Integer schoolId, Integer empId);
     Classroom createClassroomFromRequest(ClassroomRequest request, Classroom classroom, Integer empId, Integer schoolId);
+
+    /**
+     * Deletes a classroom, but only if it belongs to the caller's school.
+     *
+     * @return true when a row was deleted, false when no such classroom exists in that school
+     */
+    boolean deleteWithinSchool(Integer id, Integer schoolId);
     
     // Service-to-service communication method
     java.util.Optional<Classroom> findById(Integer id);

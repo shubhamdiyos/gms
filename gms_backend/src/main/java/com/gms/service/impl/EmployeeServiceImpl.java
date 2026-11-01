@@ -17,7 +17,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 @Transactional
-public class EmployeeServiceImpl extends AbstractCRUDService<Employee, Integer> implements EmployeeService {
+public class EmployeeServiceImpl implements EmployeeService {
 
     private final EmployeeRepository employeeRepository;
     private final SchoolService schoolService;
@@ -26,7 +26,6 @@ public class EmployeeServiceImpl extends AbstractCRUDService<Employee, Integer> 
     public EmployeeServiceImpl(EmployeeRepository employeeRepository,
                                SchoolService schoolService,
                                UserService userService) {
-        super(employeeRepository);
         this.employeeRepository = employeeRepository;
         this.schoolService = schoolService;
         this.userService = userService;

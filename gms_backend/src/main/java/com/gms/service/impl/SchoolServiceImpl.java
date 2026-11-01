@@ -11,7 +11,6 @@ import com.gms.repository.DesignationRepository;
 import com.gms.repository.EmployeeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.EmailService;
 import com.gms.service.SchoolService;
 import com.gms.util.SecurityUtil;
@@ -32,7 +31,7 @@ import java.util.Optional;
 import java.util.Collections;
 
 @Service
-public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> implements SchoolService {
+public class SchoolServiceImpl implements SchoolService {
     private static final Logger log = LoggerFactory.getLogger(SchoolServiceImpl.class);
 
     private final SchoolRepository schoolRepository;
@@ -48,7 +47,6 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
                              EmployeeRepository employeeRepository,
                              PasswordEncoder passwordEncoder,
                              EmailService emailService) {
-        super(schoolRepository);
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
         this.designationRepository = designationRepository;
@@ -175,19 +173,28 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
 
     @Override
     @Transactional(readOnly = true)
+    public List<School> findAll() {
+        return schoolRepository.findAll();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
     public School getById(Integer id, Integer schoolId) {
-        // Fix: Validate that the requested school ID matches the user's school ID
-        if (!id.equals(schoolId)) {
+        // A school administrator may read only its own school; the platform owner may read any,
+        // because the same caller can already list every school and update or toggle any of them.
+        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
+        boolean platformOwner = roles != null && roles.contains("SUPERADMIN");
+        if (!platformOwner && !id.equals(schoolId)) {
             throw new IllegalArgumentException("Access denied: You can only access your own school");
         }
-        
+
         School school = schoolRepository.findByIdAndStatusOne(id)
                 .orElseThrow(() -> new EntityNotFoundException("School not found or not active"));
-        
+
         if (!school.isEnabled()) {
             throw new IllegalArgumentException("School is not enabled");
         }
-        
+
         return school;
     }
 
@@ -296,6 +303,6 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
     // Simple create method for bootstrap and other special cases
     @Override
     public School create(School school) {
-        return repository.save(school);
+        return schoolRepository.save(school);
     }
 }

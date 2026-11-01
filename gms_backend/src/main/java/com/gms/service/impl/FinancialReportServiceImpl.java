@@ -8,7 +8,6 @@ import com.gms.model.response.FinancialReportResponse;
 import com.gms.repository.FinancialReportRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.FinancialReportService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -18,7 +17,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Service
-public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialReport, Integer> implements FinancialReportService {
+public class FinancialReportServiceImpl implements FinancialReportService {
 
     private final FinancialReportRepository financialReportRepository;
     private final SchoolRepository schoolRepository;
@@ -27,7 +26,6 @@ public class FinancialReportServiceImpl extends AbstractCRUDService<FinancialRep
     public FinancialReportServiceImpl(FinancialReportRepository financialReportRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(financialReportRepository);
         this.financialReportRepository = financialReportRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

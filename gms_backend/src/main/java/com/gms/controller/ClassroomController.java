@@ -4,7 +4,6 @@ import com.gms.model.entity.Classroom;
 import com.gms.model.request.ClassroomRequest;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.service.ClassroomService;
-import com.gms.service.impl.ClassroomServiceImpl;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
@@ -14,16 +13,24 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * Classroom administration and the teacher-facing read.
+ *
+ * <p>This controller no longer extends {@code AbstractCRUDController}, which supplied an unguarded
+ * {@code GET /{id}} and {@code DELETE /{id}}. Both are declared below and both are scoped to the
+ * caller's school. The delete carries its own {@code @PreAuthorize} because the URL layer admits
+ * {@code TEACHER} to {@code /classrooms/**}: without a method-level guard a teacher could delete
+ * any classroom, in any school.</p>
+ */
 @RestController
 @CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"})
 @RequestMapping(Constants.API_BASE_V1 + "/classrooms")
-public class ClassroomController extends AbstractCRUDController<Classroom, Integer> {
+public class ClassroomController {
 
     private final ClassroomService classroomService;
 
-    public ClassroomController(ClassroomServiceImpl classroomServiceImpl) {
-        super(classroomServiceImpl);
-        this.classroomService = classroomServiceImpl;
+    public ClassroomController(ClassroomService classroomService) {
+        this.classroomService = classroomService;
     }
 
     @PostMapping("/create")
@@ -50,7 +57,6 @@ public class ClassroomController extends AbstractCRUDController<Classroom, Integ
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
-    @Override
     public ResponseEntity<List<Classroom>> getAll() {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -63,7 +69,6 @@ public class ClassroomController extends AbstractCRUDController<Classroom, Integ
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
-    @Override
     public ResponseEntity<Classroom> getById(@PathVariable Integer id) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -77,6 +82,28 @@ public class ClassroomController extends AbstractCRUDController<Classroom, Integ
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(403).build();
         }
+    }
+
+    /**
+     * Deletes a classroom of the caller's own school.
+     *
+     * <p>The frontend calls this route ({@code ClassroomsPage.jsx}), so it is declared here rather
+     * than inherited. The inherited version had no guard at all and no tenant predicate: the URL
+     * layer admits {@code TEACHER} to {@code /classrooms/**}, so a teacher could delete a classroom
+     * in any school. A classroom that still holds students is refused by the foreign key the
+     * migrations put in place — {@code PATCH /classrooms/toggle} is the way to retire one.</p>
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
+    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!classroomService.deleteWithinSchool(id, schoolId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PatchMapping("/toggle")

@@ -4,7 +4,6 @@ import com.gms.model.entity.Subject;
 import com.gms.model.request.SubjectRequest;
 import com.gms.model.response.SubjectResponse;
 import com.gms.service.SubjectService;
-import com.gms.service.impl.SubjectServiceImpl;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
@@ -14,16 +13,24 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * Subject administration and the teacher-facing read.
+ *
+ * <p>This controller no longer extends {@code AbstractCRUDController}, which supplied an unguarded
+ * {@code GET /{id}} and {@code DELETE /{id}}. Both are declared below and both are scoped to the
+ * caller's school. The delete carries its own {@code @PreAuthorize} because the URL layer admits
+ * {@code TEACHER} to {@code /subjects/**}: without a method-level guard a teacher could delete any
+ * subject, in any school.</p>
+ */
 @RestController
 @CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"})
 @RequestMapping(Constants.API_BASE_V1 + "/subjects")
-public class SubjectController extends AbstractCRUDController<Subject, Integer> {
+public class SubjectController {
 
     private final SubjectService subjectService;
 
-    public SubjectController(SubjectServiceImpl subjectServiceImpl) {
-        super(subjectServiceImpl);
-        this.subjectService = subjectServiceImpl;
+    public SubjectController(SubjectService subjectService) {
+        this.subjectService = subjectService;
     }
 
     @PostMapping("/create")
@@ -50,7 +57,6 @@ public class SubjectController extends AbstractCRUDController<Subject, Integer> 
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
-    @Override
     public ResponseEntity<List<Subject>> getAll() {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -63,7 +69,6 @@ public class SubjectController extends AbstractCRUDController<Subject, Integer> 
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
-    @Override
     public ResponseEntity<Subject> getById(@PathVariable Integer id) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         if (schoolId == null) {
@@ -77,6 +82,27 @@ public class SubjectController extends AbstractCRUDController<Subject, Integer> 
         } catch (IllegalArgumentException ex) {
             return ResponseEntity.status(403).build();
         }
+    }
+
+    /**
+     * Deletes a subject of the caller's own school.
+     *
+     * <p>The frontend calls this route ({@code SubjectsPage.jsx}), so it is declared here rather
+     * than inherited. The inherited version had no guard at all and no tenant predicate: the URL
+     * layer admits {@code TEACHER} to {@code /subjects/**}, so a teacher could delete a subject in
+     * any school.</p>
+     */
+    @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
+    public ResponseEntity<Void> delete(@PathVariable Integer id) {
+        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!subjectService.deleteWithinSchool(id, schoolId)) {
+            return ResponseEntity.notFound().build();
+        }
+        return ResponseEntity.noContent().build();
     }
 
     @PatchMapping("/toggle")

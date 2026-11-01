@@ -9,7 +9,6 @@ import com.gms.repository.ParentRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.StudentRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.ParentStudentService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;

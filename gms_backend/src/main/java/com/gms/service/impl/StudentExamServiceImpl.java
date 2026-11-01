@@ -12,7 +12,6 @@ import com.gms.repository.StudentRepository;
 import com.gms.repository.ExamSubjectRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.StudentExamService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -21,7 +20,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class StudentExamServiceImpl extends AbstractCRUDService<StudentExam, Integer> implements StudentExamService {
+public class StudentExamServiceImpl implements StudentExamService {
 
     private final StudentExamRepository studentExamRepository;
     private final StudentRepository studentRepository;
@@ -34,7 +33,6 @@ public class StudentExamServiceImpl extends AbstractCRUDService<StudentExam, Int
                                  ExamSubjectRepository examSubjectRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(studentExamRepository);
         this.studentExamRepository = studentExamRepository;
         this.studentRepository = studentRepository;
         this.examSubjectRepository = examSubjectRepository;

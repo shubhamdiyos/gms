@@ -8,7 +8,6 @@ import com.gms.model.response.PaymentGatewayResponse;
 import com.gms.repository.PaymentGatewayRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.PaymentGatewayService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGateway, Integer> implements PaymentGatewayService {
+public class PaymentGatewayServiceImpl implements PaymentGatewayService {
 
     private final PaymentGatewayRepository paymentGatewayRepository;
     private final SchoolRepository schoolRepository;
@@ -26,7 +25,6 @@ public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGatewa
     public PaymentGatewayServiceImpl(PaymentGatewayRepository paymentGatewayRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(paymentGatewayRepository);
         this.paymentGatewayRepository = paymentGatewayRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

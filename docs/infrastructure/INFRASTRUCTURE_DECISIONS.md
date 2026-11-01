@@ -782,6 +782,11 @@ entities rather than authored as a Flyway baseline. The two remaining proofs are
 `gms_frontend/src/features/` that map one-to-one onto the modules in [ARCHITECTURE.md §2](../ARCHITECTURE.md). So
 "modular monolith" could mean two very different pieces of work here.
 
+> **Re-measured 2026-11-01.** Stage 3 `C-1` deleted `AbstractCRUDController` and `AbstractCRUDService`, so the count
+> is now **280** files in 11 packages (`controller` 35, `service` 39 + `impl` 34; the others unchanged). The decision
+> this ADR took is unaffected — the point was and is that the boundary is enforced by tests rather than by moving
+> files, and two fewer files to move does not change that.
+
 **Decision.** Keep the layout; enforce the boundary with **ArchUnit** rules in the test scope, written as the six
 assertions in `ARCHITECTURE.md §7` (one writer per table, no cross-module repository access, no entity in a response,
 no tenant-less read, no `ResponseEntity` inside a service, every handler authorised). Violations are grandfathered by
@@ -905,8 +910,8 @@ instead of asserted by a document.
 
 ### ADR-023 — Delete `AbstractCRUDController` and `AbstractCRUDService`
 
-**Status:** **Accepted**. **Date:** 2026-11-01. **Closes:** `SEC-05`. **Implements:** the mandate's *"Avoid
-unrestricted CRUD inheritance"*.
+**Status:** **Accepted and implemented** on `feat/stage2-flyway-baseline`, 2026-11-01. **Closes:** `SEC-05`.
+**Implements:** the mandate's *"Avoid unrestricted CRUD inheritance"*.
 
 **Context.** Two base classes that auto-register endpoints: `AbstractCRUDController.java:30,41,52` maps
 `GET /{id}`, `GET` and `DELETE /{id}` with **no** `@PreAuthorize` and **no** tenant predicate, and
@@ -939,16 +944,64 @@ behaviour, the shared thing becomes a **service method**, not a mapping.
 
 **Consequences.** Six controllers gain explicit `getById`/`delete` decisions, and the app gains its first honest
 endpoint count: after deletion, the routes that exist are the routes someone wrote, which makes every later surface
-review (including the OpenAPI work in Stage 4) a read rather than a derivation. The 3 inherited mappings disappear, so
-232 becomes 229 *declared* — and the number that matters is that 0 of them arrive by inheritance. Some clients may
-have been calling the inherited routes; the frontend is the only known client and `apiSlice.js` has no call site for
-`DELETE` on these resources, which is a search result, not a production log.
+review (including the OpenAPI work in Stage 4) a read rather than a derivation. The 3 inherited mappings disappear and
+4 explicit ones replace them, so the mapping count moves from **232 to 233** — and the number that matters is that
+**0 of them arrive by inheritance**. The unbounded-`List` count falls from **90 to 89**, because the base class's
+unguarded `getAll` was one of them. The guard count rises from **206 to 210**: the four new operations carry their own
+`@PreAuthorize`, and no other controller lost one.
+
+> **Correction to the first draft of this ADR.** The first draft said the frontend "has no call site for `DELETE` on
+> these resources". That was wrong: `gms_frontend/src/store/api/apiSlice.js:258` calls `DELETE /classrooms/{id}` and
+> `:290` calls `DELETE /subjects/{id}`, and both resources had inherited an unguarded delete. The two call sites were
+> therefore **live frontend behaviour** and the inherited `DELETE /{id}` was reachable from the application's own
+> client — which is why the two deletes are re-declared explicitly rather than dropped. One further call site is
+> outright wrong and belongs to Stage 4's frontend-contract repair: `apiSlice.js:249` sends `PUT /classrooms/{id}`
+> while the controller declares `PUT /classrooms/update` with the id in the body, so the classroom edit form calls a
+> route that does not exist. Measured live on 2026-11-01: `PUT /api/v1/classrooms/1` answers **405** while
+> `PUT /api/v1/classrooms/update` answers **200**. The subject edit is fine — `apiSlice.js:281` sends
+> `PUT /subjects/update/{id}` and the controller declares `PUT /subjects/update/{id}`; measured **200**.
+
+**Implementation (2026-11-01).** Both classes are deleted. 25 service implementations dropped `extends
+AbstractCRUDService<X, Integer>` and their `super(repository)` call; 0 of the 36 controllers now extend anything.
+`GET /{id}` is declared explicitly, and tenant-scoped, on `Student`, `Employee` and `School`; it is **not** declared
+on `Parent` (the tenant lives on `parent_student`, not on `parents`) and not on `User` (it already had one, and it is
+now scoped). `DELETE /{id}` is declared, tenant-scoped and `ADMIN`/`SUPERADMIN`-only on `Subject` and `Classroom`,
+where the frontend calls it. Three tenancy holes closed along the way, each found by re-reading the code the
+inheritance had been hiding: `ParentServiceImpl.findBySchool` returned **every platform's parents**; `UserService`'s
+`getById`/`deleteById` pair had no tenant predicate, so any administrator could read or delete any other school's
+account; and `SchoolService.getById` did not exist, so the platform owner could list schools but not read one.
+
+**Two 500s found by running it, not by reading it.** The live run against a real PostgreSQL surfaced two
+client-error paths that the catch-all `@ExceptionHandler(Exception.class)` was answering as **500**:
+
+| Request | Was | Now | Cause |
+|---|---|---|---|
+| `DELETE /api/v1/students/1` | 500 | **405** | `HttpRequestMethodNotSupportedException` — the path still answers `GET`, so the method mismatch reached the catch-all |
+| `DELETE /api/v1/classrooms/1` (classroom with a student) | 500 | **409** | `DataIntegrityViolationException` — `students.classroom_id` still references the row |
+| `GET /api/v1/students/1` as a `TEACHER` | 500 | **403** | `AuthorizationDeniedException extends AccessDeniedException` — every method-level refusal in the app answered 500 |
+
+The third row is the more serious one: it was not specific to this card, it was the answer to *every* refusal the
+method layer had ever produced. `GlobalExceptionHandler` now maps `AccessDeniedException` → 403,
+`HttpRequestMethodNotSupportedException` → 405 and `DataIntegrityViolationException` → 409, each with the same
+`{traceId, path, error, message}` envelope and no disclosure. The wider client-error mapping (415, unreadable body,
+missing parameter, type mismatch) is still outstanding and belongs to Stage 4's error-contract card (`BKL-01`,
+`BKL-07`).
 
 **Cost.** ₹0.
-**Verification.** `grep -rn "extends AbstractCRUDController" gms_backend/src/main/java/` → **no output**; a
-`MockMvc` assertion per extendee that `GET /{id}` and `DELETE /{id}` answer 401/403 for a caller with no role claim;
-the Stage-3 cross-tenant suite covering all six resources; and the same deliberate-failure control used twice already
-in this repository — restore one deleted route on a scratch branch and watch the suite go red on exactly it.
+**Verification.**
+- `grep -rn "extends AbstractCRUDController" gms_backend/src/main/java/` → **no output**. Same for
+  `AbstractCRUDService` and for `extends AbstractCRUD` in the controller package.
+- `EndpointInheritanceTest` — **33 tests**, all green: no controller inherits its endpoints, every declared operation
+  carries its own `@PreAuthorize`, the inherited read and delete routes are absent from the mapping table, and each
+  of the six extendees answers 401 without a token and 403 without a role claim.
+- **Deliberate-failure control**, run as this repository has run twice before (`ADR-018`, PR #19): restoring the
+  inherited `DELETE /{id}` on `StudentController` and removing its `@PreAuthorize` made the suite go red on exactly the
+  two assertions that cover it, and the file was restored afterwards.
+- **Live cross-tenant run** — `scripts/verify-c1-tenancy.sh`, **29 checks, 0 failures**, against the packaged jar on
+  PostgreSQL 16.15 with the schema built by Flyway from an empty database. It creates two schools and their
+  administrators, proves 403 across the tenant boundary and 204 inside it, and proves the four deleted routes are
+  gone (405, or 403 where `anyRequest().denyAll()` answers first).
+- Full suite: **79 tests green** (42 pre-existing + 33 new + 4 exception-mapping tests). No check was downgraded.
 
 ---
 

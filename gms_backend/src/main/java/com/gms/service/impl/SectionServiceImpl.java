@@ -8,7 +8,6 @@ import com.gms.model.response.SectionResponse;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.SectionRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.SectionService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> implements SectionService {
+public class SectionServiceImpl implements SectionService {
 
     private final SectionRepository sectionRepository;
     private final SchoolRepository schoolRepository;
@@ -29,7 +28,6 @@ public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> im
     public SectionServiceImpl(SectionRepository sectionRepository, 
                              SchoolRepository schoolRepository,
                              UserRepository userRepository) {
-        super(sectionRepository);
         this.sectionRepository = sectionRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

@@ -8,7 +8,6 @@ import com.gms.model.response.NotificationResponse;
 import com.gms.repository.NotificationRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.NotificationService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +18,7 @@ import java.util.Comparator;
 import java.util.List;
 
 @Service
-public class NotificationServiceImpl extends AbstractCRUDService<Notification, Integer> implements NotificationService {
+public class NotificationServiceImpl implements NotificationService {
 
     private final NotificationRepository notificationRepository;
     private final SchoolRepository schoolRepository;
@@ -28,7 +27,6 @@ public class NotificationServiceImpl extends AbstractCRUDService<Notification, I
     public NotificationServiceImpl(NotificationRepository notificationRepository,
                                    SchoolRepository schoolRepository,
                                    UserRepository userRepository) {
-        super(notificationRepository);
         this.notificationRepository = notificationRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

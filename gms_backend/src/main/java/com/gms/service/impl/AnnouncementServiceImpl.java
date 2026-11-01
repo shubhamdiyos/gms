@@ -16,7 +16,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Service
-public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, Integer> implements AnnouncementService {
+public class AnnouncementServiceImpl implements AnnouncementService {
 
     private final AnnouncementRepository announcementRepository;
     private final SchoolService schoolService;
@@ -25,7 +25,6 @@ public class AnnouncementServiceImpl extends AbstractCRUDService<Announcement, I
     public AnnouncementServiceImpl(AnnouncementRepository announcementRepository,
                                    SchoolService schoolService,
                                    UserService userService) {
-        super(announcementRepository);
         this.announcementRepository = announcementRepository;
         this.schoolService = schoolService;
         this.userService = userService;

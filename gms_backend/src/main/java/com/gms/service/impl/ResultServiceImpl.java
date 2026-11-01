@@ -10,7 +10,6 @@ import com.gms.repository.ResultRepository;
 import com.gms.repository.StudentExamRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.ResultService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -22,7 +21,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> implements ResultService {
+public class ResultServiceImpl implements ResultService {
 
     private final ResultRepository resultRepository;
     private final StudentExamRepository studentExamRepository;
@@ -33,7 +32,6 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
                            StudentExamRepository studentExamRepository,
                            SchoolRepository schoolRepository,
                            UserRepository userRepository) {
-        super(resultRepository);
         this.resultRepository = resultRepository;
         this.studentExamRepository = studentExamRepository;
         this.schoolRepository = schoolRepository;

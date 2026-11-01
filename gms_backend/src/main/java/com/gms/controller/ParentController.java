@@ -4,7 +4,6 @@ import com.gms.model.entity.Parent;
 import com.gms.model.request.ParentRequest;
 import com.gms.model.response.*;
 import com.gms.service.ParentService;
-import com.gms.service.impl.ParentServiceImpl;
 import com.gms.util.Constants;
 import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
@@ -14,16 +13,27 @@ import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
 
+/**
+ * Parent administration and the parent portal.
+ *
+ * <p>This controller no longer extends {@code AbstractCRUDController}, which supplied an unguarded
+ * {@code GET /{id}} and {@code DELETE /{id}}. Neither is declared here, and that is a decision
+ * rather than an omission: {@code parents} carries no {@code school_id} of its own — the tenant
+ * lives on the {@code parent_student} link — so an id-addressed read would have to reconstruct the
+ * tenant from the children, and the delete would orphan the {@code users.parent_id} foreign key.
+ * The reads that do exist are tenant-scoped: {@code /parents/profile} and {@code /parents/children/*}
+ * resolve the parent from the caller's own token, and {@code /parent-students/parent/{id}/students}
+ * passes the caller's school into the join query.</p>
+ */
 @RestController
 @CrossOrigin(origins = {"http://localhost:5173", "http://localhost:3000"})
 @RequestMapping(Constants.API_BASE_V1 + "/parents")
-public class ParentController extends AbstractCRUDController<Parent, Integer> {
+public class ParentController {
 
     private final ParentService parentService;
 
-    public ParentController(ParentServiceImpl parentServiceImpl) {
-        super(parentServiceImpl);
-        this.parentService = parentServiceImpl;
+    public ParentController(ParentService parentService) {
+        this.parentService = parentService;
     }
 
     @PostMapping("/create")

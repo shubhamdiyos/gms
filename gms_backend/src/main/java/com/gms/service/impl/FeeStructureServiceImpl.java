@@ -8,7 +8,6 @@ import com.gms.model.response.FeeStructureResponse;
 import com.gms.repository.FeeStructureRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.FeeStructureService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +16,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class FeeStructureServiceImpl extends AbstractCRUDService<FeeStructure, Integer> implements FeeStructureService {
+public class FeeStructureServiceImpl implements FeeStructureService {
 
     private final FeeStructureRepository feeStructureRepository;
     private final SchoolRepository schoolRepository;
@@ -26,7 +25,6 @@ public class FeeStructureServiceImpl extends AbstractCRUDService<FeeStructure, I
     public FeeStructureServiceImpl(FeeStructureRepository feeStructureRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(feeStructureRepository);
         this.feeStructureRepository = feeStructureRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

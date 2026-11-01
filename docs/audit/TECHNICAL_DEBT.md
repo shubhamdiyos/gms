@@ -9,7 +9,7 @@ No duplicate implementations are permitted where a capability already exists. Ev
 
 | Capability | Existing asset to repair | Must **not** be created |
 |---|---|---|
-| Pagination | `AbstractCRUDController.java:5` already imports `Pageable`; controllers already return `ResponseEntity` | a second paging framework, a new list-response wrapper alongside the current one |
+| Pagination | `UserServiceImpl.java:173` already paginates users (no controller calls it); controllers already return `ResponseEntity` | a second paging framework, a new list-response wrapper alongside the current one |
 | DTO mapping | per-service `mapToResponse` methods in 34 impls | MapStruct/ModelMapper added beside hand-mapping — pick one and convert incrementally |
 | Error contract | `exception/GlobalExceptionHandler` + `DomainException` (declared, unused) | a new `ApiResponse`/`Result` wrapper layered over the existing exception types |
 | Tenancy | `util/SecurityUtil` call sites in controllers | a parallel `TenantFilter` that coexists with header re-parsing |
@@ -40,6 +40,7 @@ Blast radius = what breaks if the change is done badly, given **zero** existing 
 | BKL-07 | `Constants.API_BASE_V1` used by only ~14 of 36 controllers; the rest hardcode `/api/v1` | P3 | S | path drift | — | replace literals with the constant |
 | BKL-08 | Two audit-column conventions (`created_on` vs `created_at`), three entities carrying both | P2 | M | every report/query touching audits; migration surface | blocked by **OPS-07** (no schema baseline) | choose one via migration; do not add a third |
 | BKL-09 | `RoleEnum` exists but roles persist as raw strings in `user_roles`, and a sixth value `"EMPLOYEE"` is created at runtime (**SEC-09**) | P1 | M | every authorization rule | **SEC-06** depends on this | either map `RoleEnum` via `@Enumerated(STRING)` or keep strings and enforce one constant source — not both |
+| BKL-10 | The error contract maps four client errors and leaves the rest to the catch-all, so a malformed body, a wrong media type or a missing query parameter answers **500** | P2 | S | every caller that sends a malformed request | — | extend the existing `GlobalExceptionHandler` with `HttpMediaTypeNotSupportedException` → 415, `HttpMessageNotReadableException` → 400, `MissingServletRequestParameterException` → 400; keep the `{traceId, path, error, message}` envelope. Stage 4's error-contract card (**BKL-01**, **BKL-07**) is where the envelope itself is unified — do not build a second one here |
 
 ### Data layer
 

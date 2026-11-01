@@ -24,14 +24,13 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class ClassroomServiceImpl extends AbstractCRUDService<Classroom, Integer> implements ClassroomService {
+public class ClassroomServiceImpl implements ClassroomService {
 
     private final ClassroomRepository classroomRepository;
     private final SchoolService schoolService;
     private final UserService userService;
 
     public ClassroomServiceImpl(ClassroomRepository classroomRepository, SchoolService schoolService, UserService userService) {
-        super(classroomRepository);
         this.classroomRepository = classroomRepository;
         this.schoolService = schoolService;
         this.userService = userService;
@@ -44,7 +43,7 @@ public class ClassroomServiceImpl extends AbstractCRUDService<Classroom, Integer
         }
 
         Classroom classroom = createClassroomFromRequest(request, new Classroom(), empId, schoolId);
-        Classroom saved = super.create(classroom);
+        Classroom saved = classroomRepository.save(classroom);
         return ResponseEntity.ok(toResponse(saved));
     }
 
@@ -87,6 +86,20 @@ public class ClassroomServiceImpl extends AbstractCRUDService<Classroom, Integer
     @Transactional(readOnly = true)
     public java.util.Optional<Classroom> findById(Integer id) {
         return classroomRepository.findById(id);
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteWithinSchool(Integer id, Integer schoolId) {
+        Classroom classroom = classroomRepository.findById(id).orElse(null);
+        if (classroom == null) {
+            return false;
+        }
+        if (!schoolId.equals(classroom.getSchoolId())) {
+            return false;
+        }
+        classroomRepository.delete(classroom);
+        return true;
     }
 
     @Override
@@ -170,10 +183,5 @@ public class ClassroomServiceImpl extends AbstractCRUDService<Classroom, Integer
                 classroom.getGrade(),
                 classroom.getSection()
         );
-    }
-
-    // Method to get repository for AbstractCRUDService compatibility
-    public ClassroomRepository getRepository() {
-        return classroomRepository;
     }
 }

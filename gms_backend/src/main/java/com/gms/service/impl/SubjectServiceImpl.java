@@ -10,7 +10,6 @@ import com.gms.repository.SchoolRepository;
 import com.gms.repository.SubjectRepository;
 import com.gms.repository.TeacherAssignmentRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.SubjectService;
 import com.gms.util.SecurityUtil;
 import jakarta.persistence.EntityNotFoundException;
@@ -27,7 +26,7 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class SubjectServiceImpl extends AbstractCRUDService<Subject, Integer> implements SubjectService {
+public class SubjectServiceImpl implements SubjectService {
 
     private final SubjectRepository subjectRepository;
     private final SchoolRepository schoolRepository;
@@ -35,7 +34,6 @@ public class SubjectServiceImpl extends AbstractCRUDService<Subject, Integer> im
     private final TeacherAssignmentRepository teacherAssignmentRepository;
 
     public SubjectServiceImpl(SubjectRepository subjectRepository, SchoolRepository schoolRepository, UserRepository userRepository, TeacherAssignmentRepository teacherAssignmentRepository) {
-        super(subjectRepository);
         this.subjectRepository = subjectRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
@@ -49,7 +47,7 @@ public class SubjectServiceImpl extends AbstractCRUDService<Subject, Integer> im
         }
 
         Subject subject = createSubjectFromRequest(request, new Subject(), empId, schoolId);
-        Subject saved = super.create(subject);
+        Subject saved = subjectRepository.save(subject);
         return ResponseEntity.ok(toResponse(saved));
     }
 
@@ -93,6 +91,20 @@ public class SubjectServiceImpl extends AbstractCRUDService<Subject, Integer> im
     @Transactional(readOnly = true)
     public java.util.Optional<Subject> findById(Integer id) {
         return subjectRepository.findById(id);
+    }
+
+    @Override
+    @Transactional
+    public boolean deleteWithinSchool(Integer id, Integer schoolId) {
+        Subject subject = subjectRepository.findById(id).orElse(null);
+        if (subject == null) {
+            return false;
+        }
+        if (!schoolId.equals(subject.getSchoolId())) {
+            return false;
+        }
+        subjectRepository.delete(subject);
+        return true;
     }
 
     @Override

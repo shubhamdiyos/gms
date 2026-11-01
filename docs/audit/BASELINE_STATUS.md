@@ -595,3 +595,105 @@ Supersedes §10 for the items it touches.
   no credential material.
 * `/Users/shubhamkumar/Desktop/GMS-V1/.env` (git-ignored) supplies `DB_URL`, `DB_USERNAME`, `DB_PASSWORD` and the
   dev-profile bootstrap variables used above. It is not committed and is not copied into any file in this document.
+
+---
+
+## 14. Stage 3 `C-1` verification evidence (`feat/stage2-flyway-baseline`)
+
+Everything above §14 describes the **baseline at commit `256b8e4`** and the **M1** remediation; none of it was edited
+to reflect `C-1`, for the reason §13 states. This section is the command evidence behind the `C-1` disposition in
+[REPOSITORY_AUDIT.md §16](REPOSITORY_AUDIT.md) and [SECURITY_AUDIT.md §5.2](SECURITY_AUDIT.md).
+
+**Environment.** JDK 21.0.1, PostgreSQL 16.15 in container `gms-postgres`, the packaged jar
+(`target/gms-0.1.0-SNAPSHOT.jar`) run with `--spring.profiles.active=dev` against a **disposable database created
+for this verification**. The platform account was created from `APP_SUPERADMIN_*` environment variables only, and the
+JWT secret was generated per run. No Neon connection was made at any point, and no schema outside the disposable
+database was touched: the pre-existing `gms` database was left exactly as it was.
+
+### 14.1 The schema is reproducible from Flyway alone
+
+The `gms` database already held a schema created by an earlier Hibernate `ddl-auto=update` run and **no**
+`flyway_schema_history`, so a boot against it fails with *"Found non-empty schema(s) "public" but no schema history
+table"*. That is the correct refusal, and it is the reason the verification used a second database rather than
+adopting the old schema with `baselineOnMigrate`.
+
+| Command | Result |
+| --- | --- |
+| `CREATE DATABASE gms_c1_verify` on the disposable container | empty — `psql -c "\dt"` → *"Did not find any relations"* |
+| boot the packaged jar against it | `Migrating schema "public" to version "1 - baseline current schema"` … `"5 - composite tenant keys"`, then **`Successfully applied 5 migrations to schema "public", now at version v5`** (0.679 s) |
+| Hibernate validation | no mismatch — the boot proceeds past `ddl-auto=validate` to `Started GmsApplication in 6.133 seconds` |
+| `select installed_rank, version, description, success from flyway_schema_history order by installed_rank` | 5 rows, versions 1–5, `success = t` on all |
+| `ls gms_backend/src/main/resources/db/migration` | `V1__baseline_current_schema.sql`, `V2__materialise_tenant_key.sql`, `V3__natural_keys.sql`, `V4__indexes.sql`, `V5__composite_tenant_keys.sql` |
+| `unzip -l target/gms-0.1.0-SNAPSHOT.jar \| grep -E "db/migration\|flyway"` | `BOOT-INF/classes/db/migration/V1..V5` and both `flyway-core-10.10.0.jar` and `flyway-database-postgresql-10.10.0.jar` |
+
+### 14.2 Build and tests
+
+| Command | Result |
+| --- | --- |
+| `mvn -B test` | **Tests run: 79, Failures: 0, Errors: 0, Skipped: 0** — BUILD SUCCESS |
+| surefire per class | `JwtTokenProviderTest` 10 · `SuperAdminBootstrapPropertiesTest` 8 · `GlobalExceptionHandlerTest` 8 · `EndpointInheritanceTest` 33 · `CustomUserDetailsServiceTest` 6 · `NotificationRecipientMatchTest` 6 · `UserServiceImplRoleGuardTest` 4 · `LoginAttemptServiceTest` 4 |
+| `mvn -B package` | BUILD SUCCESS; the packaged jar was the one the live run below used |
+
+The 42 pre-existing tests are still green. Nothing was skipped, nothing was marked `continue-on-error`, and no
+assertion was weakened.
+
+### 14.3 Live cross-tenant run — `scripts/verify-c1-tenancy.sh`, 29 checks, 0 failures
+
+The script is committed, not a transcript: it creates two schools and their administrators, a teacher, a classroom and
+a student, and asserts the boundary from both sides. It runs against any `GMS_BASE_URL`.
+
+| Group | Assertions | Observed |
+| --- | --- | --- |
+| Platform login | 1 | `POST /auth/login` → 200 |
+| Two schools created by the platform owner | 2 | 200, 200 — school A id 2, school B id 3 |
+| Both school administrators log in | 2 | 200, 200 — `aprincipal`, `bprincipal` |
+| School A builds its own data | 3 | classroom 200, subject 200, student 200 |
+| School A provisions a teacher | 2 | account 200, login 200 |
+| Reads C-1 re-declared | 5 | own student **200** · another school's student **403** · anonymous **401** · missing student **404** · another school's subject **403** |
+| Deletes C-1 re-declared | 4 | teacher delete **403** · another school's delete **404** · own delete **204** · deleted row then **404** |
+| Referenced row | 3 | another school's classroom **404** · classroom holding a student **409** · unreferenced classroom **204** |
+| Routes the deleted base class used to supply | 4 | student **405** · parent **403** · employee **405** · school **405** |
+| Method-level refusal | 1 | teacher reading a student **403** |
+| Platform reach | 1 | `GET /schools` → 200, three schools listed |
+
+### 14.4 Three 500s the live run found, and what they were
+
+None of these three was visible in the code; each was found by making a request.
+
+| Request | Was | Now | Cause |
+| --- | --- | --- | --- |
+| `DELETE /api/v1/students/1` | **500** | 405 | `HttpRequestMethodNotSupportedException` — the path still answers `GET`, so the method mismatch reached the catch-all |
+| `DELETE /api/v1/classrooms/1` (a classroom with a student) | **500** | 409 | `DataIntegrityViolationException` — `students.classroom_id` still references the row |
+| `GET /api/v1/students/1` as a `TEACHER` | **500** | 403 | `AuthorizationDeniedException extends AccessDeniedException` — **every** method-level refusal in the app answered 500 |
+| `PUT /api/v1/subjects/update/` (an id that is not an integer) | **500** | 400 | `MethodArgumentTypeMismatchException` |
+
+The third is the serious one: it was not specific to `C-1`, it was the answer to every refusal the method layer had
+ever produced. `GlobalExceptionHandler` now maps `AccessDeniedException` → 403,
+`HttpRequestMethodNotSupportedException` → 405, `DataIntegrityViolationException` → 409 and
+`MethodArgumentTypeMismatchException` → 400, each with the same `{traceId, path, error, message}` envelope and no
+disclosure. The rest of the client-error mapping — 415, an unreadable body, a missing parameter — is still outstanding
+and is now recorded as **BKL-10**.
+
+### 14.5 What the live run found about the frontend contract
+
+`FE-01` is a Stage 4 card, but `C-1`'s live run measured two of its rows rather than assuming them.
+
+| Frontend call | Backend route | Measured |
+| --- | --- | --- |
+| `apiSlice.js:249` `PUT /classrooms/{id}` | `ClassroomController` declares `PUT /classrooms/update` (id in the body) | **405** — the classroom edit form calls a route that does not exist |
+| `apiSlice.js:281` `PUT /subjects/update/{id}` | `SubjectController.java:47` declares `PUT /subjects/update/{id}` | **200** — the subject edit is fine |
+| `apiSlice.js:258` `DELETE /classrooms/{id}` | inherited before `C-1`; now declared and tenant-scoped | **204** for the caller's own row, **404** for another school's |
+| `apiSlice.js:290` `DELETE /subjects/{id}` | inherited before `C-1`; now declared and tenant-scoped | **204** for the caller's own row, **404** for another school's |
+
+### 14.6 State left on this machine by `C-1`
+
+* Container `gms-postgres` is running. It holds three databases: `gms` (the pre-existing one, **untouched** by this
+  verification), `gms_flyway_verify` and `gms_c1_verify` (the two disposable ones built by Flyway during this run,
+  holding the schools, teachers and students the script created). `docker compose down -v` removes the container and
+  all three.
+* The backend was left **running** on `:8080` against `gms_c1_verify`, started from the packaged jar with
+  `APP_SUPERADMIN_*` and `SECURITY_JWT_SECRET` supplied as environment variables for that run only. Stop with
+  `lsof -ti tcp:8080 | xargs kill`.
+* `/tmp/gms-boot*.log` and `/tmp/gms-c1-final.log` hold the boot logs referenced in §14.1 and §14.4. They are outside
+  the repository and contain no credential material — the JWT secret was generated per run and never written to a
+  file. The disposable platform password lives in `/tmp/gms-c1-secret.env` (mode 600), also outside the repository.

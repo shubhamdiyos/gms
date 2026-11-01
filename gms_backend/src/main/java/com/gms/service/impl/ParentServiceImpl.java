@@ -25,7 +25,7 @@ import java.util.stream.Collectors;
 
 @Service
 @Transactional
-public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> implements ParentService {
+public class ParentServiceImpl implements ParentService {
 
     private final ParentRepository parentRepository;
     private final StudentService studentService;
@@ -48,7 +48,6 @@ public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> impl
                             TimetableService timetableService, AnnouncementService announcementService,
                             SubjectService subjectService, NotificationService notificationService,
                             TeacherAssignmentService teacherAssignmentService) {
-        super(parentRepository);
         this.parentRepository = parentRepository;
         this.studentService = studentService;
         this.userService = userService;
@@ -97,8 +96,7 @@ public class ParentServiceImpl extends AbstractCRUDService<Parent, Integer> impl
 
     @Override
     public List<Parent> findBySchool(Integer schoolId) {
-        // For now, return all parents since Parent doesn't have direct school relationship
-        return parentRepository.findAll();
+        return parentRepository.findBySchoolId(schoolId);
     }
 
     @Override

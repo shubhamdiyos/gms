@@ -271,7 +271,7 @@ reachable by inheritance.
 
 | # | Work | Closes |
 |---|---|---|
-| C-1 | Delete `AbstractCRUDController` / `AbstractCRUDService` and make every extendee declare its own endpoints (`ADR-023`). Measured live surface on 2026-11-01: 6 controllers extend it; `GET /{id}` is inherited-and-unguarded on 3 (`Parent`, `Student`, `Employee` — `Subject:64`, `Classroom:64`, `School:81` override it); `DELETE /{id}` is inherited-and-unguarded on **all 6**, because `EmployeeController:68` maps `/toggle`, which does not shadow `/{id}`; the comment at `EmployeeController.java:65-67` records that a hand-written `getById` was *deleted* precisely because the base class supplied one. That comment is the case for deleting the base class rather than guarding it | `SEC-05` |
+| C-1 | Delete `AbstractCRUDController` / `AbstractCRUDService` and make every extendee declare its own endpoints (`ADR-023`). Measured live surface on 2026-11-01: 6 controllers extend it; `GET /{id}` is inherited-and-unguarded on 3 (`Parent`, `Student`, `Employee` — `Subject:64`, `Classroom:64`, `School:81` override it); `DELETE /{id}` is inherited-and-unguarded on **all 6**, because `EmployeeController:68` maps `/toggle`, which does not shadow `/{id}`; the comment at `EmployeeController.java:65-67` records that a hand-written `getById` was *deleted* precisely because the base class supplied one. That comment is the case for deleting the base class rather than guarding it. **Done 2026-11-01 on the branch**: both classes deleted, 25 service impls and all 36 controllers detached, the two frontend-called deletes re-declared tenant-scoped, three tenancy holes closed (`ParentServiceImpl.findBySchool` returned every platform's parents; `UserService.getById`/`deleteById` had no tenant predicate; `SchoolService.getById` did not exist). Measured: 33-test suite green, live script 29/29, control red on exactly 2 assertions, full suite 78/78 | `SEC-05` |
 | C-2 | One tenant resolution path: the `schoolId` claim parsed once per request into a request-scoped context; services and repositories take it from there instead of a parameter that a caller may forget | `TEN-01…07`, debt #5 |
 | C-3 | School-scoped repository methods for the 6 repositories that have none (`ExamSubject`, `Parent`, `Result`, `StudentExam`, `Timetable`, `TimetableSlot`) and for the 10 entities with no direct school link, via their owning aggregate | `TEN-*`, `DB-03` |
 | C-4 | Put the ownership check where the JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list | `SEC-06` |
@@ -296,6 +296,25 @@ reachable by inheritance.
    mirror test asserting a role that should not reach it gets 403. This is the only way `SEC-17` can be closed: the
    claim set in a token, not the string in an annotation, decides access.
 6. All existing 42 tests still green; no check downgraded to `continue-on-error` to get there.
+
+**`C-1` results, 2026-11-01, on `feat/stage2-flyway-baseline`.** Criterion **3** met: the grep for
+`AbstractCRUDController` and for `AbstractCRUDService` returns nothing, and no controller in `com.gms.controller`
+extends anything. Criterion **4** met: `EndpointInheritanceTest` asserts, for each of the six extendees, that no
+handler carries an inherited mapping, that every declared operation carries its own `@PreAuthorize`, and that the
+inherited read and delete routes are absent from the mapping table; it also asserts 401 without a token and 403
+without a role claim on twelve routes, plus 403 for a school administrator reading another school's student and for a
+teacher attempting a delete. Criterion **2** met: restoring the inherited delete on `StudentController` and removing
+its guard turned the suite red on exactly the two assertions covering it, and the file was restored. Criterion **6**
+met: **79 tests green** (42 pre-existing, 33 new, 4 exception-mapping).
+
+Criteria **1** and **5** are **not** met and are **not** closed by `C-1`. They are the cross-tenant suite for *every*
+resource and the per-role token suite; `C-1` covers the six extendees it touched, and the live script
+`scripts/verify-c1-tenancy.sh` proves the same boundary end-to-end for two real tenants against a real database
+(29 checks, 0 failures). The remaining work is `C-2`…`C-6`, which is what turns the six-resource boundary into a
+whole-application one. Two client-error paths the live run exposed were fixed here rather than deferred: a
+method mismatch answered **500** instead of 405, and a referenced-row delete answered **500** instead of 409. The
+third 500 — every method-level `@PreAuthorize` refusal answering 500 instead of 403 — was also fixed, and it was not
+specific to this card.
 
 ### Stage 4 — The MVP vertical slice
 
@@ -410,7 +429,7 @@ system, the remaining `DOC-*`).
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | Open | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1` done on `feat/stage2-flyway-baseline`: both base classes deleted, 33-test inheritance suite + live cross-tenant script (29 checks) green, deliberate-failure control red on exactly the guarded assertions. `C-2…C-8` open | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | Open | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
@@ -422,5 +441,6 @@ merge itself: `master` requires one approving review with last-push approval, th
 and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
 branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
 still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
-receives. Nothing above Stage 2 has started, and no stage above 1 is `Closed`. The roadmap is the plan; the evidence
-sections of `BASELINE_STATUS.md` are the proof. If the two disagree, the proof wins and this table is wrong.
+receives. Stage 3 has started — `C-1` is implemented and measured on the same unmerged branch — and nothing above
+Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
+disagree, the proof wins and this table is wrong.

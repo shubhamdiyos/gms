@@ -16,6 +16,13 @@ public interface SubjectService {
     ResponseEntity<?> toggleSubject(Integer id, Boolean isActive, Integer schoolId, Integer empId);
     Subject createSubjectFromRequest(SubjectRequest request, Subject subject, Integer empId, Integer schoolId);
     List<SubjectResponse> findSubjectsForAuthenticatedTeacher();
+
+    /**
+     * Deletes a subject, but only if it belongs to the caller's school.
+     *
+     * @return true when a row was deleted, false when no such subject exists in that school
+     */
+    boolean deleteWithinSchool(Integer id, Integer schoolId);
     
     // Service-to-service communication method
     java.util.Optional<Subject> findById(Integer id);

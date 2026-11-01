@@ -8,7 +8,6 @@ import com.gms.model.response.SchoolCalendarResponse;
 import com.gms.repository.SchoolCalendarRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.SchoolCalendarService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +19,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalendar, Integer> implements SchoolCalendarService {
+public class SchoolCalendarServiceImpl implements SchoolCalendarService {
 
     private final SchoolCalendarRepository schoolCalendarRepository;
     private final SchoolRepository schoolRepository;
@@ -30,7 +29,6 @@ public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalenda
     public SchoolCalendarServiceImpl(SchoolCalendarRepository schoolCalendarRepository,
                                     SchoolRepository schoolRepository,
                                     UserRepository userRepository) {
-        super(schoolCalendarRepository);
         this.schoolCalendarRepository = schoolCalendarRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

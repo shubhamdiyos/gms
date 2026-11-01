@@ -17,7 +17,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Service
-public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integer> implements FeePaymentService {
+public class FeePaymentServiceImpl implements FeePaymentService {
 
     private final FeePaymentRepository feePaymentRepository;
     private final StudentFeeService studentFeeService;
@@ -28,7 +28,6 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
                                 StudentFeeService studentFeeService,
                                 SchoolService schoolService,
                                 UserService userService) {
-        super(feePaymentRepository);
         this.feePaymentRepository = feePaymentRepository;
         this.studentFeeService = studentFeeService;
         this.schoolService = schoolService;

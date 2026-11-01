@@ -15,15 +15,15 @@ Every number here comes from a command run on 2026-11-01 against `master` at `bc
 
 | Surface | Measured | Command shape |
 |---|---|---|
-| Java files under `gms_backend/src/main/java` | **282** | `find … -name '*.java' \| wc -l` |
-| Packages | 11 top-level: `config` 5, `controller` 36, `enums` 3, `exception` 3, `model/entity` 37, `model/request` 41, `model/response` 36, `repository` 35, `security` 4, `service` 40 (+ `bootstrap`, `impl` 34), `util` 6 | per-directory counts |
+| Java files under `gms_backend/src/main/java` | **280** | `find … -name '*.java' \| wc -l` |
+| Packages | 11 top-level: `config` 5, `controller` 35, `enums` 3, `exception` 3, `model/entity` 37, `model/request` 41, `model/response` 36, `repository` 35, `security` 4, `service` 39 (+ `bootstrap` 1, `impl` 34), `util` 6 | per-directory counts |
 | Entities / tables | **36 + `BaseAuditEntity`** mapped to 36 tables (`academic_years` … `users`) | `ls model/entity`, `@Table(name=…)` |
 | Repositories | **35** | `ls repository` |
-| Controllers | **36** files, 35 with a class-level `@RequestMapping`, `AbstractCRUDController` with none | `grep -l "@RequestMapping"` |
-| Endpoint mappings | **232** | `grep -rhoE "@(Get\|Post\|Put\|Patch\|Delete)Mapping" \| wc -l` |
-| Endpoints returning an unbounded `List` | **90** `ResponseEntity<List<` | same grep in `controller/` |
-| Endpoints returning `Page` or taking `Pageable` | **0 of 232.** `grep -rEn "Page<\|Pageable" src/main/java` returns **8** lines, one of which is the unused import at `AbstractCRUDController.java:5`; the other seven are one dead path — `UserServiceImpl.java:173` paginates users, and no controller calls it. That single unreachable method is the whole of GMS's pagination today. | `grep -rEn "Page<\|Pageable" src/main/java` |
-| `@PreAuthorize` guards | **206** over 232 mappings | `grep -rn "@PreAuthorize" src/main/java/com/gms/controller \| wc -l` (207 repo-wide: `SecurityConfig.java:39` mentions the annotation in prose) |
+| Controllers | **35** files, all 35 with a class-level `@RequestMapping`, **none extending a base class** | `grep -l "@RequestMapping"` |
+| Endpoint mappings | **233** | `grep -rhoE "^[[:space:]]*@(Get\|Post\|Put\|Patch\|Delete)Mapping" \| wc -l` |
+| Endpoints returning an unbounded `List` | **89** `ResponseEntity<List<` | same grep in `controller/` |
+| Endpoints returning `Page` or taking `Pageable` | **0 of 233.** `grep -rEn "Page<\|Pageable" src/main/java` returns **7** lines, all of them one dead path — `UserServiceImpl.java:173` paginates users, and no controller calls it. That single unreachable method is the whole of GMS's pagination today. | `grep -rEn "Page<\|Pageable" src/main/java` |
+| `@PreAuthorize` guards | **210** over 233 mappings | `grep -rhoE "^[[:space:]]*@PreAuthorize" src/main/java/com/gms/controller \| wc -l` |
 | Secondary indexes declared in the model | **0** (`@Index`, `indexes = {`) | `grep -rE "@Index\|indexes *= *\\{" model/entity/` |
 | Unique constraints declared | **1** (`Designation.java:24-26`) | `grep -c uniqueConstraints` |
 | Entities carrying a tenant key | **25** with `@ManyToOne School` via `school_id`, 1 with a scalar `schoolId` (`School` itself), **10 with none** | per-file grep |
@@ -687,7 +687,19 @@ which does not shadow `/{id}` — and `EmployeeController.java:65-67` contains a
 `findAll` half is not currently reachable: **closed by six copies of a rule rather than by a mechanism**, which is
 why the mechanism is deletion of the base class, not six more guards. Deletion also closes the mandate's Priority-2
 line *"Avoid unrestricted CRUD inheritance"* against the same six files, and it makes the count of endpoints a
-person can trust: after it, 232 becomes a number that equals the routes someone wrote.
+person can trust: after it, the mapping count is a number that equals the routes someone wrote.
+
+> **Implemented 2026-11-01** (Stage 3 `C-1`, on `feat/stage2-flyway-baseline`). Both base classes are deleted; 25
+> service implementations and all 35 controllers are detached from them. The inherited reads are replaced by explicit,
+> school-scoped declarations on `Student`, `Employee` and `School`; the inherited deletes by guarded, school-scoped
+> declarations on `Subject` and `Classroom` — the two resources the frontend actually deletes — and are not declared at
+> all on `Parent`, `Student`, `Employee`, `School` and `User`, where the domain's own soft delete (`/toggle`) is the
+> operation that exists. The mapping count moves **232 → 233** (3 inherited removed, 4 explicit added), the
+> unbounded-`List` count **90 → 89**, the guard count **206 → 210**, and the file count **282 → 280**. Verification:
+> `EndpointInheritanceTest` (33 cases), `scripts/verify-c1-tenancy.sh` (29 live checks, 0 failures), the
+> deliberate-failure control red on exactly the two guarded assertions, full suite **78 green**. `ADR-023` carries the
+> correction to the first draft's claim that the frontend had no delete call site — it
+> has two — and the two 500s (a method mismatch and a refused delete) that the live run exposed.
 
 **Health, auth and the rest** — `/actuator/health` stays unauthenticated for probes and nothing else
 (`SEC-13`, `INF-15`); `/v3/api-docs` and `swagger-ui` are permitted in `SecurityConfig.java:35-37` for paths that
@@ -695,10 +707,10 @@ do not exist, and springdoc-openapi is added so they do (`BKL-04`), generated fr
 
 ## 7. Backend structure: boundaries without a re-packaging
 
-The target is a modular monolith. The measured reality is **package-by-layer** (11 packages, 282 files, §1). Two
+The target is a modular monolith. The measured reality is **package-by-layer** (11 packages, 280 files, §1). Two
 honest options existed and the second is taken:
 
-- *Re-package into `com.gms.<module>.{api,application,domain,persistence}`* — 282 files move, every citation in
+- *Re-package into `com.gms.<module>.{api,application,domain,persistence}`* — 280 files move, every citation in
   every register goes stale at once, every diff for the next two stages becomes a rename, and the architecture
   gained is the architecture §2 already describes. Rejected for cost with no correctness benefit
   (`ADR-021`), and noted as a **post-DoD** mechanical step if module count grows.

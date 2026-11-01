@@ -152,6 +152,23 @@ unfiltered-`findAll` half of this finding is **not currently reachable**: closed
 mechanism, and the reason [ARCHITECTURE.md §6](../ARCHITECTURE.md) deletes the base class instead of guarding it
 (`ADR-023`).
 
+*Closed 2026-11-01 on `feat/stage2-flyway-baseline`, by Stage 3 card `C-1`.* Both base classes are deleted;
+`grep -rl "extends AbstractCRUDController" controller/` and the same grep for `AbstractCRUDService` both return
+nothing, and no controller in `com.gms.controller` extends anything. The inherited mappings are gone and replaced by
+explicit, guarded, tenant-scoped declarations: `GET /{id}` on `Student`, `Employee` and `School`; `DELETE /{id}` on
+`Subject` and `Classroom`, where the frontend actually calls it (`apiSlice.js:258`, `:290` — the first draft of
+`ADR-023` wrongly said there was no frontend delete call site, and that correction is recorded in the ADR). The
+`Parent` read is not declared at all, because `parents` carries no `school_id` — the tenant lives on
+`parent_student` — and the `User` read and delete are now scoped to the caller's school, replacing an inherited
+`existsById`/`deleteById` pair that had no tenant predicate at all.
+*Verification:* `EndpointInheritanceTest` (33 cases) plus `scripts/verify-c1-tenancy.sh` (29 live checks, 0 failures,
+against the packaged jar on PostgreSQL 16.15), the deliberate-failure control red on exactly the two guarded
+assertions, and the full suite at **78 green**. Three tenancy holes that the inheritance had been hiding were closed
+at the same time: `ParentServiceImpl.findBySchool` returned every platform's parents; `UserService.getById` had no
+tenant predicate; `SchoolService.getById` did not exist, so the platform owner could list schools but not read one.
+The residual risk this finding named — that a per-controller patch will drift — is what `C-5`'s build-time
+annotation scan exists to prevent.
+
 ### P1 — major
 
 **SEC-06 — SecurityFilterChain matcher order blocks the STUDENT, PARENT and teacher portals.**
@@ -248,6 +265,9 @@ guards on 232 mappings, and **39** of them contain `ACCOUNTANT` — all of `Stud
 PARENT), appears **nowhere** in `gms_frontend/src`, and is unissuable by construction: the only path that assigns
 requested roles runs `RoleEnum.fromCode(code)` (`UserServiceImpl.java:109`, whose own comment reads
 *"throws for anything outside the vocabulary"*).
+
+> **Re-measured 2026-11-01 after Stage 3 `C-1`:** 210 guards on 233 mappings, and the **39** `ACCOUNTANT` guards are
+> unchanged — `C-1` added four guarded operations and removed none. The finding stands.
 *Impact:* every money endpoint is reachable **only** as `ADMIN`, so the segregation of duties those guards were
 written to express does not exist, and the person who runs a school also records, edits and reports payments.
 Fail-closed, therefore not a hole — which is exactly why it has survived unnoticed: nothing 403s, nothing breaks,
@@ -405,6 +425,13 @@ and the create call returns the creator-not-found 404 above.
 Wrong paths: `apiSlice.js:249` `PUT /classrooms/{id}` vs `ClassroomController.java:40` `PUT /classrooms/update`; `:461` `POST /sections/create` vs `SectionController.java:24` `POST /sections`; `:399` `PATCH /notifications/{id}/read` vs `NotificationController.java:117` `PUT /{id}/mark-read`; `:520` `GET /results` has no mapping.
 Wrong payloads: `StudentsPage.jsx:43-50` sends `classroomId`, `StudentRequest.java:41` requires `classId`; `ClassroomsPage.jsx:36-41` sends `className/capacity/roomNumber` vs required `name/grade/section`; `SubjectsPage.jsx:36-40` `subjectName/subjectCode/credits` vs `name/code`; `FeesPage.jsx:42-48` sends `feeName` (absent) and omits required `academicYear`; `EmployeesPage.jsx:40-49` sends `salary/dateOfBirth/gender` (absent) and omits required `teaching`; `AcademicYearsPage.jsx:36-40` `yearName` vs `name` + required `isCurrent`; `TeacherGradesPage.jsx:36-55` `studentId/marksObtained` vs `ResultRequest.studentExamId/obtainedMarks`.
 Wrong field reads: `DashboardLayout.jsx:46` filters `n.read_status` while the API sends `readStatus`; `StudentsPage.jsx:117` reads `classroom.className` while the entity exposes `name`.
+
+*Re-measured 2026-11-01 against the packaged jar on PostgreSQL 16.15, during Stage 3 `C-1`:* the classroom path is a
+**405**, not a 404, because the path matches a `GET` and the method does not — `PUT /api/v1/classrooms/1` answers
+**405** while `PUT /api/v1/classrooms/update` with the id in the body answers **200**. The subject edit is **not**
+broken: `apiSlice.js:281` sends `PUT /subjects/update/{id}` and `SubjectController.java:47` declares
+`PUT /subjects/update/{id}`; measured **200**. The delete paths `apiSlice.js:258` and `:290` were corrected in `C-1` —
+they now reach guarded, school-scoped endpoints rather than the inherited unguarded delete.
 
 **FE-02 (P1) — Mock mode can silently ship.** Gated only by `VITE_MOCK_AUTH === 'true'` (`apiSlice.js:16`, `authService.js:5`); currently off, but there is no `.env.example` documenting the flag, no `import.meta.env.DEV &&` guard, no CI check, and commit `8ba3342` removed the only on-screen indicator. In mock mode `mockAuthService.js:77-83` accepts **any password** and defaults unknown users to **SUPERADMIN** (`:80`) with an unsigned fake JWT, and `mockBaseQuery.js:291-292` returns `ok([])` for unmatched paths, so every FE-01 bug above is invisible and looks like "no data". Mandate §25 rule 18 is directly implicated.
 
@@ -612,7 +639,7 @@ See [§16.2](#162-citation-drift-caused-by-pr-21-and-pr-22) for the measured shi
 | SEC-02 publicly known JWT key | **Verified** (local) | `JwtTokenProvider` has no default; blank, <32-byte and retired-default secrets fail startup outside `dev`, and `dev` gets a per-process `SecureRandom` key. `JwtTokenProviderTest` (10 cases) proves a token from one dev boot is unreadable by another; `verify-security.sh` proves a token forged with the old published secret is answered **401**. |
 | SEC-03 default bootstrap credential | **Verified** | `SuperAdminBootstrapProperties` defaults are `enabled=false` with blank identity and secret, the credential that historically shipped as the repository default is refused case-insensitively (a real bug caught by `SuperAdminBootstrapPropertiesTest`: the comparison was against the lower-cased literal, so the capitalised form everyone was told to use passed), and enabled-with-incomplete-config aborts startup. The dev boot in BASELINE_STATUS §13 created its account purely from environment variables. |
 | SEC-04 client-controlled role assignment | **Verified** | `UserServiceImpl.authoriseRoles` validates every code against `RoleEnum` and requires a SUPERADMIN authority to grant SUPERADMIN; `UserServiceImplRoleGuardTest` (4 cases) covers `ROOT`, unknown codes and the update path. |
-| SEC-05 unguarded inherited CRUD | **Open** (1 of 7) | Only `UserController` left the template. `Parent`, `Student`, `Subject`, `School`, `Classroom`, `Employee` still inherit `GET /{id}` and `DELETE /{id}` returning raw entities with no tenant predicate — the delete path in AP-3 is unchanged. Needs the ownership guard from the tenant-isolation package, not a per-controller patch. |
+| SEC-05 unguarded inherited CRUD | **Closed** (branch, 2026-11-01) | `C-1` deleted both base classes. `grep -rl "extends AbstractCRUDController" controller/` and the same for `AbstractCRUDService` return nothing, and no controller extends anything. The inherited `GET /{id}` and `DELETE /{id}` are replaced by explicit, guarded, tenant-scoped declarations (`GET` on `Student`, `Employee`, `School`; `DELETE` on `Subject` and `Classroom`, the two the frontend calls); `Parent`'s read is not declared at all and `User`'s read and delete are now school-scoped. Evidence: `EndpointInheritanceTest` (33 cases), `scripts/verify-c1-tenancy.sh` (29 live checks, 0 failures), the deliberate-failure control red on exactly 2 assertions, full suite **78 green**. The generalisation the finding asked for — that per-controller patches drift — is `C-5`'s job. |
 | SEC-06 matcher order blocking portals | **Verified** (admin paths) | `verify-security.sh` §3 exercises both directions: an admin token reaches `/users` and `/users/me`, is refused `/students/my-fees` with **403**, and an unlisted path fails closed with **403** under `anyRequest().denyAll()`. **Not** verified: STUDENT and PARENT portal happy paths, because a disposable database with no seeded enrolments cannot produce those principals. |
 | SEC-07 password hashes in logs | **Verified** | `CustomUserDetailsService` logs only `enabled/locked/passwordExpired` flags; the full dev boot log for the matrix run (login failures, lockout, authenticated reads) contains no `$2a$` digest — grep of the captured log, not an assumption. |
 | SEC-08 error bodies disclose internals | **Verified** | 500 body is `{traceId,path,error,message}` with a reference-only message; 403 body is `{"error":"Forbidden"}`; `GlobalExceptionHandlerTest` asserts a 500 whose exception message contains a JDBC URL and a password leaks neither. |

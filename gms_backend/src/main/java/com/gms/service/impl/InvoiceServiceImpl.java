@@ -8,7 +8,6 @@ import com.gms.model.response.InvoiceResponse;
 import com.gms.repository.InvoiceRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
 import com.gms.service.InvoiceService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -19,7 +18,7 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Service
-public class InvoiceServiceImpl extends AbstractCRUDService<Invoice, Integer> implements InvoiceService {
+public class InvoiceServiceImpl implements InvoiceService {
 
     private final InvoiceRepository invoiceRepository;
     private final SchoolRepository schoolRepository;
@@ -28,7 +27,6 @@ public class InvoiceServiceImpl extends AbstractCRUDService<Invoice, Integer> im
     public InvoiceServiceImpl(InvoiceRepository invoiceRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(invoiceRepository);
         this.invoiceRepository = invoiceRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;

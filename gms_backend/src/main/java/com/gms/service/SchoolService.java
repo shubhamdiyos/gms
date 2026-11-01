@@ -10,6 +10,16 @@ import java.util.Optional;
 
 public interface SchoolService {
     List<School> findBySchool(Integer schoolId);
+
+    /**
+     * Every school on the platform.
+     *
+     * <p>Platform-scoped by design: this is the SUPERADMIN's list, and it is the only read in the
+     * application that is deliberately not tenant-filtered. It replaces the inherited
+     * {@code findAll()}, which every subclass of the old base class could reach.</p>
+     */
+    List<School> findAll();
+
     School getById(Integer id, Integer schoolId);
     ResponseEntity<SchoolResponse> create(SchoolRequest request, Integer empId, Integer schoolId);
     ResponseEntity<SchoolResponse> update(SchoolRequest request, Integer empId, Integer schoolId);
