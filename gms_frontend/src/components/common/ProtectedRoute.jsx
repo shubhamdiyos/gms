@@ -27,8 +27,12 @@ const ProtectedRoute = ({ children, requiredRoles = [] }) => {
   }
 
   // Check role-based access
-  if (requiredRoles.length > 0 && !hasRole(requiredRoles)) {
-    return <Navigate to="/unauthorized" replace />;
+  const required = (Array.isArray(requiredRoles) ? requiredRoles : [requiredRoles])
+    .filter(Boolean);
+
+  if (required.length > 0 && !hasRole(required)) {
+    // Terminal page, not a silent bounce to the dashboard: the denied path must stay visible.
+    return <Navigate to={ROUTES.UNAUTHORIZED} state={{ from: location.pathname }} replace />;
   }
 
   return children;

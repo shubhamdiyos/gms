@@ -1,13 +1,15 @@
-import { Grid, Paper, Typography, Box, Card, CardContent, Avatar } from '@mui/material';
+import { Grid, Paper, Typography, Box, Card, CardContent, Avatar, LinearProgress } from '@mui/material';
 import {
   Groups,
   EventNote,
   Grade,
   Schedule,
 } from '@mui/icons-material';
-import { 
+import {
   useGetTeacherProfileQuery,
   useGetTeacherClassesQuery,
+  useGetTeacherStudentsQuery,
+  useGetTeacherTimetableQuery,
 } from '../../store/api/apiSlice';
 
 const StatCard = ({ title, value, icon, color, subtitle }) => (
@@ -35,38 +37,97 @@ const StatCard = ({ title, value, icon, color, subtitle }) => (
   </Card>
 );
 
+const metric = (isLoading, error, value, subtitle) => {
+  if (error) return { value: '—', subtitle: 'Data unavailable' };
+  if (isLoading) return { value: '—', subtitle: 'Loading…' };
+  return { value, subtitle };
+};
+
+const todayName = () =>
+  new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date()).toUpperCase();
+
 const TeacherDashboard = () => {
   const { data: profile } = useGetTeacherProfileQuery();
-  const { data: classes = [] } = useGetTeacherClassesQuery();
+  const {
+    data: classes = [],
+    isLoading: classesLoading,
+    error: classesError,
+  } = useGetTeacherClassesQuery();
+  const {
+    data: students = [],
+    isLoading: studentsLoading,
+    error: studentsError,
+  } = useGetTeacherStudentsQuery();
+  const { data: timetable, isLoading: timetableLoading, error: timetableError } =
+    useGetTeacherTimetableQuery();
+
+  const classList = Array.isArray(classes) ? classes : [];
+  const studentList = Array.isArray(students) ? students : [];
+  const uniqueStudentIds = new Set(studentList.map((student) => student.id));
+  const slots = Array.isArray(timetable?.slots) ? timetable.slots : null;
+  const todayPeriods = slots ? slots.filter((slot) => slot.dayOfWeek === todayName()) : null;
+
+  const studentsInClass = (classId) =>
+    studentList.filter((student) => student.classId === classId).length;
+
+  const classDescription = (classItem) => {
+    const parts = [];
+    if (classItem.grade) parts.push(`Grade ${classItem.grade}`);
+    if (classItem.section) parts.push(`Section ${classItem.section}`);
+    return parts.join(' • ');
+  };
 
   const stats = [
     {
+      ...metric(
+        classesLoading,
+        classesError,
+        classList.length,
+        classList.length === 0 ? 'No classrooms assigned' : 'Assigned classrooms'
+      ),
       title: 'My Classes',
-      value: classes.length,
       icon: <Groups />,
       color: '#1976d2',
-      subtitle: 'Active classes',
     },
     {
+      ...metric(
+        studentsLoading,
+        studentsError,
+        uniqueStudentIds.size,
+        uniqueStudentIds.size === 0
+          ? 'No students in your classes'
+          : `${classList.length} assigned ${classList.length === 1 ? 'class' : 'classes'}`
+      ),
       title: 'Students',
-      value: '156',
       icon: <EventNote />,
       color: '#388e3c',
-      subtitle: 'Total students',
     },
     {
       title: 'Pending Grades',
-      value: '12',
+      value: '—',
       icon: <Grade />,
       color: '#f57c00',
-      subtitle: 'Need attention',
+      subtitle: 'Awaiting result aggregate',
     },
     {
+      ...(timetableError
+        ? { value: '—', subtitle: 'Timetable unavailable' }
+        : timetableLoading
+          ? { value: '—', subtitle: 'Loading…' }
+          : todayPeriods === null
+            ? { value: '—', subtitle: 'No timetable published' }
+            : {
+                value: todayPeriods.length,
+                subtitle: todayPeriods.length === 0
+                  ? 'No periods scheduled today'
+                  : `Periods ${todayPeriods
+                      .map((slot) => slot.period)
+                      .sort((a, b) => a - b)
+                      .join(', ')}`,
+              }),
       title: 'Today\'s Classes',
-      value: '4',
       icon: <Schedule />,
       color: '#7b1fa2',
-      subtitle: 'Scheduled',
     },
   ];
 
@@ -95,32 +156,51 @@ const TeacherDashboard = () => {
             <Typography variant="h6" gutterBottom>
               My Classes
             </Typography>
-            <Box>
-              {classes.map((classItem, index) => (
-                <Box
-                  key={index}
-                  sx={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    py: 2,
-                    borderBottom: '1px solid #e0e0e0',
-                    '&:last-child': { borderBottom: 'none' },
-                  }}
-                >
-                  <Avatar sx={{ bgcolor: '#1976d2', mr: 2 }}>
-                    <Groups />
-                  </Avatar>
-                  <Box sx={{ flexGrow: 1 }}>
-                    <Typography variant="subtitle1">
-                      Class {classItem.className || index + 1}
-                    </Typography>
-                    <Typography variant="body2" color="text.secondary">
-                      {classItem.subject || 'Mathematics'} • {classItem.students || '25'} students
-                    </Typography>
-                  </Box>
-                </Box>
-              ))}
-            </Box>
+            {classesLoading ? (
+              <LinearProgress />
+            ) : classesError ? (
+              <Typography color="error">
+                Class data is unavailable. {classesError.message || 'Please try again.'}
+              </Typography>
+            ) : classList.length === 0 ? (
+              <Typography color="text.secondary">
+                No classrooms are assigned to your account yet.
+              </Typography>
+            ) : (
+              <Box>
+                {classList.map((classItem, index) => {
+                  const count = studentsInClass(classItem.id);
+                  const details = [classDescription(classItem)];
+                  if (!studentsLoading && !studentsError) {
+                    details.push(`${count} ${count === 1 ? 'student' : 'students'}`);
+                  }
+                  return (
+                    <Box
+                      key={classItem.id ?? index}
+                      sx={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        py: 2,
+                        borderBottom: '1px solid #e0e0e0',
+                        '&:last-child': { borderBottom: 'none' },
+                      }}
+                    >
+                      <Avatar sx={{ bgcolor: '#1976d2', mr: 2 }}>
+                        <Groups />
+                      </Avatar>
+                      <Box sx={{ flexGrow: 1 }}>
+                        <Typography variant="subtitle1">
+                          {classItem.name || `Classroom ${classItem.id ?? index + 1}`}
+                        </Typography>
+                        <Typography variant="body2" color="text.secondary">
+                          {details.filter(Boolean).join(' • ')}
+                        </Typography>
+                      </Box>
+                    </Box>
+                  );
+                })}
+              </Box>
+            )}
           </Paper>
         </Grid>
 

@@ -143,8 +143,9 @@ const AnnouncementsPage = () => {
     try {
       const payload = {
         ...data,
-        // Convert empty expiryDate to null
         expiryDate: data.expiryDate || null,
+        targetIds: editingAnnouncement?.targetIds ?? null,
+        attachmentUrls: editingAnnouncement?.attachmentUrls ?? null,
       };
 
       if (editingAnnouncement) {
@@ -158,7 +159,7 @@ const AnnouncementsPage = () => {
       handleClose();
       refetch();
     } catch (error) {
-      toast.error('Operation failed');
+      toast.error(error?.data?.message || 'Operation failed');
     }
   };
 
@@ -169,7 +170,7 @@ const AnnouncementsPage = () => {
         toast.success('Announcement deleted successfully');
         refetch();
       } catch (error) {
-        toast.error('Delete failed');
+        toast.error(error?.data?.message || 'Delete failed');
       }
     }
   };
@@ -185,7 +186,7 @@ const AnnouncementsPage = () => {
       }
       refetch();
     } catch (error) {
-      toast.error('Failed to update publish status');
+      toast.error(error?.data?.message || 'Failed to update publish status');
     }
   };
 

@@ -16,6 +16,8 @@ import { Lock, Visibility, VisibilityOff } from '@mui/icons-material';
 import { toast } from 'react-toastify';
 import { useChangePasswordMutation } from '../../store/api/apiSlice';
 
+const passwordPolicy = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&.#_])[A-Za-z\d@$!%*?&.#_]{8,}$/;
+
 const schema = yup.object({
   oldPassword: yup
     .string()
@@ -23,7 +25,9 @@ const schema = yup.object({
   newPassword: yup
     .string()
     .required('New password is required')
-    .min(8, 'New password must be at least 8 characters'),
+    .min(8, 'New password must be at least 8 characters')
+    .max(100, 'New password must be at most 100 characters')
+    .matches(passwordPolicy, 'Use at least 8 characters with upper, lower, digit and one of @$!%*?&.#_'),
   confirmNewPassword: yup
     .string()
     .oneOf([yup.ref('newPassword'), null], 'Passwords must match')

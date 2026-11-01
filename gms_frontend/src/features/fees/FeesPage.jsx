@@ -34,26 +34,41 @@ import {
   useCreateFeeMutation,
   useUpdateFeeMutation,
   useDeleteFeeMutation,
-  useGetClassroomsQuery,
 } from '../../store/api/apiSlice';
 import { toast } from 'react-toastify';
 import dayjs from 'dayjs';
+import { useAuth } from '../../hooks/useAuth';
+import { ROLES } from '../../constants';
 
 const schema = yup.object({
-  feeName: yup.string().required('Fee name is required'),
-  amount: yup.number().positive('Amount must be positive').required('Amount is required'),
   feeType: yup.string().required('Fee type is required'),
-  dueDate: yup.date().required('Due date is required'),
-  classroomId: yup.number().required('Classroom is required'),
-  description: yup.string(),
+  amount: yup.number().positive('Amount must be positive').required('Amount is required'),
+  dueDate: yup
+    .string()
+    .matches(/^\d{4}-\d{2}-\d{2}$/, 'Due date is required')
+    .required('Due date is required'),
+  academicYear: yup.string().required('Academic year is required'),
+  classGrade: yup.string().nullable(),
+  description: yup.string().nullable(),
+  isMandatory: yup.boolean().defined(),
 });
+
+const STATUS_META = {
+  ACTIVE: { label: 'Active', color: 'success' },
+  INACTIVE: { label: 'Inactive', color: 'default' },
+  ARCHIVED: { label: 'Archived', color: 'warning' },
+};
 
 const FeesPage = () => {
   const [open, setOpen] = useState(false);
   const [editingFee, setEditingFee] = useState(null);
-  
+
+  // FeeController create/update/delete are hasAuthority('ADMIN'); ACCOUNTANT gets GET reads only,
+  // so the write affordances must not render for it (a click would 403 and toast).
+  const { hasRole } = useAuth();
+  const canManageFees = hasRole(ROLES.ADMIN);
+
   const { data: fees = [], isLoading, refetch } = useGetFeesQuery();
-  const { data: classrooms = [] } = useGetClassroomsQuery();
   const [createFee] = useCreateFeeMutation();
   const [updateFee] = useUpdateFeeMutation();
   const [deleteFee] = useDeleteFeeMutation();
@@ -65,6 +80,7 @@ const FeesPage = () => {
     control,
     formState: { errors },
   } = useForm({
+    defaultValues: { isMandatory: true },
     resolver: yupResolver(schema),
   });
 
@@ -73,7 +89,8 @@ const FeesPage = () => {
     if (fee) {
       reset({
         ...fee,
-        dueDate: fee.dueDate ? new Date(fee.dueDate).toISOString().split('T')[0] : '',
+        dueDate: fee.dueDate ? String(fee.dueDate).split('T')[0] : '',
+        isMandatory: Boolean(fee.isMandatory),
       });
     } else {
       reset();
@@ -88,17 +105,26 @@ const FeesPage = () => {
   };
 
   const onSubmit = async (data) => {
+    const payload = {
+      feeType: data.feeType,
+      description: data.description,
+      amount: data.amount,
+      dueDate: data.dueDate,
+      academicYear: data.academicYear,
+      classGrade: data.classGrade,
+      isMandatory: data.isMandatory,
+    };
     try {
       if (editingFee) {
-        await updateFee({ id: editingFee.id, ...data }).unwrap();
+        await updateFee({ id: editingFee.id, ...payload }).unwrap();
         toast.success('Fee updated successfully');
       } else {
-        await createFee(data).unwrap();
+        await createFee(payload).unwrap();
         toast.success('Fee created successfully');
       }
       handleClose();
       refetch();
-    } catch (error) {
+    } catch {
       toast.error('Operation failed');
     }
   };
@@ -109,22 +135,17 @@ const FeesPage = () => {
         await deleteFee(id).unwrap();
         toast.success('Fee deleted successfully');
         refetch();
-      } catch (error) {
+      } catch {
         toast.error('Delete failed');
       }
     }
   };
 
-  const getClassroomName = (classroomId) => {
-    const classroom = classrooms.find(c => c.id === classroomId);
-    return classroom ? classroom.className : 'Unknown';
-  };
-
   const columns = [
     {
-      field: 'feeName',
-      headerName: 'Fee Name',
-      width: 200,
+      field: 'feeType',
+      headerName: 'Fee Type',
+      width: 170,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <AttachMoney sx={{ mr: 1, color: '#4caf50' }} />
@@ -133,17 +154,9 @@ const FeesPage = () => {
       ),
     },
     {
-      field: 'feeType',
-      headerName: 'Type',
-      width: 120,
-      renderCell: (params) => (
-        <Chip
-          label={params.value}
-          color="primary"
-          variant="outlined"
-          size="small"
-        />
-      ),
+      field: 'description',
+      headerName: 'Description',
+      width: 220,
     },
     {
       field: 'amount',
@@ -152,10 +165,14 @@ const FeesPage = () => {
       renderCell: (params) => `₹${params.value?.toLocaleString()}`,
     },
     {
-      field: 'classroomId',
+      field: 'academicYear',
+      headerName: 'Academic Year',
+      width: 140,
+    },
+    {
+      field: 'classGrade',
       headerName: 'Class',
-      width: 120,
-      renderCell: (params) => getClassroomName(params.value),
+      width: 110,
     },
     {
       field: 'dueDate',
@@ -164,42 +181,56 @@ const FeesPage = () => {
       renderCell: (params) => dayjs(params.value).format('MMM DD, YYYY'),
     },
     {
-      field: 'status',
-      headerName: 'Status',
-      width: 100,
+      field: 'isMandatory',
+      headerName: 'Mandatory',
+      width: 120,
       renderCell: (params) => (
         <Chip
-          label={params.value === '1' ? 'Active' : 'Inactive'}
-          color={params.value === '1' ? 'success' : 'error'}
+          label={params.value ? 'Yes' : 'No'}
+          color={params.value ? 'primary' : 'default'}
+          variant="outlined"
           size="small"
         />
       ),
     },
     {
-      field: 'actions',
-      headerName: 'Actions',
-      width: 150,
-      sortable: false,
-      renderCell: (params) => (
-        <Box>
-          <Tooltip title="View">
-            <IconButton size="small">
-              <Visibility />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Edit">
-            <IconButton size="small" onClick={() => handleOpen(params.row)}>
-              <Edit />
-            </IconButton>
-          </Tooltip>
-          <Tooltip title="Delete">
-            <IconButton size="small" onClick={() => handleDelete(params.row.id)}>
-              <Delete />
-            </IconButton>
-          </Tooltip>
-        </Box>
-      ),
+      field: 'status',
+      headerName: 'Status',
+      width: 110,
+      renderCell: (params) => {
+        const meta = STATUS_META[params.value] || { label: params.value, color: 'default' };
+        return <Chip label={meta.label} color={meta.color} size="small" />;
+      },
     },
+    ...(canManageFees
+      ? [
+          {
+            field: 'actions',
+            headerName: 'Actions',
+            width: 150,
+            sortable: false,
+            renderCell: (params) => (
+              <Box>
+                <Tooltip title="View">
+                  <IconButton size="small">
+                    <Visibility />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Edit">
+                  <IconButton size="small" onClick={() => handleOpen(params.row)}>
+                    <Edit />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Delete">
+                  <IconButton size="small" onClick={() => handleDelete(params.row.id)}>
+                    <Delete />
+                  </IconButton>
+                </Tooltip>
+              </Box>
+            ),
+          },
+        ]
+      : []),
   ];
 
   return (
@@ -214,19 +245,21 @@ const FeesPage = () => {
             Manage school fees and payment structure
           </Typography>
         </Box>
-        <Button
-          variant="contained"
-          startIcon={<Add />}
-          onClick={() => handleOpen()}
-          sx={{
-            background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
-            '&:hover': {
-              background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
-            },
-          }}
-        >
-          Add Fee
-        </Button>
+        {canManageFees && (
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => handleOpen()}
+            sx={{
+              background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
+              '&:hover': {
+                background: 'linear-gradient(135deg, #5a6fd8 0%, #6a4190 100%)',
+              },
+            }}
+          >
+            Add Fee
+          </Button>
+        )}
       </Box>
 
       {/* Data Grid */}
@@ -258,15 +291,6 @@ const FeesPage = () => {
           </DialogTitle>
           <DialogContent>
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('feeName')}
-                  fullWidth
-                  label="Fee Name"
-                  error={!!errors.feeName}
-                  helperText={errors.feeName?.message}
-                />
-              </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth error={!!errors.feeType}>
                   <InputLabel>Fee Type</InputLabel>
@@ -314,25 +338,41 @@ const FeesPage = () => {
                   helperText={errors.dueDate?.message}
                 />
               </Grid>
-              <Grid item xs={12}>
-                <FormControl fullWidth error={!!errors.classroomId}>
-                  <InputLabel>Classroom</InputLabel>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  {...register('academicYear')}
+                  fullWidth
+                  label="Academic Year"
+                  placeholder="e.g., 2024-2025"
+                  error={!!errors.academicYear}
+                  helperText={errors.academicYear?.message}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <TextField
+                  {...register('classGrade')}
+                  fullWidth
+                  label="Class Grade"
+                  error={!!errors.classGrade}
+                  helperText={errors.classGrade?.message}
+                />
+              </Grid>
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth error={!!errors.isMandatory}>
+                  <InputLabel>Mandatory</InputLabel>
                   <Controller
-                    name="classroomId"
+                    name="isMandatory"
                     control={control}
                     render={({ field }) => (
-                      <Select {...field} label="Classroom">
-                        {classrooms.map((classroom) => (
-                          <MenuItem key={classroom.id} value={classroom.id}>
-                            {classroom.className} - {classroom.section}
-                          </MenuItem>
-                        ))}
+                      <Select {...field} label="Mandatory">
+                        <MenuItem value={true}>Yes</MenuItem>
+                        <MenuItem value={false}>No</MenuItem>
                       </Select>
                     )}
                   />
-                  {errors.classroomId && (
+                  {errors.isMandatory && (
                     <Typography variant="caption" color="error" sx={{ mt: 1, ml: 2 }}>
-                      {errors.classroomId?.message}
+                      {errors.isMandatory?.message}
                     </Typography>
                   )}
                 </FormControl>

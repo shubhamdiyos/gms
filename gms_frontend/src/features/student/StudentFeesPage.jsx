@@ -1,7 +1,6 @@
 import { Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip } from '@mui/material';
 import { AttachMoney } from '@mui/icons-material';
 import { useGetMyFeesQuery } from '../../store/api/apiSlice';
-import dayjs from 'dayjs';
 
 const StudentFeesPage = () => {
   const { data: fees = [], isLoading } = useGetMyFeesQuery();
@@ -45,17 +44,15 @@ const StudentFeesPage = () => {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Fee</TableCell>
+                  <TableCell>Fee ID</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Amount</TableCell>
-                  <TableCell>Paid Amount</TableCell>
-                  <TableCell>Due Date</TableCell>
+                  <TableCell>Amount Paid</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {fees.map((fee) => (
                   <TableRow key={fee.id}>
-                    <TableCell>{fee.feeName || 'Fee'}</TableCell>
+                    <TableCell>{fee.feeId ?? '-'}</TableCell>
                     <TableCell>
                       <Chip
                         label={fee.status}
@@ -63,11 +60,7 @@ const StudentFeesPage = () => {
                         size="small"
                       />
                     </TableCell>
-                    <TableCell>{fee.amount != null ? `₹${fee.amount}` : '-'}</TableCell>
                     <TableCell>{fee.amountPaid != null ? `₹${fee.amountPaid}` : '-'}</TableCell>
-                    <TableCell>
-                      {fee.dueDate ? dayjs(fee.dueDate).format('MMM DD, YYYY') : '-'}
-                    </TableCell>
                   </TableRow>
                 ))}
               </TableBody>

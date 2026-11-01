@@ -31,10 +31,12 @@ import dayjs from 'dayjs';
 
 const StudentAttendancePage = () => {
   const [selectedMonth, setSelectedMonth] = useState(dayjs().format('YYYY-MM'));
-  
-  const { data: attendance = [], isLoading } = useGetMyAttendanceQuery({
-    month: selectedMonth,
-  });
+
+  const { data: allAttendance = [], isLoading } = useGetMyAttendanceQuery();
+
+  const attendance = allAttendance.filter(
+    (record) => typeof record.date === 'string' && record.date.startsWith(selectedMonth)
+  );
 
   // Calculate attendance statistics
   const calculateStats = () => {
@@ -253,13 +255,13 @@ const StudentAttendancePage = () => {
                   <TableCell>Day</TableCell>
                   <TableCell>Subject</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Time</TableCell>
+                  <TableCell>Period</TableCell>
                   <TableCell>Remarks</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
-                {attendance.map((record, index) => (
-                  <TableRow key={index}>
+                {attendance.map((record) => (
+                  <TableRow key={record.id}>
                     <TableCell>
                       {dayjs(record.date).format('MMM DD, YYYY')}
                     </TableCell>
@@ -267,7 +269,7 @@ const StudentAttendancePage = () => {
                       {dayjs(record.date).format('dddd')}
                     </TableCell>
                     <TableCell>
-                      {record.subject || 'General'}
+                      {record.timetableSlot?.assignment?.subject?.name || '-'}
                     </TableCell>
                     <TableCell>
                       <Chip
@@ -277,7 +279,7 @@ const StudentAttendancePage = () => {
                       />
                     </TableCell>
                     <TableCell>
-                      {record.time || dayjs(record.createdAt).format('HH:mm')}
+                      {record.timetableSlot?.period ?? '-'}
                     </TableCell>
                     <TableCell>
                       {record.remarks || '-'}
