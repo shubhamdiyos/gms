@@ -323,6 +323,22 @@ Deliberately out of scope for Milestone 0. Each item needs either owner authoriz
 | Postman requests | 45 across two collections, against **230** declared handler methods counted in `controller/*.java` (128 GET, 44 POST, 30 PUT, 23 DELETE, 5 PATCH) — ≈19% coverage |
 | Known P0 findings | 9 (see §3 of REPOSITORY_AUDIT.md) |
 
+**These are baseline counts, and five of them no longer describe the tree.** Read against the code rather than
+against this table: `controller/` holds **36** classes, and the table's 36 is right again — but not for the reason the
+baseline had, because `C-1` deleted `AbstractCRUDController` and the directory has since gained `DashboardController`
+in its place;
+the row above about 7 controllers inheriting tenant-unchecked reads is **0**, because `C-1` deleted the base class and
+`EndpointInheritanceTest` fails the build if any controller extends one. "Controllers with no `@PreAuthorize` on any
+method: 6" is **0** — 234 of the 236 handler methods carry a guard and the two exceptions (`AuthController.login`,
+`HealthController.ping`) are pinned, by name, by `security/DenyByDefaultAuthorizationArchTest`; the "20 of 36 unprotected
+by a path rule" row is doubly stale, since the catch-all is `anyRequest().denyAll()` (`SecurityConfig.java:152`) and an
+unlisted route is now refused rather than admitted. "Backend test classes 0" and "Database migration files 0" were the
+audit's truest rows and are now the largest changes: 16 test classes under `gms_backend/src/test/java/com/gms/`
+(counted with `find … -name '*.java' | wc -l`), and seven migrations `V1`–`V7` in
+`gms_backend/src/main/resources/db/migration/`, with `flyway-core` in `gms_backend/pom.xml:54`. The later sections of
+this file (§13 onward) carry the counts for each card as it closed: §18 is the card evidence for `C-4`, `C-5`, `C-6` and
+`C-8`, and what is still open is the set of "does not close" / "still owed" lines at §17.6 and §18.1–§18.6.
+
 ---
 
 ## 10. State left on this machine by the baseline
@@ -1058,10 +1074,36 @@ refuses to run unless a row exists.
 
 ### 17.6 What `C-7` does not close
 
-`C-4` — 155 `findById` and 6 `getById` call sites still resolve a row by raw id before anybody decides whether the
-caller may name it, and `RepositoryTenantScopeArchTest` cannot see any of them because they are inherited rather than
-declared. `C-5` — 23 mutating handlers reach a service with no `@PreAuthorize`. `C-8` — `V7`'s join tables, and the
-chance to retire this card's trigger by giving `parent_student` an entity. `FIN-04` — `invoices` and `receipts` map and
+*Recorded at this card's close, and two of the four items have since closed — in the corrected wording, because the
+counts below counted call sites and were then read as leaks.*
+
+`C-4` — **closed after this card.** 155 `findById` and 6 `getById` call sites resolved a row by raw id before anybody
+decided whether the caller may name it, and `RepositoryTenantScopeArchTest` could not see any of them because they are
+inherited rather than declared. That was a count of *call sites*: most of them already refused a foreign row, because
+a hand-written ownership comparison sat immediately below (`grep` for `.equals(TenantContext.schoolId())` under
+`service/impl/`: 107 lines at the commit `C-4` starts from, 82 after it deleted the redundant copies; the same `grep`
+on this branch today returns **23 lines, 21 of them distinct comparisons** — 107 and 82 are the historical pair, 23 is
+the current measurement). The measured defect was therefore **duplication of one predicate plus two copies that
+dereferenced an unloaded Hibernate proxy** — `StudentFeeServiceImpl.getStudentFeeById` and
+`FeePaymentServiceImpl.getFeePaymentById` walked `getStudent().getSchoolId()` across `FetchType.LAZY` associations
+(`StudentFee.java:27-30`, `FeePayment.java:27-30`,
+`Student.java:77`) after `open-in-view=false` (`application.properties:36`) had closed the session, and answered HTTP
+500 to the row's rightful owner. `repository/TenantScopedRepository.java:56-61` is the closure: one `findById`
+override, `where e.id = :id and e.school.id = :schoolId`, extended by 33 of the 36 repository interfaces — the three
+that are not are `ParentRepository`, `SchoolRepository` and `DashboardStatisticsRepository`, each exempt with a reason
+(§18.1) — guarded by `repository/TenantScopedReadArchTest`; inherited `findAll`/`findAllById`/`delete` stay open. Full
+write-up: [SECURITY_AUDIT §5.5](SECURITY_AUDIT.md), and the card evidence in §18.1.
+
+`C-5` — **closed after this card.** 23 mutating handlers reached a service with no `@PreAuthorize`; 234 of the 236
+handlers now carry a guard of their own and `security/DenyByDefaultAuthorizationArchTest` fails the build on the next
+one that does not, with `AuthController.login` and `HealthController.ping` as the only two named exemptions. What is
+still true of `C-7`'s own scope: a guard is a gate, not a tenant predicate. Card evidence, including the control that
+runs it red, in §18.2.
+
+`C-8` — the recipient/announcement/message join tables, which every draft of `ARCHITECTURE.md §5` reserved as `V7`;
+that number is now taken — `V7__record_who_wrote_the_pupil.sql` exists and is `C-8`'s authorship migration (§18.5) — so
+the join-table slot has moved to `V8`, and with the delay goes the chance to retire this card's
+`trg_parent_student_tenant_key` trigger by giving `parent_student` an entity. `FIN-04` — `invoices` and `receipts` map and
 write `school_id` but never assign `student`, so their `V5` keys are vacuous for a reason that has nothing to do with
 tenancy. `DB-08` — `uq_timetable_classroom_year` is platform-wide and is evaluated before `fk_timetable_classroom_same_school`,
 which is why §6 needs a distinct academic year to reach the constraint it is testing. `C-9` and Stage 6 — none of this
@@ -1083,4 +1125,243 @@ is deployed, and `master` still has no migrations at all.
   credentials and the local database password, which lives in the gitignored `.env` and appears in no file here). The
   two control backups under `/tmp` were deleted once both files were restored.
 * No credential appears in this document, in `V6__require_the_tenant_key.sql`, in `scripts/verify-c7-tenant-key.sh`, or
+  anywhere else in the repository.
+
+
+## 18. Stage 3 `C-4`, `C-5`, `C-6` and `C-8` — the load, the gate, the vocabulary and the author (2026-11-02, `feat/stage2-flyway-baseline`)
+
+Four cards closed on this branch after §17. [ARCHITECTURE.md §4](../ARCHITECTURE.md) and
+[INFRASTRUCTURE_DECISIONS.md](../infrastructure/INFRASTRUCTURE_DECISIONS.md) ADR-020 both cite this section as where
+their card evidence lives, and the citations were written before the section existed — so until now a reader following
+either link arrived at the end of §17.7 and learned nothing about `C-4`, `C-5`, `C-6` or `C-8`. §17.6 recorded only what
+each card left open; the measurements, the instruments and the controls are here, one subsection per card, in §16/§17's
+shape: the number, the mechanism that produced it, and what remains owed.
+
+### 18.1 `C-4` — ownership at the point of load
+
+`repository/TenantScopedRepository.java` is a `@NoRepositoryBean` interface `TenantScopedRepository<T extends
+TenantOwned>`, and it is the base **33 of the 36 repository interfaces** in `com.gms.repository` extend. It overrides
+`findById` with one query — `where e.id = :id and e.school.id = :schoolId` — so a read that names another school's row
+matches nothing and the endpoint answers **404**. That is the whole card: the ownership predicate moved from a
+hand-written comparison below the load to the load itself, so a service method cannot forget it by forgetting to write
+it.
+
+`getById` and `getReferenceById` are **refused, not scoped**, and `repository/TenantScopedReadArchTest` is the
+instrument that refuses them. Scoping them would be a lie: both hand back a proxy without looking at the tenant, so the
+row's identity is never established against the caller — the tenant check would run against a value nobody had resolved
+yet. A method that cannot be made honest is taken away rather than wrapped.
+
+`EntityLazyAccessorArchTest` polices the other half of the same bug, and it prints the number this card started with:
+
+```
+C-4: 41 derived accessors read a lazy association, 17 of them ask whether it is loaded first
+```
+
+With `open-in-view=false` (`application.properties:36`) there is no session when a response is serialised, so any getter
+other than `getId()` on a lazy to-one association is a `LazyInitializationException` and therefore an HTTP **500** —
+delivered to the row's rightful owner, which is why §17.6 counted it as a defect rather than as noise. The rule the test
+holds is that a derived accessor must ask `Hibernate.isInitialized` first and answer with the id, or the null, or a
+declared absence, rather than trigger the load. 41 is the exposure the test counts; **17 is how many of them ask**. What
+the remaining 24 do about it is not measured by this number, and `C-4` does not claim that they are safe.
+
+**The three interfaces that do not extend the base are named, with a reason** — the same convention §16.1 and §17.1 use,
+where an exemption without a reason is indistinguishable from a gap. `SchoolRepository`, because its table *is* the
+tenant; `ParentRepository` and `DashboardStatisticsRepository`, because the rows they read have no single owner — a
+parent's children can sit in two schools, and a dashboard aggregate is assembled across rows rather than loaded from
+one.
+
+*Live.* `scripts/verify-c4-owned-reads.sh`: **118 passed / 0 failed / 17 skipped**. The 17 skips are stated rather than
+buried: they are by-id routes whose own `@PreAuthorize` does not admit `SUPERADMIN`, the only identity the script holds
+a token for, so the script cannot ask the question at all. **A skip is never counted as a pass** — the 118 are the
+routes that were asked, and the 17 are still unasked.
+
+### 18.2 `C-5` — deny by default
+
+The rule is that a handler which declares no guard is a refusal, and `security/DenyByDefaultAuthorizationArchTest`
+(7 tests) is the instrument that makes "forgot to guard" a build failure rather than a review finding. Its own
+measurement, printed on every build:
+
+```
+C-5: 236 handlers, 234 guarded, 2 deliberately public
+```
+
+236 handler mappings, **234** carrying a guard, and **2** deliberately public — `AuthController.login` and
+`HealthController.ping`, both named rather than counted as a tolerance.
+
+The count is read off **compiled bytecode**, not source, for two measured reasons. The mapping annotation and
+`@PreAuthorize` appear on a handler in either order in the source, so a scan anchored on the declaration line can walk
+past a guard that is genuinely there. And 2 of the 236 textual `@PreAuthorize` occurrences in `controller/*.java` are
+inside javadoc, not on a method — `SubjectController.java:21` and `ClassroomController.java:21` — so a text scan
+over-counts guards by two. A test that reads the same bytes Spring does cannot drift from the application it polices.
+
+The other six tests enforce the shape of the list rather than just its size: a **floor of 200** handlers, so a scanner
+that stopped matching shrinks the set instead of silently turning red into green; `guarded + deliberatelyPublic ==
+handlers`, so nothing can be neither; **no class-level guard**, because one annotation on a class is a guard the next
+method inherits without anybody choosing it; and every authority named by any guard must be **a role the application can
+mint** — the clause that made `C-6` visible (see §18.3).
+
+The URL layer had its own defect, and it was the opposite of a leak: first-match-wins in `SecurityConfig` had the admin
+matchers ordered ahead of the self-service ones, so a `STUDENT` calling `GET /timetables/student/me` was refused by the
+perimeter even though the handler beneath it grants exactly that role. The self-service matchers now precede the admin
+ones. A perimeter that over-refuses is still a broken authorisation surface, because it trains the next author to
+broaden a matcher rather than to read the ordering.
+
+**Control run, and the observed red.** `@PreAuthorize` was deleted from `AnnouncementController.createAnnouncement` and
+the test printed `C-5: 236 handlers, 233 guarded, 2 deliberately public` and **failed naming that handler**. Restored,
+it returns `234 guarded` and green — with both files `touch`ed afterwards, for the reason §17.5 records: an older mtime
+makes Maven skip the recompile, and a green on stale bytecode would have made the restored half of this control
+meaningless.
+
+*Not closed by `C-5`.* A guard is a gate, not a tenant predicate — the sentence §17.6 already carried, and still true.
+And the accountants' writes: `POST`, `PUT` and `DELETE` on the finance controllers are all `hasAuthority('ADMIN')`, so
+the role this branch minted can read the money and not touch it (§18.3).
+
+### 18.3 `C-6` — a role the application can mint
+
+**39 guards named `ACCOUNTANT` while `RoleEnum` declared five constants and none of them was `ACCOUNTANT`.** Read
+carefully, because the direction of the defect is not the obvious one: that is not a hole but a wall. A guard naming a
+role that cannot exist can never be satisfied, so the money module was reachable only by `ADMIN`/`SUPERADMIN`, and the
+39 annotations describing an accountant were describing nobody.
+
+`RoleEnum` now declares **6** constants with `ACCOUNTANT` at `RoleEnum.java:11`, and **no migration was needed** —
+measured, not assumed: `user_roles.role` is a plain `varchar(30)` with no Postgres enum type and no `CHECK` constraint,
+so the vocabulary was never enforced at the database. It is enforced in code and policed by `C-5`'s scan, which is the
+stronger of the two arrangements available here because the scan checks the guards against the enum rather than the rows
+against a type.
+
+`/auth/self-register` was minting the literal string `"EMPLOYEE"` — a role no guard in the application names, which is
+how a self-registration could produce an identity with an authority and no way to use it. It now routes through
+`UserService.authoriseRoles`, so every token the application issues is issued by the one path that validates against
+`RoleEnum`. The `roles` claim is written **sorted and null-filtered** at signing, and that is what licenses the rule
+stated for clients: no caller may read position zero as a precedence, because position zero is now whichever name sorts
+first.
+
+The frontend had to move the same distance, because a role the backend can mint and the UI cannot spell is a half
+card. `ACCOUNTANT` is in the role vocabulary, the labels, the sidebar sections, the precedence order and the landing
+routes, so an accountant signs in and lands on `/admin/fees`. Write controls are **hidden for a role whose writes the
+server refuses** — which is the honest rendering of §18.2's last line rather than a workaround for it. Three other
+frontend defects were found while wiring it and fixed there: `ProtectedRoute`'s deny path now renders a real
+`/unauthorized` screen instead of a blank one; the catch-all route moved *inside* the layout so that it can actually
+win the match; and a token carrying two roles composes both sections rather than taking the first.
+
+*Deliberately not done, and recorded so it is not mistaken for an oversight.* `ACCOUNTANT` sits between `ADMIN` and
+`TEACHER` in the precedence order — a choice, not a gap. The `DASHBOARD` matcher still admits only `ADMIN`/`SUPERADMIN`.
+`apiSlice.js` has no endpoints for the finance reads beyond fees, so the accountant's landing page is narrower than the
+role's read authority.
+
+### 18.4 `C-7` — the tenant as a key
+
+Recorded in full in §17 and not repeated here: the rule and the instrument are §17.1, the code is §17.2, the migration
+and the reason it is `V6` are §17.3, the 66-check live run is §17.4, and the two deliberate-failure controls are §17.5.
+This subsection exists only so §18 reads as the whole of Stage 3's card evidence rather than a part of it. What `C-7`
+left open is in §17.6, and `C-4` and `C-5` have closed two of those items since — their evidence is §18.1 and §18.2.
+
+### 18.5 `C-8` — the row records who wrote it
+
+`model/entity/AuthorshipEntity.java` is a `@MappedSuperclass` that declares `createdBy` and `updatedBy` once.
+`BaseAuditEntity` now **extends** it rather than re-declaring them, which is how the count reaches 33: **28 entities
+audit through `BaseAuditEntity`, and 5 — `School`, `Student`, `Classroom`, `Subject`, `StudentAdmission` — extend
+`AuthorshipEntity` directly**, because they name their timestamp columns `created_at`/`updated_at` and inheriting the
+base would have given each of them two timestamp pairs on the same table. 28 + 5 = **33 of the 36 entity classes
+listener-stamped**. The three that are not: `Employee` and `User` keep a hand-assigned `created_by`, because for those
+two tables it is a business fact rather than an audit trail, and `AcademicYear` has none.
+
+`V7__record_who_wrote_the_pupil.sql` adds the two columns and **8** `REFERENCES public.users(id)` foreign keys to
+`students`, `classrooms`, `subjects` and `student_admissions` — two keys per table, one per actor column. They are
+`NO ACTION`, matching `V1`'s existing **62** audit keys across **31** tables, and deliberately **not**
+`ON DELETE SET NULL`: set-null is the option that looks safe and is not, because it lets a deletion quietly erase the
+trail rather than telling the deleter that a trail depends on the row. **35 of the 38 tables now carry an actor column**;
+the exceptions are `academic_years`, `parent_student` and `user_roles`. **Nothing is backfilled** — an author attributed
+by inference would be a fabricated fact in a table whose entire purpose is to hold one.
+
+**The bug this card found, which is the reason it is recorded rather than summarized.** `AuditingEntityListener` fires
+*during* the flush, so the auditor may not issue SQL — and the first version of it did. It called
+`userRepository.findByUsername(...)`, whose implicit auto-flush re-entered the flush already in progress, and every
+`PUT`/`PATCH` on a school, a pupil, a classroom and an admission answered **500** with
+
+```
+org.hibernate.AssertionFailure: collection was processed twice by flush()
+```
+
+under a `StackOverflowError` — while `mvn -o clean package` stayed **green**. The suite ran, the jar built, and none of
+it could see a failure that only existed inside a live flush.
+
+The affected entities own **no collection of their own**, which is what made the failure look impossible when read from
+the stack trace. The re-entered flush is the *session's*, not the entity's: any session that has already touched one of
+the three collection owners — `Parent.students`, `Exam.subjects`, `Timetable.slots`, the last of them
+`FetchType.EAGER` — is exposed.
+
+The fix is at the mechanism, not the call site: the JWT now carries a **`uid`** claim (`users.id`), and the auditor
+answers with `getReferenceById(uid)`, which returns a managed proxy and **makes no statement at all**. No query, so no
+auto-flush, so no re-entry.
+
+`uid` also settles **BKL-08**, which was open as a modelling question and closed as an authorship one: the existing
+`empId` claim is an *employee* id for staff but the *user* id for the platform owner, so attributing a write through it
+could name a different tenant's employee as the author of this tenant's row. Writing the user id directly removes the
+ambiguity instead of routing around it.
+
+*Live.* `scripts/verify-mvp-e2e.sh`, the `C-8` feature block **F11**: **20 checks PROVED**.
+
+*Still owed for `C-8`.* **The deliberate-failure control has not been run.** §17.5 and §18.2 each record a card
+proving its own test can go red; `C-8` has the equivalent test not yet performed — drop `@CreatedBy`, watch F11 go red,
+restore it, and `touch` the file. Until that is done, F11's 20 checks demonstrate the behaviour but do not demonstrate
+that anything would notice if the behaviour stopped. And two things this card does not claim to have fixed: **hard
+deletes destroy the trail** — a row and its authorship disappear together, and no constraint exists to keep them apart —
+and **no API surfaces the trail to a school**, so the columns are evidence available to the database and not yet to the
+user.
+
+### 18.6 The whole-build measurement
+
+Taken on the branch after all four cards, against a fresh disposable database:
+
+| Measurement | Result |
+|---|---|
+| `mvn -B verify` (JDK 21) | **106** unit + architecture tests, **0 failures** |
+| Fresh database | applies `V1`→`V7` and boots under `ddl-auto=validate` |
+| `scripts/verify-mvp-e2e.sh` | **294 passed / 0 failed / 0 skipped**, `FEATURES PROVED: 11 of 11`, on two tenants |
+| Per-card regressions | `c1` 29/0 · `c2` 32/0/0 · `c3` 24/0/1 · `c4` 118/0/17 · `c7` 65/0/1 |
+
+`11 of 11` is the line worth reading twice: it is the first time on this branch that every frozen-MVP feature has been
+*demonstrated* by a running application rather than asserted by a test that could not reach one.
+
+Two of the per-card numbers disagree with the card's own section, and the disagreement has a cause that was measured
+rather than guessed: §16.4 measured `verify-c3-scoped-reads.sh` at 25/0/0 and it now reports 24/0/1; §17.4 measured
+`verify-c7-tenant-key.sh` at 66/0/0 and it now reports 65/0/1. The skip in each case is the same check, and each
+transcript names it — `SKIP generated-SQL check (GMS_SQL_LOG is not set (start the backend with JPA_SHOW_SQL=true))`
+(`c3`) and `SKIP generated INSERT check (GMS_SQL_LOG is not set …)` (`c7`). This run's harness booted the jar without
+`JPA_SHOW_SQL=true` and did not export `GMS_SQL_LOG`, so the two scripts could not read the SQL log they assert
+against. **Nothing regressed and no check lost its power: the gap is in how this section's run was configured, not in
+the build**, and re-running either card with the log exported is the way to close it. What this section claims for both
+is `0 failed`; the two skips are the harness's own omission, recorded rather than presented as passes.
+
+### 18.7 State left on this machine
+
+* Container `gms-postgres` is running on `127.0.0.1:5433`. Alongside the pre-existing `gms` database — untouched by
+  every card in Stage 3 — it now holds **34** disposable databases created by these runs: `gms_mvp_1`, `gms_post_c1`
+  … `gms_post_c7`, `gms_recheck_1`, `gms_final_*`, `gms_c*_r*`, the two `gms_schema_probe*` pair, `gms_perf_seed`,
+  `gms_v3_negative` and the rest. `docker compose down -v` removes the container and all of them with it. The retired
+  `gms-v1-neon` host was not contacted, read, or named in any command.
+* The backend on `:8080` is **stopped** (`lsof -ti tcp:8080` is empty). To reproduce §18.6: source `.env` and the
+  disposable platform credentials, boot the jar with `--spring.profiles.active=dev` against a freshly created database
+  (the `DB_URL` override points it at `127.0.0.1:5433`), then run `scripts/verify-mvp-e2e.sh` with
+  `GMS_VERIFY_DB` naming that database and `GMS_REQUIRE_DB=1` so the script refuses to pretend rather than skip. The
+  per-card scripts take the same `GMS_VERIFY_DB`; add `JPA_SHOW_SQL=true` and `GMS_SQL_LOG=<the boot log>` if the
+  generated-SQL checks in `c3` and `c7` are wanted rather than skipped, which is the one thing §18.6's run left out.
+* `V7__record_who_wrote_the_pupil.sql` was edited after the runs above — four comment lines, the table and entity counts
+  in its own header. No DDL changed, and §18.6's numbers were re-measured against the rebuilt jar on a fresh database
+  (7 `Migrating schema` lines, V1→V7 applied, 294/0/0 again). **The edit does change Flyway's checksum for `V7`**, so
+  any database that already applied the old text will refuse a subsequent `migrate` with a checksum mismatch until it
+  is repaired or recreated. The resolution is the one this project already mandates — a database Flyway can recreate —
+  and every figure in this section was produced that way.
+* Outside the repository: `/tmp/gms-mvp-harness4.txt` (the run summary), `/tmp/gms-mvp-e2e.txt` (the 294-check
+  transcript and the feature register), `/tmp/gms-post-c*.txt` (the five per-card transcripts, including the two
+  `SKIP … GMS_SQL_LOG is not set` lines §18.6 quotes), `/tmp/gms-mvp-boot-*.log`, `/tmp/gms-recheck-e2e.txt` (the
+  re-run after the `V7` comment edit), `/tmp/gms-mvp-run.sh` and `/tmp/gms-recheck.sh` (scratch harnesses, not project
+  scripts), and `/tmp/gms-c7-secret.env` (mode 600 — disposable platform credentials and the local database password,
+  which lives in the gitignored `.env` and appears in no file in this repository).
+* A second worktree at `/private/tmp/gms-pre-c4` is still checked out at `7c7789d` with local modifications. It is the
+  pre-`C-4` tree the 107-line tenant-comparison count was taken against, and it has been left in place rather than
+  pruned because its diff is the only remaining artifact of that measurement; `git worktree list` shows it and it
+  appears in no build.
+* No credential appears in this document, in `V7__record_who_wrote_the_pupil.sql`, in any `scripts/verify-*.sh`, or
   anywhere else in the repository.

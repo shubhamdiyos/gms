@@ -162,7 +162,7 @@ Three things §5.1 got wrong, found by executing it rather than by re-reading it
 1. **Rule I-2 as stated is unsatisfiable, and the reason is a fact about this schema.** Against
    V1+V2+V3 the query for a foreign key with no index leading on its first column returns **69 rows,
    and 62 of them are `created_by` or `updated_by`** — the audit-bookkeeping references
-   `BaseAuditEntity` puts on thirty-four tables. Nothing reads "rows created by user 41", so those
+   `BaseAuditEntity` puts on thirty-one tables. Nothing reads "rows created by user 41", so those
    62 would be 62 write-time taxes for a query that does not exist. The rule is amended to *every
    navigated foreign key*; the exemption is expressed by column name inside the assertion, so an
    unfamiliar FK still has to earn an index; and the 7 that remain (`students.classroom_id`,
@@ -281,9 +281,9 @@ reachable by inheritance.
 | C-1 | Delete `AbstractCRUDController` / `AbstractCRUDService` and make every extendee declare its own endpoints (`ADR-023`). Measured live surface on 2026-11-01: 6 controllers extend it; `GET /{id}` is inherited-and-unguarded on 3 (`Parent`, `Student`, `Employee` — `Subject:64`, `Classroom:64`, `School:81` override it); `DELETE /{id}` is inherited-and-unguarded on **all 6**, because `EmployeeController:68` maps `/toggle`, which does not shadow `/{id}`; the comment at `EmployeeController.java:65-67` records that a hand-written `getById` was *deleted* precisely because the base class supplied one. That comment is the case for deleting the base class rather than guarding it. **Done 2026-11-01 on the branch**: both classes deleted, 25 service impls and all 36 controllers detached, the two frontend-called deletes re-declared tenant-scoped, three tenancy holes closed (`ParentServiceImpl.findBySchool` returned every platform's parents; `UserService.getById`/`deleteById` had no tenant predicate; `SchoolService.getById` did not exist). Measured: 33-test suite green, live script 29/29, control red on exactly 2 assertions, full suite 79/79 | `SEC-05` |
 | C-2 | One tenant resolution path: the `schoolId` claim parsed once per request into a request-scoped context; services and repositories take it from there instead of a parameter that a caller may forget. **Done 2026-11-01 on the branch**: `SecurityUtil` deleted — it re-parsed and re-verified the JWT signature on every one of 325 call sites across 41 files — and replaced by `security/TenantContext`, a request-scoped holder the filter fills from the claims it has already verified and clears in a `finally` so a pooled thread cannot carry one caller's tenant forward. 35 service interfaces and 31 implementations rewritten: 221 methods took a `schoolId`/`empId`/`creatorEmpId`/`updaterEmpId`/`employeeId` argument and no longer do; 201 now-dead controller locals removed. Two regressions found by review and repaired: the transformation rewrote the string literal `"schoolId"` inside three `BeanUtils.copyProperties` ignore-lists, and it silently turned `AuthController.selfRegister`'s `findByEmployee_Id(employee.getId())` into the caller's own employee — the self-registration uniqueness check would have read an empty tenant. A cross-tenant refusal was answered 400 on the write path and 403 on the read path; `TenantAccessDeniedException` makes both 403. Measured: 86-test suite green, `verify-c1-tenancy.sh` 29/29, new `verify-c2-tenant-context.sh` 32/32, control red on exactly the "verified once" assertion | `TEN-01…07`, debt #5 |
 | C-3 | School-scoped repository methods for the reads that span schools. **Done 2026-11-01 on the branch**: measured with `RepositoryTenantScopeArchTest` run against the build that ended `C-2` — 170 declared repository reads, 55 carrying no tenant, 37 of them neither scoped nor explainable. 17 repository interfaces and 13 services (22 call sites) rewritten so the tenant arrives in the query; the same scan now reports 168 reads, 150 carrying the tenant, 18 that do not and every one allow-listed with the reason the schema supports it. Two dead cross-tenant log queries deleted, one true duplicate deleted, the platform-wide `timetableRepository.findAll()` and `studentRepository.findAllById(ids)` replaced with tenant-keyed forms. Measured: 87-test suite green, `verify-c1-tenancy.sh` 29/29, `verify-c2-tenant-context.sh` 32/32, new `verify-c3-scoped-reads.sh` 25/25 — and that same script run against the pre-C-3 build fails 6 checks, one of them a live read of school A's timetable by school B | the query half of `TEN-01…07`; `TEN-06` **partly** — explicit predicates, not a session filter, and inherited reads plus level 3 stay open (`C-4`, `C-7`). `DB-03` was already closed by `B-3` |
-| C-4 | Put the ownership check where the JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list | `SEC-06` |
-| C-5 | `@PreAuthorize` on every mutating endpoint; deny-by-default verified by a mapping scan that fails the build on an unannotated handler | `SEC-04`, `OPS-*` |
-| C-6 | Resolve the role vocabulary: 39 guards name `ACCOUNTANT`, which is in no enum, issued by no code and unknown to the frontend (`SEC-17`). Either the role exists and `RoleEnum` plus provisioning grow, or those guards collapse to `ADMIN` and the string disappears | `SEC-16`, `SEC-17` |
+| C-4 | Put the ownership check where the JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list. **Done 2026-11-02 on the branch**: `TenantScopedRepository` gives `findById` a tenant predicate so the inherited method stops being a hole (33 repositories scope it, 3 exempt with a reason, counted by `TenantScopedReadArchTest` on every build); the duplicate hand-written comparisons a scoped load makes dead are deleted where they duplicated the load and kept where they guard an attachment; the entity-side lazy-proxy 500s this card exposed are guarded and now policed by `EntityLazyAccessorArchTest`. Measured live: `verify-c4-owned-reads.sh` **118 PASS / 0 FAIL / 17 SKIP**, 22 probes over the 22 controllers that declare a by-id read; the deliberate-failure control on `ClassroomRepository` turns the build-time guard red twice and the live suite red on exactly `classroom` and nothing else; `C-1` 29/29, `C-2` 32/32, `C-3` 24/0 and `C-7` 65/0 re-measured on the same jar after their 403 expectations were widened to "403 or 404" with the reason recorded | `SEC-06` |
+| C-5 | `@PreAuthorize` on every mutating endpoint; deny-by-default verified by a mapping scan that fails the build on an unannotated handler. **Done 2026-11-02 on the branch**: `DenyByDefaultAuthorizationArchTest` reads the guard state off the compiled handler rather than the source text, and reports **236 handlers, 234 guarded, 2 deliberately public** (`AuthController.login`, `HealthController.ping`) with the URL rule each is permitted by; no class-level guard, no `hasRole(`, and every authority named by a guard is a role the application can actually mint | `SEC-04`, `OPS-*` |
+| C-6 | Resolve the role vocabulary: 39 guards name `ACCOUNTANT`, which is in no enum, issued by no code and unknown to the frontend (`SEC-17`). **Done on the backend 2026-11-02, open on the frontend**: `ACCOUNTANT` is now a `RoleEnum` value and therefore issuable, so the guards that already named it are satisfiable instead of permanently closed; `user_roles.role` is a plain `varchar(30)` with no enum type and no `CHECK`, so no migration is needed. `/auth/self-register` no longer mints the unreachable `"EMPLOYEE"` — it routes its role through the one validator `/users/create` uses, which rejects a non-`RoleEnum` code before the username is taken. The `roles` claim is now sorted where it is written, so a client reads it as data instead of guessing a precedence. What is left is the surface: an accountant has no route, no link and no dashboard | `SEC-16`, `SEC-17` |
 | C-7 | Finish what Stage 2 deliberately left open: map `school_id` so the write path fills it, then land the deferred `SET NOT NULL` flips. A tenant column the application may leave NULL is a column, not a control. **Done 2026-11-01 on the branch** — and the card's own plan was wrong twice, which is the first finding. It named **ten** entities; the unmapped column is on **nine**, because `parent_student` is a `@ManyToMany` join table with no entity to map, so it is closed in the database instead: `trg_parent_student_tenant_key` derives the tenant from the student on `BEFORE INSERT OR UPDATE`, raises when the student is missing, and raises when a hand-written row disagrees with its student — a trigger, not a silent coercion, because re-deriving a *conflicting* value would make the column a cache rather than a key. It said the flips would land "as a V7"; they land as **V6**, the next number no committed file owns — `git ls-tree HEAD` against `db/migration/` returns `V1`–`V5` and nothing else — which returns the V7 slot §5.1 had reserved for this card's successor to `C-8`. The nine (`Attendance`, `ExamSubject`, `FeePayment`, `Result`, `StudentExam`, `StudentFee`, `TeacherAssignment`, `Timetable`, `TimetableSlot`) carry the canonical `@JsonIgnore` + `@ManyToOne(fetch = LAZY, optional = false)` + `@JoinColumn(name = "school_id", nullable = false)` block and 11 create paths in 8 services assign it — from `TenantContext.schoolId()`, never copied off the parent row, because a copied tenant makes the same-school FKs it is supposed to satisfy vacuous. The ten flips ship in one migration behind ten idempotent backfills and a ten-clause assertion that names the table it refused to flip, plus four candidate keys (`(id, school_id)`) and **seven** new same-school FKs, and re-runs the V4/V5 index guards because a guard that is checked only once is a guard against the migration that forgot it. Measured: **89-test suite green**; new `EntityTenantColumnArchTest` prints `C-7: 35 tables carry an integer school_id, 36 entity classes cover 34 of them, 1 have no entity and a reason`; `C-3`'s scan moved from 168/150 to **169/151** because the fix needed a new scoped read (`TimetableSlotRepository.findByIdAndSchool_Id`); a fresh database applies V1→V6 and boots with `ddl-auto=validate`; new `verify-c7-tenant-key.sh` **66 passed / 0 failed / 0 skipped**, including per-table "`written by school A, and by nobody else`" for all ten, ten rolled-back `SET school_id = NULL` probes that each first assert a row exists, and a cross-tenant timetable write refused with 403; `C-1`/`C-2`/`C-3`'s scripts re-run on this build 29/29, 32/32, 25/25. **Two controls, each red then restored:** dropping `Result`'s mapping turns the arch test red naming `Result`; pointing `Attendance`'s join column at `org_id` turns the live script red with `attendances: none -- the endpoint never wrote one`. **Three pre-existing bugs the verification surfaced and this card fixes** (each proven from the server log, none a C-7 regression): `POST /student-exams` and `POST /fee-payments` 500'd with `LazyInitializationException` because `mapToResponse` walked a lazy proxy outside a session — now `@Transactional`; `POST /attendance` could never have written a row, since the service read `timetableSlotId` and dropped it against a NOT NULL column, and resolving that slot tenant-scoped is also what makes `fk_attendance_slot_same_school` expressible; and a straddling `POST /timetables` answered **409** from the platform-wide `uq_timetable_classroom_year` before the tenant rule was reached, so `GlobalExceptionHandler` now distinguishes a `*_same_school` violation and returns 403 | `ADR-020` level 3 completed, Stage 2 finding 2, the level-3 half of `TEN-06` |
 | C-8 | §5.1's V6 as a migration and as code: `notification_recipients`, `announcement_targets`, `message_recipients`, per-recipient read state on `Notification`, and the repositories rewritten off `recipient_ids`. **Its migration is V7** — §5.1 and §9 of `ARCHITECTURE.md` reserved `V6` for exactly this work, `C-7` has taken that number, and the reservation moves with it; do not number it V8 to look sequential. It may also retire `C-7`'s `trg_parent_student_tenant_key`: the trigger exists because a `@ManyToMany` join table has no entity to map, and if this card gives `parent_student` an entity of its own, the assignment belongs in Java and the trigger should be deleted in the same migration, not left as a second writer of the same column | `DB-04`, `TEN-03`, moved from B-4 |
 
@@ -535,11 +535,263 @@ rather than applied — if the product ever wants a makeup register recorded aga
 that guard is the line to argue about, and nothing here records the decision.
 
 
+**C-4, executed 2026-11-02 — the row a caller reads by id is the row that caller owns.**
+
+**The rule.** ADR-020 level 2, finished where a declaration scan cannot reach. `C-3` scoped every *declared*
+repository query; `findById` is not declared by any repository, it is inherited by all of them, so 155 service call
+sites went on loading another school's row by id and then either trusting it or comparing its school by hand. `C-4`
+moves the ownership test into the inherited method itself: a repository whose entity implements `TenantOwned` extends
+`TenantScopedRepository`, which pairs `findByIdOwnedBy(id, schoolId)` with `findByIdAnyTenant(id)` and overrides
+`findById` to choose between them on `TenantContext.readsAcrossTenants()`. The tenant is the one the authentication
+filter already verified, so a caller cannot pass a different one, cannot pass none, and cannot forget to pass it.
+
+**What changed.** `TenantScopedRepository` and the `TenantOwned` marker; 33 repositories now extend the base and 3
+deliberately do not, counted by `TenantScopedReadArchTest` on every build — `SchoolRepository` and
+`DashboardStatisticsRepository` serve the tenant root table itself, and `ParentRepository` serves a row with no single
+owning school, whose tenancy lives in `parent_student` and is keyed by `C-7`'s trigger. `prints C-4: 33 repositories
+serve a tenant-owned entity and every one of them scopes findById by the claim; 3 serve the tenant table itself or a
+row with no single owner`. A wrong-tenant id resolves to nothing, so the answer to school B naming school A's row
+stopped being a filtered empty list and became 404.
+
+**The 104 hand-written comparisons, sorted into three buckets instead of one.** With the load scoped, the services
+still carried their own school tests; a build (and a security finding) that calls all of them duplication would have
+deleted the ones that matter. They were classified:
+
+- **dead duplicate** — the comparison re-tests the row the preceding scoped `findById` already filtered. 83 of them,
+  across 27 service implementations, deleted. The reason is not tidiness: the bootstrapped platform owner carries its
+  own SYSTEM `school_id`, so `!row.getSchoolId().equals(TenantContext.schoolId())` refuses the one caller the
+  mechanism lets through, which is exactly how `subject` and `student` came to answer 403 to `SUPERADMIN` during this
+  card's own verification.
+- **attachment guard** — the comparison tests a row being *attached* to the one being written (a pupil's classroom, a
+  fee's student, an exam's subject). **Kept.** The platform owner reads across tenants, so a guard on the attached row
+  is the only thing between a straddling row and the composite FK that would reject it. 21 comparisons remain and
+  every one is this bucket or the next.
+- **uncovered load** — the row came from a call the base does not scope, so the comparison is the only control:
+  `SchoolRepository` (not scoped), `ParentRepository` (not scoped), `UserRepository.findByEmployee_Id` (tenant-free by
+  design, since a username is the key), and `StudentFeeServiceImpl.findById`, which tests the *nested* student the
+  scoped load of the fee does not cover. Kept, and each is a candidate for a scoped read rather than a hand test.
+
+**Verified.** 101 tests green at the point the card closed; the same suite is 104 on the jar this section's live
+numbers were taken from (the audit-listener work and the principal-attribution test landed alongside). Live:
+`verify-c4-owned-reads.sh` **118 PASS / 0 FAIL / 17 SKIP** — 22 probes over the 22 controllers that declare a by-id
+read, each probe asking school B for school A's id and then asking the platform owner for the same id. The 17 SKIPs
+are the by-id routes whose `@PreAuthorize` does not admit `SUPERADMIN`; they record a refusal *by the role layer* and
+explicitly do not claim the tenant filter spoke. `C-1` 29/0, `C-2` 32/0/0, `C-3` 24/0/1 and `C-7` 65/0/1 re-measured
+on the same jar, after three of those scripts had their expectations changed — see the next paragraph — and `C-3`'s
+counter now reads 181 declared reads / 158 carrying the tenant / 23 allow-listed.
+
+**A status code moved, and the suites had to say why.** Before `C-4`, school B naming school A's id was loaded and
+then refused by a hand comparison: 403. Afterwards the load itself answers nothing: 404. Three verification scripts
+asserted 403 literally, so each gained a `refused()` helper that accepts 403 *or* 404 and still rejects a 200 that
+carries somebody else's row, with the reason written into the helper's comment. `C-7`'s straddle check additionally now
+proves the database key exists (`SELECT count(*) FROM pg_constraint WHERE conname = 'fk_timetable_classroom_same_school'`)
+because the refusal it used to observe had migrated from the load to the constraint. This is a widened *assertion about
+the same security property*, verified by re-running the pre-`C-4` jar against the widened script and watching it fail
+where it should; it is not a failing check downgraded, which §6 forbids.
+
+**The control this repository requires of itself.** `ClassroomRepository` was broken twice. At build time the guard
+went red on both halves of the mechanism — `repository.ClassroomRepository calls findByIdAnyTenant, which reads any
+school's row` and `ClassroomRepository re-declares findById, which overrides the tenant filter with a method body this
+scan cannot read` — and live, against a server running the broken jar, the suite reported **117 PASS / 1 FAIL**, the
+one failure naming exactly `classroom: another school reading the same id was answered 200, not 403/404` and nothing
+else. Restored, re-verified green.
+
+**The lazy proxies this card exposed.** Scoping the load made several by-id reads answer 200 for the first time, and
+some of them then threw: `open-in-view=false` means any getter other than `getId()` on a lazy to-one outside a session
+is a 500. `EntityLazyAccessorArchTest` now polices the entity side — `C-4: 41 derived accessors read a lazy
+association, 17 of them ask whether it is loaded first (75 lazy to-one fields and 53 @JsonProperty accessors across 38
+entity sources)` — and the live suite shows no 500 on any by-id read it walks. The service side is not all closed:
+nested dereferences remain in `ResultServiceImpl` and `ParentServiceImpl`, recorded under debt.
+
+**What `C-4` does not close.** (1) It scopes reads by id. It does not authorise them — `C-5` owns the guard on the
+endpoint, and a scoped load behind an unguarded route is still a route anybody authenticated can reach. (2) It does
+not make the *write* path tenant-safe on its own: an insert or update that takes a tenant from a request field rather
+than the claim is outside this mechanism, which is why the 96 lines this card sorted matter. (3) `getById` and
+`getReferenceById` are refused by the arch test rather than scoped by the base — a service that reaches for them on a
+tenant-owned entity fails the build, and that is the right answer, because both hand back a proxy without looking at
+the tenant. (4) The platform-owner branch is deliberately broad: `SUPERADMIN` reads any school's row by design, so the
+guard on `SchoolController`'s writes, not this file, is what keeps that role from being a hole in the other direction.
+
+
+
+**C-5, executed 2026-11-02 — a handler that declares no guard does not answer anybody.**
+
+**The rule.** Deny by default means the *absence* of a decision is a refusal. Before this card, 23 of the handlers in
+`com.gms.controller` carried no `@PreAuthorize`, and the URL layer admitted any role its perimeter matched — so an
+unannotated handler was reachable by every authenticated caller of that prefix. That is the inherited-delete hole
+`C-1` closed by hand for six controllers; this closes it for the rest and keeps it closed on the next handler that
+ships without a guard.
+
+**Why the guard state is read off the compiled handler, not the source text.** Three reasons, each measured: the two
+annotations appear in either order in this package, so a line-window heuristic reports whichever happened to be nearer;
+the literal string `@PreAuthorize` occurs inside javadoc (`SubjectController.java:21`, `ClassroomController.java:21`), so
+a text scan counted 212 guards where 210 existed; and both `@PreAuthorize` and the mapping annotations are
+`RUNTIME`-retained, so the bytecode state is the same state Spring's handler mapping reads when it registers the
+endpoint. A test that reads the source can pass while the registered handler disagrees.
+
+**What the scan reports.** `DenyByDefaultAuthorizationArchTest` prints
+`C-5: 236 handlers, 234 guarded, 2 deliberately public` and
+`C-5: guards name 6 distinct authorities: [ACCOUNTANT, ADMIN, PARENT, STUDENT, SUPERADMIN, TEACHER]`. The two public
+handlers are named, not pattern-matched: `AuthController.login` and `HealthController.ping`. Four checks make the
+counting non-vacuous rather than merely optimistic: a floor of 200 handlers so a broken pattern cannot report zero
+findings as green; the partition `guarded + deliberatelyPublic == handlers`, so a handler cannot fall between the two
+lists; no guard may be declared on the *class*, because a class-level `@PreAuthorize` is the widest possible
+over-grant; and every authority any guard names must be a role the application can actually mint — which is the seam
+`C-6` closed.
+
+**The control was run, and it went red for the right reason.** Deleting `@PreAuthorize` from
+`AnnouncementController.createAnnouncement` and re-running the test fails with
+`C-5: 236 handlers, 233 guarded, 2 deliberately public` and names that one handler; restoring it returns the print to
+`234 guarded` and the suite to green. A guard-counting test that has never been observed to fail is only evidence that
+annotations exist somewhere in the package, so this is the check that makes the count mean what it says — and the same
+deliberate-failure method is now applied to every card in this stage.
+
+**The other half of deny-by-default is the URL layer, and it disagreed with the method layer.** First-match-wins in
+`SecurityConfig` meant `/timetables/**` admitted `ADMIN`, `SUPERADMIN` and `TEACHER` before the self-service matcher
+could be reached, so a `STUDENT` calling `GET /timetables/student/me` was refused by the perimeter even though its
+handler grants exactly that role. The self-service matchers now precede the admin matchers. The same ordering was
+shadowing `PARENT` and `TEACHER` reads, which is the mechanism `SEC-06` had been describing as "grants shadowed" — that
+framing is now historical.
+
+**Live.** `verify-mvp-e2e.sh` walks the role layer against a running server and asserts the refusal is a 403 with the
+documented body rather than a 500 or a silently-empty success: a `TEACHER` posting a pupil is refused and the pupil list is
+byte-for-byte unchanged afterwards; a `TEACHER` deleting a subject is refused *by the method guard*, which the script
+proves by noting the URL layer admits `TEACHER` to `/subjects/**`; and a tampered token is a refusal, not a weaker
+principal.
+
+**What `C-5` does not close.** A guard is a gate, not a tenant predicate: `hasAuthority('TEACHER')` says a teacher may
+reach the route, not which school's row it may read — that is `C-2`/`C-3`/`C-4`'s subject. The rule is about a guard
+being *present*, not about it being *right*: a route wide open to a role the URL layer also admits passes every check
+here, which is why the authority-vs-`RoleEnum` check and the `SEC-06` self-service ordering are argued separately above.
+And the scan's universe is the compiled package: a controller the component scan does not reach satisfies this test and
+serves nothing, and only a live route inventory can tell those apart.
+
+
+**C-6, executed 2026-11-02 on the backend, closed on the frontend the same day — a role the application can mint is a
+role a caller can use.**
+
+**The finding, stated accurately.** 39 `@PreAuthorize` guards named `ACCOUNTANT` — the whole money module — while
+`RoleEnum` declared five constants and none of them was `ACCOUNTANT`, no code path issued it, and the frontend did not
+know the word. The practical effect was not a hole but a wall: the accountant persona in the PRD could not exist, so
+`/fees`, `/invoices`, `/receipts`, `/fee-payments`, `/financial-reports` were reachable by `ADMIN` and `SUPERADMIN`
+only. `SEC-17` described the mismatch; `SEC-16` described the unreachable role.
+
+**What changed on the backend.** `ACCOUNTANT` is a `RoleEnum` constant, which makes it issuable and makes those 39
+guards satisfiable instead of permanently closed; no migration was needed because `user_roles.role` is a plain
+`varchar(30)` with no Postgres enum and no `CHECK`, so the vocabulary is enforced in code and policed by the `C-5` scan
+rather than by the schema. `/auth/self-register` stopped minting the string `"EMPLOYEE"` — a role no guard names and no
+enum declares — and now routes its role through `UserService.authoriseRoles`, the same validator `/users/create` uses,
+which rejects a code outside `RoleEnum` *before* it consumes a username. Two handlers that had no guard at all got one
+(`changePassword` for any authenticated caller, `selfRegister` for `ADMIN`/`SUPERADMIN`), which is why `C-5` counts 2
+public handlers rather than 4. The `roles` claim is written sorted and null-filtered at the point of signing, so a
+client reads it as a set rather than guessing that position zero means anything.
+
+**What changed on the frontend.** `ACCOUNTANT` is in the role vocabulary, the label map, the sidebar sections, the
+role-precedence order and the landing-route table, so the role that is minted is a role that can log in and see
+something. Concretely: an accountant lands on `/admin/fees`, whose only load call is `GET /api/v1/fees` — a route the
+backend admits `ACCOUNTANT` to — and the Add/Edit/Delete controls on that page are hidden for a role whose writes the
+server refuses, because the API client toasts on every 403 and a button that cannot work is a defect the user sees.
+Two route-layer defects came with it: `ProtectedRoute`'s deny path now renders a real `/unauthorized` screen carrying the
+denied path instead of an empty layout shell, and the catch-all that used to sit outside the layout — which could never
+win against the layout branch — moved inside it, so an unmatched URL redirects to the caller's own landing page. Where a
+token carries two roles, the sidebar now composes the sections of every role below the landing role, so an
+accountant-teacher is not locked out of the classes they teach.
+
+**Deliberately not done.** `ACCOUNTANT` sits *between* `ADMIN` and `TEACHER` in precedence: it is school-wide (the fee
+catalogue spans the school, not a class), so below `TEACHER` would land a money role on a dashboard with no finance
+link, and above `ADMIN` would let a read-only role own the write screens. `SecurityConfig`'s `DASHBOARD` matcher still
+admits only `ADMIN` and `SUPERADMIN`, so an accountant has no `/dashboard/**` screen; `GET /financial-dashboard` is the
+natural route for one and no page exists to consume it. `apiSlice.js` has no endpoints for the seven finance reads that
+`ACCOUNTANT` is allowed, so the invoice and receipt pages in the PRD persona stay unlinked. Two latent
+order-dependencies survived in files this card did not own — `authService.getUserRole()` and `authSlice.selectUserRole`
+both return `roles?.[0]`, which with a sorted claim is the alphabetically-first role rather than the most privileged;
+neither is on a live path, and both should delegate to `getPrimaryRole`.
+
+**What `C-6` does not close.** The accountants' *writes* do not exist as a decision: every `POST`/`PUT`/`DELETE` on the
+finance controllers is `hasAuthority('ADMIN')`, which is a policy choice inherited from the pre-`ACCOUNTANT` code and
+not a consequence of this card. If the PRD's "records a fee payment" is meant literally, an accountant must be able to
+write `fee-payments`, and that is a product decision with a tenant consequence, not a guard to add quietly.
+
+
+**C-8, executed 2026-11-02 — the row records who wrote it, and the answer comes from the token, not from a lookup.**
+
+**The rule.** MVP feature 11 is "basic audit logging", and the cheapest true version of it is that every write stamps
+its author. `created_by` is a foreign key to `users(id)`, so the whole feature rests on one question: *which row is the
+caller?* Ten years of wrong answers to that question are worse than no answer, because an audit trail that names the
+wrong person is evidence against an innocent staff member.
+
+**What changed in the schema.** `V7__record_who_wrote_the_pupil.sql` adds `created_by`/`updated_by` to the four tables
+that carried timestamps but no actor — `students`, `classrooms`, `subjects`, `student_admissions` — and the eight
+`REFERENCES public.users(id)` keys that go with them. The keys are plain, matching the NO ACTION the V1 baseline already
+uses for the other 31 actor columns; `ON DELETE SET NULL` would have silently erased the trail of a departed employee,
+which is the opposite of what an audit column is for. Nothing is backfilled: no row in those four tables can be
+attributed from data that exists today, and an invented author is worse than an absent one.
+
+**What changed in the mapping.** `AuthorshipEntity` is a `@MappedSuperclass` that declares `createdBy`/`updatedBy`
+once, and `BaseAuditEntity` now extends it rather than duplicating them, so the 28 entities that already audited through
+`BaseAuditEntity` and the 5 that could not — `School`, `Student`, `Classroom`, `Subject`, `StudentAdmission`, each of
+which names its timestamps `created_at`/`updated_at` and would have acquired a second timestamp pair by extending
+`BaseAuditEntity` — share one definition. That is 33 of the 36 entity classes stamped by the listener. The count is
+stated because it is the honest one: `Employee` and `User` already carry a `created_by`, but theirs is a business fact
+(who hired this person, who opened this account) assigned by the service, not an audit trail, so they do not extend the
+superclass; `AcademicYear` is the only entity with no author at all. At table level the same card takes V1's 31 tables
+with an actor column to 35 of 38, the three exceptions being `academic_years` and the two join tables `parent_student`
+and `user_roles`. The JSON the API returns gained
+`created_by_id`/`created_by_name`/`updated_by_id`/`updated_by_name`, where the name is read only when the association is
+already initialised, because `open-in-view=false` turns a naive getter on a lazy `@ManyToOne` into a 500 on the read
+path.
+
+**The mechanism, and the bug it found.** `AuditingEntityListener` fires *during the flush*, so the auditor may not issue
+SQL. The first version resolved the caller with `userRepository.findByUsername(principal)`, which triggers Hibernate's
+auto-flush — and so it re-entered a flush that was already in progress. `mvn -o clean package` was green and the app
+booted; 22 live write checks then failed with a 500 on every `PUT`/`PATCH` for a school, a pupil, a classroom and an
+admission, and the server printed `org.hibernate.AssertionFailure: collection was processed twice by flush()` under a
+`StackOverflowError`. (That boot log has since been overwritten by the green run it produced, so the string is recorded
+here rather than attached; it appeared on every one of those writes.) The affected entities own no collection — none of
+`School`, `Student`, `Classroom`, `Subject`, `StudentAdmission` declares one — which is what makes the assertion worth
+reading carefully: the re-entered flush is the *session's*, not the written row's, and the persistence context of a
+school update can already be holding `Parent.students` or `Timetable.slots` (`Timetable`'s is `FetchType.EAGER`, so it is
+loaded on any timetable read). Any audited write in a session that has touched one of the three collection-owning
+entities is therefore exposed, which is why this is a mechanism defect and not a defect in the four new columns. The fix
+removes the query rather
+than reverting the annotation: the JWT now carries `uid` (the `users.id` the token authenticates), and the auditor
+answers with `getReferenceById(uid)`, which returns a managed proxy and makes no statement at all. `uid` also settles
+BKL-08 in the right direction: the `empId` claim is an *employee* id for staff but the *user* id for the platform owner,
+so attributing through it could name a different tenant's employee as the author of a row they never touched. The
+auditor is now pinned to the principal and the attribution test asserts `findByEmployee_Id` is never called.
+
+**Live.** `verify-mvp-e2e.sh` F11 is 20 checks that read the actor columns back off a pupil, an admission and a
+classroom after each write, assert the author is a real account *in the same tenant as the row it wrote* and that it is
+not the platform owner reaching in from outside, and the feature register now marks feature 11 `PROVED (20 checks ran,
+0 skipped)`. The whole register is `11 of 11` on this build — 294 assertions, 0 failures, 0 skips — which is the first
+time every frozen-MVP feature has been demonstrated rather than asserted. The unit and architecture suite is 106 tests
+green (was 104 before this card's two attribution tests), and the Stage 3 suites re-run against a V7 database are
+unchanged: C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1. The `c3` and `c7` skips are this run's harness,
+not the build: both transcripts print `SKIP generated-SQL/INSERT check (GMS_SQL_LOG is not set …)`, because the jar was
+booted without `JPA_SHOW_SQL=true`. Everything was re-measured on a rebuilt jar after the V7 header was corrected — 7
+`Migrating schema` lines, V1→V7 applied, 294/0/0 again.
+
+**The control, stated as the check it still owes.** `C-5` was proved non-vacuous by deleting a guard and watching the
+scan name it; `C-8` has the same control and has not run it yet. Dropping `@CreatedBy` from `AuthorshipEntity` must
+turn F11 red on all four tables, and restoring it must turn it green, before the count of 4 is evidence about the
+annotation rather than about a value the seed happened to write. It is recorded as owed, not as done.
+
+**What `C-8` does not close.** (1) The five hard-delete paths remove the row *and* its trail, so "who deleted this"
+has no answer — that is a soft-delete decision, and it is a product decision. (2) No API surfaces the trail to a
+school: the columns exist and the responses name the author, but there is no audit view, which is what PRD feature 11
+would have to become before a school could use it. (3) A write with no authenticated caller — the bootstrap runner and
+any scheduled job — legitimately leaves `created_by` NULL, and nothing yet distinguishes "system wrote this" from
+"nobody looked". (4) `updated_by` records the last writer, not the sequence of writers; a real history needs a
+separate event table, which is not MVP scope.
+
+
 ### Stage 4 — The MVP vertical slice
 
 **Goal:** the frozen MVP in [PRODUCT_REQUIREMENTS.md §8](PRODUCT_REQUIREMENTS.md) works end-to-end for two tenants
 at once.
-**State:** Open. **Depends on:** Stage 3.
+**State:** Partly proved on the branch — the 11 frozen-MVP features are all live-proved (11 of 11, 294 assertions, 0
+failures, 0 skips on a fresh V1→V7 database with two tenants); the stage's own gate, *bounded* lists, is open.
+**Depends on:** Stage 3.
 
 Work: server-side pagination, sorting and filtering for every list resource (debt #10, `BKL-03`, `FE-08`); response
 envelope and one error contract (`BKL-01`, `BKL-07`); DTOs instead of entity leakage (`SEC-04/ACD`); OpenAPI
@@ -648,8 +900,8 @@ system, the remaining `DOC-*`).
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1`, `C-2`, `C-3` and `C-7` done on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant now travels in the query — 37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it; and with `C-7` the tenant is now a key the database enforces — nine entities map `school_id`, 11 create paths fill it from the claim, all ten deferred `SET NOT NULL` flips land as V6 behind backfill-and-assert, `parent_student` is held by trigger, and 7 more same-school FKs make a straddling row impossible (89-test suite green, live scripts 29/29, 32/32, 25/25 and a new 66/66, two controls red then restored, fresh database V1→V6 under `ddl-auto=validate`). `C-4`, `C-5`, `C-6`, `C-8` open | $0 | No |
-| 4 MVP slice | journey end-to-end for two tenants, bounded lists | Open | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed on the branch** — `C-1`…`C-7` plus `C-8` are implemented and measured on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and three deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write). `C-8`'s control is still owed | $0 | No |
+| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
@@ -660,8 +912,9 @@ merge itself: `master` requires one approving review with last-push approval, th
 and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
 branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
 still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
-receives. Stage 3 has started — `C-1`, `C-2`, `C-3` and `C-7` are implemented and measured on the same unmerged branch,
-which widens the gap rather than narrowing it: the branch now applies **six** migrations and a schema that refuses a
-NULL tenant, while `master` applies none and lets Hibernate guess — so the longer PR #25 sits unreviewed, the further the
+receives. Stage 3 is now executed on that same branch — `C-1` through `C-8` are implemented and measured — and part of
+Stage 4 is proved by the same run: the branch applies **seven** migrations, boots a schema that refuses a NULL tenant
+and stamps who wrote each row, and answers 294 live assertions across two tenants without a single failure, while
+`master` applies none and lets Hibernate guess — so the longer PR #25 sits unreviewed, the further the
 merged description of this project drifts from the verified one. Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
 disagree, the proof wins and this table is wrong.

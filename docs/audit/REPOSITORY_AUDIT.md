@@ -31,6 +31,18 @@ gms_frontend/    React 18, Vite 7, MUI 5, Redux Toolkit + RTK Query (71 endpoint
 
 Request lifecycle: `JwtAuthenticationFilter` → path rules in `SecurityConfig` → `@PreAuthorize` on controller → service → repository → DTO/entity → Jackson.
 
+**The tree above is the audited revision; three of its lines are no longer the tree.** `com.gms.controller` holds **36**
+REST controllers — the 36th is the new `DashboardController`; the `AbstractCRUDController` base the tree listed alongside
+them was deleted by `C-1` and is **not** one of the 36 — while the block never listed
+`com.gms.exception`, `com.gms.bootstrap` or `com.gms.util`, which are on the classpath. `com.gms.model.entity` holds
+**39** files: 36 `@Table` entities, `BaseAuditEntity`, `TenantOwned` (`C-4`'s marker interface), and `AuthorshipEntity`
+(`C-8`'s audit-authorship mixin). The lifecycle line
+now reads `JwtAuthenticationFilter` → `TenantContext` → **`@PreAuthorize` on the handler** (234 of 236; the two
+public exceptions — `AuthController.login` and `HealthController.ping` — are named and pinned by
+`security/DenyByDefaultAuthorizationArchTest`) → an unmapped path is refused by
+`anyRequest().denyAll()` (`SecurityConfig.java:152`) → service → **`TenantScopedRepository.findById`** → entity →
+Jackson.
+
 **Layering defect (BKL-01).** Services return `org.springframework.http.ResponseEntity` (`StudentService.java:13-16`, `NotificationServiceImpl.java:132`), so the web tier leaks into the business tier and services fabricate HTTP 403/404/501 instead of throwing domain exceptions. This is why several "errors" are silent (see FIN-03, ACD-05).
 
 **No dependency injection of tenant context.** Tenant is re-derived per call from the raw HTTP header by a static holder (`util/SecurityUtil.java:59-99`) rather than from the already-authenticated `SecurityContext`. It returns `null` outside a request scope (async, scheduled, tests), and every service must remember to compare the passed `schoolId`. Findings TEN-01…TEN-09 are the consequences.
@@ -40,8 +52,10 @@ service methods no longer take the tenant as a parameter, and `TenantParameterAr
 does again. `C-3` then closed `TEN-01`'s other half on 2026-11-01: the tenant is a predicate in every declared
 repository read, or an allow-listed entry with the constraint that makes it global by design. `C-7` closed the third
 half the same day: the tenant column the schema declared and the application never wrote is now mapped, filled and
-required, and the composite keys that depended on it bind the running software's writes. The half still open is the
-inherited CRUD that `JpaRepository` hands every repository (`C-4`). The evidence is in
+required, and the composite keys that depended on it bind the running software's writes. `C-4` then closed the by-id
+half: `repository/TenantScopedRepository.java:56-61` overrides `findById` so the tenant predicate is in the SQL, not in
+a service, for the 33 repositories whose entity implements `TenantOwned`. What is still open in that list is inherited
+`findAll`, `findAllById` and `delete` (`TenantScopedReadArchTest.java:39-41`). The evidence is in
 [BASELINE_STATUS.md §15](BASELINE_STATUS.md), [§16](BASELINE_STATUS.md) and [§17](BASELINE_STATUS.md).
 
 ## 2. Existing product functionality
@@ -68,20 +82,32 @@ Verified state of the modules the README advertises:
 | Student self-service portal | **unreachable (403)** | SEC-06 |
 | Parent self-service portal | **unreachable + frontend crash** | SEC-06, FE-07 |
 | Teacher portals | partially reachable | SEC-06 |
-| Pagination / search / filtering | not implemented anywhere | API-05 |
+| Pagination / search / filtering | server-side paging on **1** endpoint only (`GET /students/search`); rest unbounded | API-05, BKL-03 |
 | File upload / attachments | disabled at framework level | OPS-07 |
 
 ## 3. API surface
 
-36 controllers, ~230 mapping annotations, base path `/api/v1`. `Constants.API_BASE_V1` is used by only ~14 controllers; the other ~22 hardcode the string (API-08).
+**36 controllers** (the 36th is the new `DashboardController`; `AbstractCRUDController`, deleted by `C-1`, was never one of
+the 36 — the register earlier called the count 35 and blamed the deleted base class, which is a false rationale), **236** handler
+mappings plus 36 class-level `@RequestMapping` values — 272 mapping annotations in total, counted with
+`grep -rhoE "@(Get|Post|Put|Patch|Delete|Request)Mapping" controller/`, against the ~230 this line was written with — and
+base path `/api/v1`. `Constants.API_BASE_V1` is used by **12** controllers (`grep -rl API_BASE_V1 controller/ | wc -l`);
+the other 24 hardcode the string (API-08).
 
-No response envelope, no `Page`/`Pageable` on any endpoint, no OpenAPI dependency despite `SecurityConfig.java:35-37` permitting `swagger-ui`/`v3/api-docs` paths that do not exist.
+No response envelope. `Page`/`Pageable` reach exactly **one** endpoint — `GET /students/search` (`StudentController.java:98-110`)
+returns `Page<StudentResponse>` — so the former "no `Page`/`Pageable` on any endpoint" claim is **partly closed**: 1 of 236
+handlers pages and the remaining 235 reads stay unbounded (`BKL-03`, `API-05`). The OpenAPI half of API-08's neighbour `BKL-04` has moved:
+there is still no springdoc dependency in `gms_backend/pom.xml`, but the chain no longer permits `swagger-ui` or
+`/v3/api-docs` at all — the `SecurityConfig.java:35-37` permit this finding cited is the audited revision, and the
+current list ends at `anyRequest().denyAll()` (`:152`), so adding springdoc now means adding its matchers too.
 
 Verb-in-path convention (`/create`, `/update`, `/toggle`) mixed with RESTful paths; IDs sourced from body, `@PathVariable` and `@RequestParam` in the same API (API-04).
 
 ## 4. Database relationships (as-is)
 
-**38 tables** are generated from the 37 entity classes (measured by booting the application with
+**38 tables** are generated from the **36 `@Table` entities** (the `model/entity` package holds 39 files; `BaseAuditEntity`,
+`TenantOwned` and `AuthorshipEntity` map to no table, and the two `@JoinTable`s carry the generated DDL from 36 tables to
+38) — measured by booting the application with
 `ddl-auto=update` against a disposable PostgreSQL 16 and dumping the result — BASELINE_STATUS §6). The tenant column
 `school_id` is present on **26** tables and **absent on 12**: `attendances`, `exam_subjects`, `fee_payments`,
 `student_fees`, `student_exams`, `results`, `timetables`, `timetable_slots`, `teacher_assignments`, `parents`,
@@ -95,7 +121,11 @@ still have no tenant column, `parents` and `user_roles`, and this document's §1
 same four measurements, on the migrated database the running application boots against: **39** tables, **141** foreign
 keys (18 of them `(child_id, school_id)` same-school pairs), **45** named unique constraints, **175** indexes — against
 the 123 / 14 / zero this row was written with, which is the difference between a schema Hibernate guessed and one the
-repository owns.*
+repository owns. **These four figures are measured `pre-V7` (on `V1`–`V6`, dated 2026-11-01): `C-8`'s `V7__record_who_wrote_the_pupil.sql`
+adds `created_by`/`updated_by` and 8 audit foreign keys, so the FK count moves `141 → 149`, but the table / unique-constraint /
+index totals have NOT been re-counted against a migrated database since `V7`. This document does not guess an unmeasured number,
+so the post-`V7` schema totals above (39 / 141 / 45 / 175, plus the 149 FK figure which is arithmetic on the measured `V7` delta)
+remain **unverified** for the current migration head.***
 
 Measured against the generated schema: **123 foreign keys** (referential integrity is real), **14 unique constraints**
 (`schools.school_code`, `users.username`, `users.email` among them, but **no tenant-scoped composite unique** such as
@@ -121,7 +151,7 @@ work should own. Numbered **DB-08**.*
 
 **`schools.school_id` is not a tenant key.** `School.java:24` maps a `varchar(20)` display code (`SCH001`) under the *same column name* the rest of the schema uses for the tenant FK, so the generated schema has a `school_id` column on **26** tables while only **25** carry the tenant. Any `WHERE school_id = :id` written against `schools` silently compares a string code to an integer id. Recorded as a design constraint on Stage 2's naming, not as a rename (a rename would break every generated schema in the field): the FK columns are `school_id integer REFERENCES schools(id)`, and the display code stays `schools.school_id varchar(20)`. *Re-measured 2026-11-01 on the migrated database: **36** tables carry a column named `school_id`, **35** of them the integer tenant FK, and `schools.school_id` is still `varchar(20)`. The trap is unchanged; only the count has grown, which is the point of keeping the distinction in writing — `C-7` added nine mapped associations and none of them may be confused with the display code.*
 
-**No schema is version-controlled.** Zero `.sql` files, no `flyway-core` or Liquibase dependency, yet `application.properties:16-17` enables Flyway against a nonexistent `classpath:db/migration`. `ddl-auto=validate` therefore validates against a schema that exists only inside the live Neon instance (DB-01). *Changed on `feat/stage2-flyway-baseline`, not on `master`:* **six** migrations — `V1` captured from a disposable server, `V2`–`V6` authored against it, both Flyway 10 artifacts — and `V7` reserved for `C-8` — so the sentence "exists only inside the live Neon instance" is now about the *unrebuildable* production database, not about the repository having no schema at all. `ADR-022` carries the verification record.
+**No schema is version-controlled.** Zero `.sql` files, no `flyway-core` or Liquibase dependency, yet `application.properties:16-17` enables Flyway against a nonexistent `classpath:db/migration`. `ddl-auto=validate` therefore validates against a schema that exists only inside the live Neon instance (DB-01). *Changed on `feat/stage2-flyway-baseline`, not on `master`:* **seven** migrations — `V1` captured from a disposable server, `V2`–`V6` authored against it, all Flyway 10 artifacts — and `V7__record_who_wrote_the_pupil.sql` added by `C-8` (2026-11-02) — so the sentence "exists only inside the live Neon instance" is now about the *unrebuildable* production database, not about the repository having no schema at all. `ADR-022` carries the verification record.
 
 ## 5. Security architecture (as-is) and findings
 
@@ -217,6 +247,14 @@ annotation scan exists to prevent.
 `SecurityConfig.java:39` permits all of `/api/v1/auth/**`, which includes `POST /auth/self-register` (`AuthController.java:133`) and `POST /auth/change-password` (`:108`). Self-register trusts caller-supplied `empId`/`schoolId` (`:136-141`) and assigns the role `"EMPLOYEE"` (`:166`) — a string outside the five product roles, so the created account is gated by no path rule at all.
 *Remediation:* narrow the permitAll list to `/auth/login`; require an invitation token for provisioning; replace `"EMPLOYEE"` with the documented role model.
 *Verification:* unauthenticated POST to both endpoints asserts 401.
+*Corrected 2026-11-02 by `C-6`:* the present-tense claims above are the baseline; they are no longer the running code.
+Self-register does not mint the literal `"EMPLOYEE"` — it routes the requested roles through `UserService.authoriseRoles`,
+which validates every code against `RoleEnum` and rejects anything outside it, so no off-vocabulary role can be assigned.
+`"EMPLOYEE"` is minted nowhere in the source, and `RoleEnum` now declares **six** constants including `ACCOUNTANT`
+(`RoleEnum.java:11`); the "string outside the five product roles" framing is closed by `C-6`. The path rule is also no
+longer absent: `POST /auth/self-register` is `hasAnyAuthority("ADMIN","SUPERADMIN")` and answers **401** anonymously (§16,
+SEC-09). What remains is a product gap, not a security hole: the finance **writes** are still `hasAuthority('ADMIN')`
+rather than `ACCOUNTANT`, and `apiSlice.js` exposes no endpoints for finance reads beyond fees.
 
 **SEC-10 — No login throttling; account-state columns ignored.**
 No rate limiting exists anywhere (grep for `ratelimit|bucket4j` → 0 hits); `AuthController.java:101-105` collapses every exception, including DB failures, into a bare 401. `User.loginAttempts`, `accountLocked` and `passwordExpired` (`model/entity/User.java:80-95`) are never read or incremented — `CustomUserDetailsService.java:49-57` hardcodes `accountNonLocked`, `credentialsNonExpired` and `accountNonExpired` to `true`.
@@ -311,6 +349,14 @@ access, not the string in an annotation. `grep -rn "ACCOUNTANT\|EMPLOYEE" gms_ba
 either empty or fully backed by a role the JWT can carry. Sequenced in [ENGINEERING_ROADMAP.md
 Stage 3 C-6](../ENGINEERING_ROADMAP.md).
 
+*Closed by `C-6` (2026-11-02):* `ACCOUNTANT` is now a real, issuable role — `RoleEnum` declares six constants with
+`ACCOUNTANT` at `RoleEnum.java:11`, provisioning accepts it, and a JWT can carry it, so the 39 guards that name it are no
+longer documentation of a role no token can hold. The mirror claim above (self-register minting an un-guardable `"EMPLOYEE"`)
+is moot for the same reason: `"EMPLOYEE"` is minted nowhere now, because self-register validates through
+`UserService.authoriseRoles` rather than writing a raw string. The two things `C-6` does **not** close, and which keep the
+finding's product half open: the finance **writes** are still `hasAuthority('ADMIN')` rather than `ACCOUNTANT`, and
+`apiSlice.js` still has no endpoints for finance reads beyond fees.
+
 ### Tenant isolation (mandate §6)
 
 **TEN-01 — `schoolId` accepted then ignored, with a literal TODO.** `FeePaymentServiceImpl.java:150-152`, `ReceiptServiceImpl.java:145-147`, `InvoiceServiceImpl.java:154-156`, `ResultServiceImpl.java:162-168`, `StudentExamServiceImpl.java:127`, `AttendanceServiceImpl.java:201-211`, `TimetableServiceImpl.java:72-99`, `UserServiceImpl.java:130` all receive the tenant and never filter by it — several carry the comment `// Filter by schoolId if needed`. Repositories back this: `FeePaymentRepository.java:19`, `ReceiptRepository.java:17`, `InvoiceRepository.java:17`, `ResultRepository.java:13,16`, `AttendanceRepository.java:16,18`, `UserRepository.java:70` (`findByRole` spans every school), `TeacherAssignmentRepository.java:21` (`findByAcademicYear` spans every school).
@@ -323,11 +369,36 @@ a new declared read that does neither. The routes above were measured rather tha
 build the verification script watched school B read school A's timetable; against the `C-3` build the same request is
 refused and the captured SQL names the school. What is **still** open is the rest of the finding: the CRUD
 `JpaRepository` hands every repository for free (`findById`, `findAll`, `findAllById`, `delete` — no declaration, so no
-test can read one) and that is `C-4`; the `school_id` the schema declares but the application never writes is `C-7`.
+test can read one) and that is `C-4` — since closed **for `findById`**, which now resolves through
+`TenantScopedRepository`'s tenant predicate for 33 of the 36 repository interfaces (see `TEN-02` below for what that closure found
+and for the count this register had wrong) — while `findAll`, `findAllById` and `delete` remain inherited and
+unfiltered; and the `school_id` this row said the schema declares but the application never wrote was `C-7`, closed the
+same day and recorded under `TEN-04` below.
 The `TEN-01` row in this document's §16 carries the evidence; the measurement is
 [BASELINE_STATUS.md §16](BASELINE_STATUS.md), which supersedes the work list in its §15.8.
 
 **TEN-02 — Raw-id loads with no ownership check.** `StudentServiceImpl.java:158`, `ClassroomServiceImpl.java:88`, `SectionServiceImpl.java:159`, `SubjectServiceImpl.java:94`, `EmployeeServiceImpl.java:99`, `ParentServiceImpl.java:309`.
+**Closed for by-id reads 2026-11-02 by `C-4` — and the finding as written overstated what it had found, which is the
+more important half.** The two registers carried different counts of the same thing — "155 `findById` and 6 `getById`
+call sites" here adjacent to `C-7`, "67 call sites load a row by raw id with no ownership check" in
+[SECURITY_AUDIT.md §5.4](SECURITY_AUDIT.md) — and both counted **call sites**, in a shape that read as that many live
+cross-tenant leaks. They were not leaks. By far the most of those sites already refused a foreign row:
+ownership was compared by hand in the service immediately below the load (`grep` for `.equals(TenantContext.schoolId())`
+in `service/impl/`: 107 lines at the commit `C-4` started from, and **23 lines / 21 distinct comparisons** today after it deleted the redundant copies — any "82" figure this register previously carried was wrong), and the by-id probes run against
+two schools on the verification database produced no foreign bodies. So tenancy here was enforced **by convention in
+service methods rather than by one mechanism at the query layer**, and the measurable defects of that arrangement were
+(a) the same predicate written thirty-odd times, each of which could be omitted or mistyped, and (b) two copies that
+dereferenced an unloaded Hibernate proxy and answered **HTTP 500 to the rightful owner** —
+`StudentFeeServiceImpl.getStudentFeeById` and `FeePaymentServiceImpl.getFeePaymentById`, both comparing
+`…getStudent().getSchoolId()` across associations declared `@ManyToOne(fetch = FetchType.LAZY)`
+(`model/entity/StudentFee.java:27-30`, `model/entity/FeePayment.java:27-30`, with `Student.java:77` dereferencing its
+own lazy `school`) after `spring.jpa.open-in-view=false` (`application.properties:36`) closed the session. The closure
+is one predicate in one place: `repository/TenantScopedRepository.java:56-61` overrides `findById` with
+`where e.id = :id and e.school.id = :schoolId`, the tenant read from `TenantContext` rather than from the caller, and
+33 of the 36 repository interfaces extend it (the 37th file under `repository/` is the `TenantScopedRepository` base itself) —
+`ParentRepository` (global by D-2), `SchoolRepository` (the tenant is the row) and `DashboardStatisticsRepository` do not. Foreign id → no row → 404 from the query, which is the resource-disclosure answer `SEC-REMED` asked for.
+`repository/TenantScopedReadArchTest` keeps it closed; inherited `findAll`, `findAllById` and `delete` remain open
+(`TenantScopedReadArchTest.java:39-41`). Full write-up: [SECURITY_AUDIT.md §5.5](SECURITY_AUDIT.md).
 
 **TEN-03 — Notification audience resolved by substring match.** `NotificationRepository.java:21-22` used `recipientIds LIKE %:userId%` against a JSON TEXT column, so user 1 matches 11, 21, 100 and 1234 — an intra-tenant disclosure plus a full-table scan. `NotificationServiceImpl.java:156-159` never compared the path `userId` to the caller, so `GET /notifications/user/{userId}` (`NotificationController.java:74`) exposed any user's notifications, and `markNotificationAsRead` (`:192-207`) mutates a single shared read flag for all recipients.
 
@@ -437,7 +508,7 @@ kept duplicate-free by the partial per-school index `uq_students_school_email` (
 
 **BKL-01 (P2)** Services return `ResponseEntity` (§1) — the layering break that makes every other error-handling finding harder to fix.
 **BKL-02 (P1)** ~28 controllers serialize raw JPA entities (full list in the API audit), while `application.properties:38` sets `open-in-view=false` and relations are `FetchType.LAZY` (`Student.java:26-38`; `Employee.java:30,89,94`). The derived `@JsonProperty getSchoolName()` / `getCreatedByName()` getters (`User.java:140-143`, `BaseAuditEntity.java:50-53`) force proxy initialisation after the transaction has committed → `LazyInitializationException`/500 on list endpoints. Unidirectional EAGER pairs (`Timetable.slots`, `User.roles`) are the only ones that survive.
-**BKL-03 (P1)** No pagination: `Page`/`Pageable` appear in no controller (`AbstractCRUDController.java:5` imports `Pageable` and never uses it); ~20 unbounded `findAll()`-style reads, largest at `StudentFeeServiceImpl.java:143`, `AnnouncementServiceImpl.java:127-181`.
+**BKL-03 (P1)** Pagination is essentially absent. At baseline `Page`/`Pageable` appeared in no controller (the `AbstractCRUDController.java:5` this finding cited imported `Pageable`, used it nowhere, and has since been deleted by `C-1`). Measured on `feat/stage2-flyway-baseline` the finding is **partly closed**: exactly **one** endpoint of 236 now pages — `GET /students/search` (`StudentController.java:98-110`) returns `Page<StudentResponse>` — so the former "no `Page`/`Pageable` in any controller" wording no longer holds. The rest stands: ~20 unbounded `findAll()`-style reads remain, largest at `StudentFeeServiceImpl.java:143`, `AnnouncementServiceImpl.java:127-181`.
 **BKL-04 (P2)** No mapper library; `BeanUtils.copyProperties` with growing hand-maintained ignore lists (`StudentServiceImpl.java:127`, `UserServiceImpl.java:109-113`) and **no exclusions at all** at `EmployeeServiceImpl.java:71` and `ParentServiceImpl.java:107` — mass-assignment surface. A 12-argument `StudentResponse` constructor is duplicated in three impls.
 **BKL-05 (P1)** Dead and misleading code: `DomainException` is never thrown by any service;
 `ParentStudentServiceImpl.java:12` imports `AbstractCRUDService` and never extends it; `SubjectServiceImpl.java:102`
@@ -655,11 +726,25 @@ rewriting, is the remediation.
 
 ## 13. Missing features (relative to mandate §4.3 and §6)
 
-Server-side pagination, sorting and filtering; OpenAPI generation; centralised tenant resolution and ownership assertions; row-level security evaluation; refresh tokens and a revocation store; password reset (no endpoint exists); role-change propagation policy; idempotency keys on financial writes; payment verification or an honest manual path; invoice↔payment↔receipt linkage; refunds; late fees and due-date processing; attendance percentage; grade derivation from the scheme; draft/publish result workflow; admission-number sequencing per tenant; audit trail (no audit table; `created_by` only); soft delete as a consistent concept; data retention/deletion policy; backup/restore automation; structured JSON logging with correlation IDs (the `TraceIdFilter` **is** registered — a `@Component` at
+Server-side pagination, sorting and filtering; OpenAPI generation; centralised tenant resolution and ownership assertions; row-level security evaluation; refresh tokens and a revocation store; password reset (no endpoint exists); role-change propagation policy; idempotency keys on financial writes; payment verification or an honest manual path; invoice↔payment↔receipt linkage; refunds; late fees and due-date processing; attendance percentage; grade derivation from the scheme; draft/publish result workflow; admission-number sequencing per tenant; audit trail (the write-attribution half is since closed by `C-8` — `created_by`/`updated_by` on the schema and stamped by JPA auditing; the row stands for what `C-8` does **not** close, namely the hard-delete durability of the trail and the absent read API — see the note under §13); soft delete as a consistent concept; data retention/deletion policy; backup/restore automation; structured JSON logging with correlation IDs (the `TraceIdFilter` **is** registered — a `@Component` at
 `Ordered.HIGHEST_PRECEDENCE`, `TraceIdFilter.java:16-18` — and it does populate MDC (`:26`) and set `X-Trace-Id`
 (`:28`), but no `logging.pattern` references `%X{…}`, so the id reaches the response header and never the log
 line; see INF-15); error tracking; readiness/liveness separation; non-root containers; HTTPS; test suites of any
 kind; PR quality gates.
+
+*`C-8` (2026-11-02) closes the audit trail's write-attribution half, and the MVP feature gate is now measured rather than
+asserted: on a fresh V1→V7 database across two tenants, `scripts/verify-mvp-e2e.sh` reports **294 PASSED / 0 FAILED /
+0 SKIPPED** with **FEATURES PROVED: 11 of 11**, and the `F11` audit-authorship check alone contributes **20 checks, 0
+skips**. Measured detail: `V1` gave 31 of its 38 tables a `created_by` (62 audit FKs `REFERENCES public.users(id)`, no
+`ON DELETE` clause = NO ACTION); `V7__record_who_wrote_the_pupil.sql` adds `created_by`/`updated_by` plus 8 such keys to
+`students`, `classrooms`, `subjects`, `student_admissions`, so **35 of 38** tables now carry an actor column (the three that
+do not are `academic_years`, `parent_student`, `user_roles`) and the audit-FK total is now **70**; **33 of 36** entity
+classes are stamped by the JPA auditing listener (28 via `BaseAuditEntity`, 5 via `AuthorshipEntity` directly), while
+`Employee`/`User` set a business `created_by` by hand and `AcademicYear` sets none. What `C-8` does **not** close, and why
+the audit-trail item stays on this list: (1) hard deletes (`delete`, not soft delete) destroy the row and therefore destroy
+the trail it would have recorded, and (2) no API surfaces the authorship columns to a school — the trail exists in the
+schema but is not readable through the product. The `created_by` write path also still runs through `BKL-08`'s
+employee-id/user-id substitution, which `C-8`'s `uid` JWT claim addresses but does not erase.*
 
 ## 14. Technical debt summary and remediation order
 
@@ -735,11 +820,11 @@ See [§16.2](#162-citation-drift-caused-by-pr-21-and-pr-22) for the measured shi
 | SEC-13 actuator without authentication | **Verified** | `/actuator/info` is **401** anonymously and **200** for SUPERADMIN; only `health` stays public, on the readiness group, with `show-details=never` in prod. |
 | SEC-14 plaintext HTTP, host disclosed | **Open** | Deployment-side (`vercel.json` rewrite, TLS termination); unreachable from here — see §17. |
 | SEC-15 documented names do not bind | **Verified** (dev) | `application.properties` now carries `${SECURITY_JWT_SECRET}`, `${APP_SUPERADMIN_*}`, `${DB_*}` placeholders; `.env.example` and Compose pass the same names; the memory-bank page that told operators to set `SUPERADMIN_PASSWORD` is corrected. Prod-profile boot **not** executed. |
-| SEC-16 inert `hasRole` guards | **Verified** | 13 → 0 (`git grep hasRole(` is empty), converted to the 216-guard `hasAuthority` convention already in the codebase rather than a new mechanism. |
+| SEC-16 inert `hasRole` guards | **Verified** | 13 → 0 (`git grep hasRole(` is empty), converted to the `hasAuthority` convention already in the codebase rather than a new mechanism — the convention now spans **234** guards across the 236 handlers (the two non-guards are the deliberately public `AuthController.login` and `HealthController.ping`), up from the 216 this row recorded when it was written. |
 | TEN-01 tenant accepted then ignored | **Closed on branch for the code, both halves** (2026-11-01) | `C-2` removed the mechanism that let it happen: `util/SecurityUtil.java` — which re-parsed and re-verified the JWT signature on each of 325 call sites across 41 files — is deleted, and the tenant now reaches a service through `security/TenantContext`, filled by the filter from the claims it has already verified and cleared in a `finally`. 221 service methods no longer take the tenant as a parameter; `TenantParameterArchTest` fails the build if one does again. Evidence: `TenantContextTest` (5 cases, including a deliberate-failure control that turned the suite red on exactly the "parsed once" assertion), `TenantParameterArchTest` (1 case), `scripts/verify-c2-tenant-context.sh` (32 live checks, 0 failures) and `scripts/verify-c1-tenancy.sh` re-run (29 checks, 0 failures), full suite **86 green**. `C-3` closed the query half: every one of `findByStudentExam_Student_Id`, `findByStudentId`, `findByStudentFee_Student_Id`, the invoice and receipt `findByStudentId`, `findByStudent_IdAndDateBetween`, `findByClassroom_Id`, `findByTeacher_Id`, `findByStudentsId` and `findByRole` is gone — rewritten with the tenant in the predicate or deleted where a scoped form already existed. `RepositoryTenantScopeArchTest` measures 55 declared reads with no tenant at the end of `C-2` (37 indefensible) and 18 now, each listed with the constraint that makes it global by design. Evidence: suite **87 green**, `scripts/verify-c3-scoped-reads.sh` **25/25**, the same script against the pre-C-3 build **6 failures** starting with a live read of school A's timetable by school B, and the generated SQL captured from the running application. **Still open:** the inherited `findById`/`findAll`/`findAllById`/`delete` (`C-4`) and endpoint-level deny-by-default (`C-5`). `C-7` closed the third item that was listed here — the `school_id` the application never wrote — on 2026-11-01. |
 | TEN-06 no tenant discriminator in the query layer | **Partly closed** (branch, 2026-11-01) | The consequence this finding named — "isolation depends 100% on hand-written service checks that are demonstrably missing in 15+ places" — is now a property of the *SQL*: a scoped read carries `… join classrooms c1_0 on … where c1_0.school_id = ?`, and a build-failing test refuses any new declared read that does not. `@Where`/`@Filter` remain deliberately unused, because a session filter is invisible at the call site in exactly the way the forgotten `schoolId` parameter was; the explicit predicate is the mechanism. **The composite half is now closed too:** `C-7` maps the nine unmapped tenant columns, fills them from the claim on 11 create paths, lands all ten `SET NOT NULL` as `V6` and adds seven same-school foreign keys, so the constraints bind the running application's writes and not only a migration's — `verify-c7-tenant-key.sh` refuses a cross-tenant `POST /timetables` with 403 from `fk_timetable_classroom_same_school`, and measures `rows with a NULL tenant, in any tenant table, platform-wide: 0`. Not closed: no RLS exists (`ADR-020` defers it to Stage 7), and a school predicate is not an authorisation decision (`C-5`). |
 | BKL-07 client errors as 500 | **Verified** | New 400/404 handlers plus `@Email`; live probes in BASELINE_STATUS §13.4 and `GlobalExceptionHandlerTest` (4 cases). |
-| BKL-08 bootstrap admin cannot create users | **Open** — new | Discovered while probing BKL-07; deliberately not patched in a security branch because the fix is a schema/audit-trail decision (§13's missing audit trail). |
+| BKL-08 bootstrap admin cannot create users | **Open** — new | Discovered while probing BKL-07; deliberately not patched in a security branch because the fix is a schema/audit-trail decision — §13's audit-trail item, whose *write-attribution* half `C-8` has since closed (the `created_by` identity source, the hard-delete residue and the absent authorship read API remain open). |
 | OPS-08 Compose cannot boot from a fresh clone | **Changed** | Obsolete `version:` key removed, `${DB_PASSWORD:?}` now fails loudly, `DB_URL`/credentials/`SPRING_PROFILES_ACTIVE` are passed, healthcheck moved to `/actuator/health/readiness`. Still `env_file: .env` on both services, so a clone without a `.env` still fails at `docker compose config` — the full fix belongs to the M4 Docker package. |
 | OPS-11 debug logging in every profile | **Verified** | Base and prod default to INFO (`application.properties:95-98`); DEBUG is only what `application-dev.properties` opts into, and `StartupSecurityValidator` refuses to boot with `com.gms` at DEBUG/TRACE outside `dev`. |
 | OPS-14 no test suite | **Changed** | **89 backend tests now execute under `mvn -B verify`** — up from the 42 this row recorded after M1 — and three of them are architecture tests rather than unit tests: `TenantParameterArchTest` (`C-2`), `RepositoryTenantScopeArchTest` (`C-3`) and `EntityTenantColumnArchTest` (`C-7`), each of which prints its own measurement so the roadmap's figures are recomputed on every build rather than transcribed from a card. JaCoCo writes a report; `mvn -DskipTests` is no longer the only command that works. Frontend still has zero tests (FE-14) and there is still no Playwright or Testcontainers integration harness — that is M3, and Stage 5's *"automated tests pass"* gate rests on unit tests plus five hand-run live scripts. |

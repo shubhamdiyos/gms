@@ -771,16 +771,20 @@ cross-tenant row becomes *impossible* rather than unlikely — has been observed
 there was no application in the loop, no HTTP request, no JWT, and the schema was derived mechanically from the
 entities rather than authored as a Flyway baseline. The two remaining proofs are exactly those absences.
 
-**Implementation status (2026-11-01, Stage 3 `C-2`, `C-3` and `C-7`).** Layer 1 — the claim — is **shipped**: `JwtAuthenticationFilter`
+**Implementation status (2026-11-01 for `C-2`, `C-3` and `C-7`; 2026-11-02 for `C-4`, `C-5`, `C-6` and `C-8`; Stage 3,
+all on `feat/stage2-flyway-baseline`).** Layer 1 — the claim — is **shipped**: `JwtAuthenticationFilter`
 parses the token once per request and populates `security/TenantContext`, `util/SecurityUtil` (325 call sites in 41
 files, each re-parsing *and re-verifying* the signature) is deleted rather than wrapped, and `TenantParameterArchTest`
 fails the build if any service method accepts the tenant as an argument — the "a caller may forget" path that
 `TEN-01`/`TEN-07` describe is closed by an architecture test rather than by discipline. A request that names another
 school's row is refused with **403** (`TenantAccessDeniedException`), so the read path and the write path now answer
-alike.
+alike — with one qualification since `C-4`: a by-id read of another school's row no longer reaches a service that
+could raise, because it matches no row at the load, so that specific request answers **404** ([ARCHITECTURE.md §4](../ARCHITECTURE.md),
+and in the card evidence at [BASELINE_STATUS.md §18](../audit/BASELINE_STATUS.md) — its `C-4` subsection records that
+load-time refusal, and §18 is the register of the `C-4`, `C-5`, `C-6` and `C-8` card runs).
 
 Layer 2 — the query discriminator — is **shipped for every read this repository declares**, on the same day and the
-same branch, by `C-3`. The state at `C-2`'s close was ten declared reads that queried across schools —
+same branch, by `C-3`, **and completed on 2026-11-02 by `C-4` for the inherited by-id read**. The state at `C-2`'s close was ten declared reads that queried across schools —
 `resultRepository.findByStudentExam_Student_Id`, `studentExamRepository.findByStudentId`,
 `feePaymentRepository.findByStudentFee_Student_Id`, `invoiceRepository.findByStudentId`, `receiptRepository.findByStudentId`,
 `attendanceRepository.findByStudent_IdAndDateBetween`, `timetableRepository.findByClassroom_Id`,
@@ -791,11 +795,15 @@ declared read names no school, and it measures the repositories from their compi
 somebody maintains: at the commit immediately before `C-3`, **170 declared reads, 115 carrying the tenant, 55 carrying
 none, 37 indefensible** (test red); on this branch, **168 / 150 / 18 / 0** (green), re-measured after `C-7` at
 **169 / 151 / 18 / 0** — one read added and one more carrying the tenant, because closing layer 3 required
-`TimetableSlotRepository.findByIdAndSchool_Id`. Each of the 18 is allow-listed with
-the key that makes it global by design. Two limits belong to the claim rather than to a footnote: it reads
+`TimetableSlotRepository.findByIdAndSchool_Id` — and **181 / 158 / 23 / 0** on the build that closes `C-4`, where the
+23 are allow-listed with the reason the schema supports it. Each of those allow-listed reads carries the key that makes
+it global by design. Two limits belong to the claim rather than to a footnote: it reads
 *declarations*, so the `findById` / `findAll` / `findAllById` / `delete` that `JpaRepository` hands every repository are
-invisible to it and are `C-4`; and a predicate that reaches the tenant by travelling a join is only as good as the
-column it travels, which is the next paragraph.
+invisible to it — `C-4` closed the by-id half of that with a different instrument, `repository/TenantScopedRepository`
+(an overridden `findById` that filters by the claim at the point of load) policed by `TenantScopedReadArchTest`, which
+prints `C-4: 33 repositories serve a tenant-owned entity and every one of them scopes findById by the claim; 3 serve the
+tenant table itself or a row with no single owner`, while `findAll` / `findAllById` / `delete` are inherited, unfiltered
+and **still open**; and a predicate that reaches the tenant by travelling a join is only as good as the column it travels, which is the next paragraph.
 
 Layer 3 — the materialised key with the composite foreign key — **shipped on the same branch and the same day, by
 `C-7`**. The measurement that justified the card is quoted rather than deleted, because it is the reason this layer is
@@ -817,15 +825,41 @@ Measured: `EntityTenantColumnArchTest` fails the build for a tenant table whose 
 `fk_timetable_classroom_same_school` and `rows with a NULL tenant, in any tenant table, platform-wide: 0`.
 
 Layers 1 and 2 protect HTTP traffic today; layer 3 is what makes a defect in layers 1 or 2 survivable, which is the
-point of having three. It does not make a wrong-tenant *read* impossible — `findById` is still inherited and still
-loads before the check, which is `C-4`, and level 3 constrains what may be written about a row rather than who may
-fetch it.
+point of having three. It does not make a wrong-tenant *read* impossible — since `C-4` the ownership check sits **at the
+point of load** rather than in the service below it, so a by-id read of another school's row matches no row at all and
+answers 404, but that is layer 2's mechanism and not this layer's: level 3 constrains what may be written about a row
+rather than who may fetch it, and the inherited `findAll` / `findAllById` / `delete` still fetch and remove without a
+predicate.
 
-`ARCHITECTURE.md §4` and the roadmap's `C-3` and `C-7` cards carry the measurements and the deliberate-failure controls;
-the verification of layer 1 is in [BASELINE_STATUS.md §16](../audit/BASELINE_STATUS.md) and of layer 3 in
-[§17](../audit/BASELINE_STATUS.md). ADR-020 is therefore **all three layers shipped** on this branch — and still not
-closed, because `C-4` owns the inherited reads, `C-5` owns deny-by-default at the endpoint, and RLS stays a Stage-7
-evaluation. The roadmap says so rather than marking the ADR done.
+**`C-8` — audit authorship, executed 2026-11-02, the same day as `C-4`, `C-5` and `C-6` and on the same branch.** This
+is the fourth card the roadmap scheduled after those three, and unlike them it adds nothing to this ADR's three layers:
+it records *who* wrote the row rather than *which school* owns it. `V7__record_who_wrote_the_pupil.sql` adds
+`created_by` and `updated_by` to `students`, `classrooms`, `subjects` and `student_admissions`, backed by 8
+`REFERENCES public.users(id)` keys at `NO ACTION`, so an author is a user id the database will not let dangle. Three
+things it does **not** close, stated here so no later reading mistakes a column for a capability: the 5 hard-delete
+paths destroy the trail along with the row they delete; no API surfaces the trail to a school, so today only someone
+with SQL can read it; and the bootstrap and scheduled write paths run with no request and therefore no claim, so they
+leave `created_by` NULL.
+
+**The migration numbering moved under this ADR's own prose.** `src/main/resources/db/migration` holds **seven**
+migrations, `V1`–`V7`, with `flyway-core` declared at `gms_backend/pom.xml:54`. `V7` is now `C-8`'s authorship
+migration, so the notification-recipient join tables — which earlier readings of this register described as inheriting
+`V7` — have **not** been authored and are owed a `V8`; nothing reserves `V7` for them any more.
+
+`ARCHITECTURE.md §4` and the roadmap's `C-3`, `C-4`, `C-7` and `C-8` cards carry the measurements and the
+deliberate-failure controls; the verification of layer 1 is in
+[BASELINE_STATUS.md §15](../audit/BASELINE_STATUS.md), of layer 2's declared reads in
+[§16](../audit/BASELINE_STATUS.md), of layer 3 in [§17](../audit/BASELINE_STATUS.md), and of layer 2's `C-4` half —
+with `C-5`'s endpoint gate, `C-6`'s role vocabulary and `C-8`'s authorship columns — in
+[§18](../audit/BASELINE_STATUS.md), which carries one subsection per card plus, at §18.6, the whole-build measurement:
+against a fresh `V1`→`V7` database holding two tenants, `scripts/verify-mvp-e2e.sh` reports **294 PASSED / 0 FAILED /
+0 SKIPPED** with `FEATURES PROVED: 11 of 11`; the card suites report `c1-tenancy` 29 PASSED / 0 FAILED, and
+passed/failed/skipped as `c2-tenant-context` 32/0/0, `c3-scoped-reads` 24/0/1, `c4-owned-reads` 118/0/17 and
+`c7-tenant-key` 65/0/1. ADR-020 is
+therefore **all three layers shipped** on this branch — and still not closed, because the inherited bulk reads and
+delete stay unfiltered, the whole-application cross-tenant suite over every protected resource (`DoD-3`) has not been
+run, `C-5`'s guards are untested per role with a real token, `C-8`'s trail is written but never surfaced, and RLS
+stays a Stage-7 evaluation. The roadmap says so rather than marking the ADR done.
 
 ### ADR-021 — A modular monolith enforced by architecture tests, not by moving 282 files
 
@@ -843,11 +877,30 @@ evaluation. The roadmap says so rather than marking the ADR done.
 > this ADR took is unaffected — the point was and is that the boundary is enforced by tests rather than by moving
 > files, and two fewer files to move does not change that.
 
+> **Re-measured 2026-11-02.** `gms_backend/src/main/java` holds **292** files, and three of the package counts in the
+> **Context** paragraph and the note above have moved again: `controller` is **36** — the 36th file is
+> `DashboardController`, added after `C-1` deleted the base classes, so this is a different 36 from the one the Context
+> paragraph counted; `repository` is **37** (36 interfaces plus `TenantScopedRepository`, which is a class and not an
+> interface); and the service tree is **76** files, 35 of them in `service/impl`. `model/entity` 37 and the
+> DTO/security/config packages are not re-counted here, so the "11 packages" decomposition above should be read as
+> historical. The decision is unaffected a third time: the boundary is still enforced by tests, and re-packaging is
+> still rejected on cost.
+
 **Decision.** Keep the layout; enforce the boundary with **ArchUnit** rules in the test scope, written as the six
 assertions in `ARCHITECTURE.md §7` (one writer per table, no cross-module repository access, no entity in a response,
 no tenant-less read, no `ResponseEntity` inside a service, every handler authorised). Violations are grandfathered by
 a frozen allow-list so the build fails on a **new** violation and not on history; the list shrinks stage by stage and
 a PR that lengthens it is refused.
+
+> **Corrected 2026-11-02 — the decision is intact, the instrument named in it is not what shipped.** No ArchUnit
+> dependency exists in `gms_backend/pom.xml`; the six assertions are enforced, where they are enforced at all, by
+> hand-written `*ArchTest` classes on JUnit 5 + AssertJ that reflect over the compiled classes or read source text.
+> The ADR's actual decision — *enforce the boundary with a build-failing test instead of moving 280 files* — is what
+> `TenantParameterArchTest`, `RepositoryTenantScopeArchTest`, `EntityTenantColumnArchTest`, `TenantScopedReadArchTest`,
+> `EntityLazyAccessorArchTest`, `EndpointInheritanceTest` and `DenyByDefaultAuthorizationArchTest` do today. Two of the
+> six are **not** enforced: one-writer-per-table and no-`ResponseEntity`-in-a-service remain prose, and
+> `ARCHITECTURE.md §7` now lists each rule against the test that holds it. This is the same defect `ADR-018` named in
+> the paragraph above — a guard recorded as existing without being observable — wearing a library name.
 
 **Alternatives rejected.**
 - *Re-package into `com.gms.<module>.{api,application,domain,persistence}` now* — 282 file moves, every `file:line`
@@ -863,16 +916,23 @@ a PR that lengthens it is refused.
   and true for architecture: *"the rules stop being enforceable-by-habit the moment the file is bigger than the
   person editing it."* Prose rules were exactly how `SEC-16`'s thirteen inert guards survived.
 
-**Consequences.** ArchUnit is a test-scope dependency from Maven Central, so the boundary rules run inside the
-`mvn verify` that CI already executes — no new job, no new cost, no new language. The allow-list means the rules are
+**Consequences.** The boundary rules are test-scope code — see the correction under **Decision** above, the library is
+hand-written reflection rather than ArchUnit — so they run inside the
+`mvn verify` that CI already executes: no new job, no new cost, no new language. The allow-list means the rules are
 introduced with debt named rather than debt hidden, and its count is the honest measure of `D-1…D-4` progress
-today: 90 entity-returning endpoints, 65 of 74 service files importing `ResponseEntity`, 6 unscoped repositories,
-3 unguarded inherited reads.
+today: 90 entity-returning endpoints, 65 of 76 service files importing `ResponseEntity` (the service tree is 76 files,
+35 of them in `service/impl`), the 6 unscoped repositories of the *baseline* count the list was frozen against — 3
+named exemptions remain today, `ParentRepository`, `SchoolRepository` and `DashboardStatisticsRepository` — and 3
+unguarded inherited reads. *The last two of those four are closed and the first two are not: the tenant-less read
+became `RepositoryTenantScopeArchTest`'s allow-list — 18 reasons at `C-3`, 23 at the build that closes `C-4`, both
+quoted in ADR-020 — plus `TenantScopedRepository`'s by-id predicate, the
+unguarded inherited read became `EndpointInheritanceTest`, and D-1/D-3 still have no test.*
 
 **Cost.** ₹0.
 **Verification.** The rules must fail on a violation that is *deliberately introduced*, the same control used for the
 HCL guards (`ADR-018`, PR #19) and for the CI path filter (`BASELINE_STATUS.md §11.1`): add one cross-module
-repository reference on a scratch branch, show ArchUnit red on exactly that assertion, restore. A rule that has never
+repository reference on a scratch branch, show the boundary test red on exactly that assertion, restore (for `D-1` and
+`D-3` this control is not yet performable — those two assertions have no test, so there is nothing to turn red). A rule that has never
 been observed to fail is documentation.
 
 ### ADR-022 — Flyway owns the schema; `ddl-auto` is `validate` in every profile, including dev
@@ -964,6 +1024,15 @@ the gate, not a preamble to it.
 constraint "fk_attendance_student_same_school"` (`§3`). That is the ADR's entire argument, demonstrated by a database
 instead of asserted by a document.
 
+> **Re-measured 2026-11-02 — the migration count in every paragraph above is the Stage-2 one.** `src/main/resources/db/migration`
+> holds **seven** migrations, `V1`–`V7`, and `V7` is `C-8`'s authorship file (`V7__record_who_wrote_the_pupil.sql`); the
+> notification-recipient join tables have **not** been authored and now owe a `V8`, so no passage may reserve `V7` for
+> them or describe the tree as `V1`–`V6`. `flyway-core` is declared at `gms_backend/pom.xml:54`. The **Context**
+> paragraph's numbers stay as the 2026-11-01 baseline rather than being rewritten: today `ddl-auto=validate` is the
+> value in **every** profile — `application.properties:33` and `application-dev.properties:26` — and `update` appears
+> in **no** profile, which is this ADR's decision implemented; `spring.jpa.open-in-view=false` sits at
+> `application.properties:36`.
+
 ### ADR-023 — Delete `AbstractCRUDController` and `AbstractCRUDService`
 
 **Status:** **Accepted and implemented** on `feat/stage2-flyway-baseline`, 2026-11-01. **Closes:** `SEC-05`.
@@ -995,6 +1064,19 @@ behaviour, the shared thing becomes a **service method**, not a mapping.
   `SEC-06` (matcher order shadowing the method-level grants) and `SEC-16` (inert vocabulary) both show this codebase
   cannot operate safely. Method security stays the mechanism; a build-time scan that fails on an unannotated handler
   is the enforcement (`ARCHITECTURE.md §7`).
+  > **Both halves of this sentence later moved, in opposite directions.** The scan shipped on 2026-11-02 as
+  > `gms_backend/src/test/java/com/gms/security/DenyByDefaultAuthorizationArchTest.java` (7 tests: per-handler
+  > `@PreAuthorize`, no class-level guard, no `hasRole`/`hasAnyRole`, every authority in the granted vocabulary, no
+  > stale or double-covering exemption) — the guard count this ADR recorded rising to 210 is, at `C-5`'s close and as
+  > the test prints it, **236 handlers, 234 guarded, 2 deliberately public** (`AuthController.login`,
+  > `HealthController.ping`). And the chain did take a `denyAll()` catch-all (`SecurityConfig.java:152`), which is *not* a reversal of
+  > this rejection: what was rejected was the filter chain becoming the authorisation model, and it has not — the
+  > matchers are perimeters that admit a role class, the decision on any given endpoint is still the annotation, and
+  > the catch-all only decides routes nobody named. It has one consequence worth recording: an endpoint whose prefix no
+  > matcher names is now refused for **every** caller, so the matcher list needs an inventory whenever a route is
+  > added. `ParentController`'s `POST /create`, `PUT /update`, `GET /parents` and `PATCH /toggle`
+  > (`ParentController.java:39-76`) are in exactly that position today — guarded `ADMIN`/`SUPERADMIN`, matched by
+  > nothing, answered 403 by `denyAll()`.
 - *Leave it and fix by exception* — rejected because the exception list is what people are asked to remember, and
   `TEN-01`/`TEN-04`/`TEN-07` are four documented ways that remembering already failed.
 
@@ -1018,7 +1100,8 @@ unguarded `getAll` was one of them. The guard count rises from **206 to 210**: t
 > `PUT /subjects/update/{id}` and the controller declares `PUT /subjects/update/{id}`; measured **200**.
 
 **Implementation (2026-11-01).** Both classes are deleted. 25 service implementations dropped `extends
-AbstractCRUDService<X, Integer>` and their `super(repository)` call; 0 of the 36 controllers now extend anything.
+AbstractCRUDService<X, Integer>` and their `super(repository)` call; 0 of the 36 controllers now extend anything
+(`ls gms_backend/src/main/java/com/gms/controller | wc -l` returns **36**).
 `GET /{id}` is declared explicitly, and tenant-scoped, on `Student`, `Employee` and `School`; it is **not** declared
 on `Parent` (the tenant lives on `parent_student`, not on `parents`) and not on `User` (it already had one, and it is
 now scoped). `DELETE /{id}` is declared, tenant-scoped and `ADMIN`/`SUPERADMIN`-only on `Subject` and `Classroom`,
@@ -1026,6 +1109,13 @@ where the frontend calls it. Three tenancy holes closed along the way, each foun
 inheritance had been hiding: `ParentServiceImpl.findBySchool` returned **every platform's parents**; `UserService`'s
 `getById`/`deleteById` pair had no tenant predicate, so any administrator could read or delete any other school's
 account; and `SchoolService.getById` did not exist, so the platform owner could list schools but not read one.
+
+> **Corrected 2026-11-02 — the footnote this Implementation line first carried for its own count was false.** It read
+> "0 of the 35 controllers now extend anything (`ls … | wc -l` — the count this line first carried, 36, included the
+> deleted base class)". Both halves are wrong: `AbstractCRUDController` is **not** one of the files `ls` returns today,
+> because `C-1` deleted it, and the directory is **36**, not 35 — it grew a 36th file, `DashboardController`, after the
+> deletion. The claim survives its bad footnote: **0 of the 36 controllers extend anything**, and
+> `grep -rn "extends AbstractCRUD" gms_backend/src/main/java/` still returns no output.
 
 **Two 500s found by running it, not by reading it.** The live run against a real PostgreSQL surfaced two
 client-error paths that the catch-all `@ExceptionHandler(Exception.class)` was answering as **500**:
@@ -1084,7 +1174,7 @@ missing parameter, type mismatch) is still outstanding and belongs to Stage 4's 
 | 017 | OCI deployment transport | Proposed, deferred until the host exists — which now has a date: Stage 6 | — |
 | 018 | OpenTofu for OCI infra; §9 rules encoded as HCL guards | **Accepted** | — |
 | 019 | Application first, cloud at Stage 6; Stages 1–5 need zero cloud resources | **Accepted**; supersedes the *sequencing* of 015/016, never their targets | nothing until Stage 6 |
-| 020 | Shared schema, `school_id` on every row, composite FK to the parent's `(id, school_id)` | **Accepted**; layer 1 (the claim) **shipped 2026-11-01** with Stage 3 `C-2`, layer 2 (the query discriminator) **shipped the same day** for every declared read with `C-3`, layer 3 (the materialised key) **shipped the same day** with `C-7` — the nine entities map the column, ten `SET NOT NULL` land as `V6` behind backfill-and-assert, `parent_student` is held by trigger, and 18 same-school foreign keys now bind the application's own writes; `C-8`'s join tables inherit `V7` — RLS deferred to a Stage-7 evaluation, deliberately kept addable. Not closed: inherited reads still load before they check (`C-4`), and the endpoint is not deny-by-default (`C-5`) | — |
-| 021 | Modular monolith enforced by ArchUnit over the existing package-by-layer layout | **Accepted**; re-packaging retained as a post-DoD mechanical step | — |
-| 022 | Flyway owns the schema; `ddl-auto=validate` in **every** profile | **Accepted**, amends 006 | — |
-| 023 | Delete `AbstractCRUDController` / `AbstractCRUDService` | **Accepted and implemented 2026-11-01**; closes `SEC-05` — 79 tests green, live tenancy run 29/29 | — |
+| 020 | Shared schema, `school_id` on every row, composite FK to the parent's `(id, school_id)` | **Accepted**; layer 1 (the claim) **shipped 2026-11-01** with Stage 3 `C-2`, layer 2 (the query discriminator) **shipped the same day** for every declared read with `C-3` and **completed 2026-11-02** for the inherited by-id read with `C-4` — `TenantScopedRepository` overrides `findById` so the ownership check sits at the point of load and a wrong-tenant by-id read answers 404 — layer 3 (the materialised key) **shipped 2026-11-01** with `C-7`: the nine entities map the column, ten `SET NOT NULL` land as `V6` behind backfill-and-assert, `parent_student` is held by trigger, and 18 same-school foreign keys now bind the application's own writes — and `C-8` (audit authorship), **executed 2026-11-02** alongside `C-4`/`C-5`/`C-6`: `V7__record_who_wrote_the_pupil.sql` adds `created_by`/`updated_by` to `students`, `classrooms`, `subjects` and `student_admissions` under 8 `REFERENCES public.users(id)` keys at `NO ACTION`. Because `V7` is that migration, the notification-recipient join tables are **not authored** and owe a `V8` — any row or note saying they "inherit `V7`", or dating the tree to `V1`–`V6`, is superseded by this row. RLS deferred to a Stage-7 evaluation, deliberately kept addable. Not closed: the inherited `findAll` / `findAllById` / `delete` still carry no predicate, no cross-tenant suite covers every protected resource (`DoD-3`), and `C-8`'s trail is destroyed by the 5 hard-delete paths, surfaced to no school by any API, and left `NULL` by the bootstrap and scheduled write paths | — |
+| 021 | Modular monolith enforced by ArchUnit over the existing package-by-layer layout | **Accepted**; re-packaging retained as a post-DoD mechanical step. *Corrected 2026-11-02:* "ArchUnit" is the decision as written, not the instrument that shipped — there is no ArchUnit dependency in `gms_backend/pom.xml`; see the correction under ADR-021's **Decision** (hand-written `*ArchTest` classes) and its 2026-11-02 re-measurement for the current 292-file tree and 36 controllers | — |
+| 022 | Flyway owns the schema; `ddl-auto=validate` in **every** profile | **Accepted**, amends 006. *Re-measured 2026-11-02:* seven migrations `V1`–`V7` (`V7` = `C-8`'s authorship file; the recipient join tables owe `V8`), `flyway-core` at `gms_backend/pom.xml:54`, `validate` in every profile with `update` in none | — |
+| 023 | Delete `AbstractCRUDController` / `AbstractCRUDService` | **Accepted and implemented 2026-11-01**; closes `SEC-05` — 79 tests green, live tenancy run 29/29 (both the `C-1` card's numbers). *Re-measured 2026-11-02:* 36 controllers, none extending anything; 236 handler mappings, 234 carrying `@PreAuthorize`, 2 deliberately public (`AuthController.login`, `HealthController.ping`); 106 tests green across 16 test classes and `c1-tenancy` 29 PASSED / 0 FAILED on the current build | — |
