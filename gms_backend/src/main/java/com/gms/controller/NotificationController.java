@@ -71,8 +71,12 @@ public class NotificationController {
         return notificationService.getNotificationsByRecipientType(schoolId, recipientType);
     }
 
+    // Admin-only because nothing on this path ever compared the id in it to the caller: a TEACHER or
+    // PARENT could walk the ids and read another user's notifications (finding TEN-03). The SPA has no
+    // call to this route — it reads /notifications/{id}/read — so narrowing it removes a surface without
+    // removing a feature.
     @GetMapping("/user/{userId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<Notification>> getNotificationsByUserId(@PathVariable Integer userId) {
         Integer schoolId = SecurityUtil.getSchoolIdFromToken();
         return notificationService.getNotificationsByUserId(schoolId, userId);

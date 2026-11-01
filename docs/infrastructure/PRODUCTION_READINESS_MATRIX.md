@@ -80,7 +80,7 @@ Each item names the command or artefact that produced the status. An item with n
 | SBOM | `NOT_IMPLEMENTED` | none produced by any run |
 | Migration validation | `BLOCKED` | no migration tool exists (OPS-07) and the prod profile has never booted (INF-11) |
 | Container smoke test | `NOT_IMPLEMENTED` | CI builds a jar, never an image, never starts a stack |
-| Integration tests against a real database | `NOT_IMPLEMENTED` | no Testcontainers; 36 unit tests only (M1) |
+| Integration tests against a real database | `NOT_IMPLEMENTED` | no Testcontainers; 42 unit tests only (36 from M1 + 6 in `fix/tenant-notification-recipients`) |
 | Advisory vs blocking gates distinguished honestly | `VERIFIED` | the lint step carries its measured count and its reason in `ci.yml`, and `npm test` remains explicitly non-blocking pending M3 of the security programme |
 
 ### 2.3 CD / deployment
