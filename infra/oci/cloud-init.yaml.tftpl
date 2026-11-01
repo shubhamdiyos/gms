@@ -1,0 +1,132 @@
+#cloud-config
+# §9.4 server hardening, executed at first boot. This is the whole content of
+# the instance's user_data; it is rendered by templatefile() in compute.tf, so
+# the deploy-user reference above is a Terraform interpolation. Every other
+# dollar-brace in this file is escaped with a second dollar so it survives into
+# the boot script — apt and dpkg substitute those themselves. Unescaped,
+# templatefile() fails the plan trying to resolve distro_id as an input
+# variable, which is how a copy of this file without the escapes can never have
+# been run. Even a comment containing a bare dollar-brace is parsed, so the
+# escapes are load-bearing prose, not decoration.
+#
+# Deliberately absent: any secret. Cloud-init user_data is readable through the
+# instance metadata service, so anything interpolated here is public to anyone
+# who can reach 169.254.169.254 from this host. Application configuration is
+# injected later from the runtime env file, never from this template.
+
+package_update: true
+package_upgrade: true
+
+packages:
+  # Docker Engine and Compose v2 from the Ubuntu archive — ARM64 packages exist
+  # there, so no third-party apt repository and no curl | sh (§9.4 installs
+  # "Docker Engine and Docker Compose v2" without naming a vendor script).
+  - docker.io
+  - docker-compose-v2
+  - ufw
+  - unattended-upgrades
+  - logrotate
+  - curl
+  - ca-certificates
+  - git
+
+users:
+  - name: ${deploy_user}
+    shell: /bin/bash
+    groups: [sudo, docker]
+    lock_passwd: true
+    sudo: "ALL=(ALL) NOPASSWD:ALL"
+
+write_files:
+  # 5432 never listens on a public interface (§9.2). PostgreSQL is Neon; the
+  # disposable dev database in docker-compose.yml binds to 0.0.0.0, and that
+  # binding must not be reproduced on this host.
+  - path: /etc/docker/daemon.json
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      {
+        "log-driver": "json-file",
+        "log-opts": { "max-size": "50m", "max-file": "5" }
+      }
+
+  - path: /etc/apt/apt.conf.d/20auto-upgrades
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      APT::Periodic::Update-Package-Lists "1";
+      APT::Periodic::Unattended-Upgrade "1";
+
+  - path: /etc/apt/apt.conf.d/52unattended-upgrades-local
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      Unattended-Upgrade::Allowed-Origins {
+          "$${distro_id}:$${distro_codename}-security";
+          "$${distro_id}ESVApps:$${distro_codename}-apps-security";
+      };
+      Unattended-Upgrade::Automatic-Reboot "false";
+
+  - path: /etc/systemd/journald.conf.d/50-gms.conf
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      [Journal]
+      SystemMaxUse=200M
+
+  - path: /etc/logrotate.d/gms
+    owner: root
+    group: root
+    mode: "0644"
+    content: |
+      /var/lib/docker/containers/*/*.log {
+        daily
+        rotate 7
+        compress
+        missingok
+        delaycompress
+        copytruncate
+      }
+
+runcmd:
+  # Firewall. The OCI security list is the enforcement point for *source*
+  # restriction; ufw here limits this host to the three ports §9.2 makes public
+  # and does not repeat the /32, because an IP-bound host rule locks the owner
+  # out the moment their ISP reassigns them.
+  - ufw default deny incoming
+  - ufw default allow outgoing
+  - ufw allow 22/tcp
+  - ufw allow 80/tcp
+  - ufw allow 443/tcp
+  - ufw --force enable
+
+  # The Docker daemon stays local. No -H listener and no systemd socket
+  # override: "do not expose Docker daemon remotely" (§9.4).
+  - systemctl enable --now docker
+
+  # Application directories, group-readable only — "avoid storing secrets in
+  # world-readable files" (§9.4). The runtime env file lives in /etc/gms at 0640.
+  - install -d -m 0750 -o ${deploy_user} -g ${deploy_user} /opt/gms
+  - install -d -m 0750 -o ${deploy_user} -g ${deploy_user} /etc/gms
+
+  # Key-based SSH only, and only where it is safe: password authentication is
+  # disabled if and only if the deploy user already has an authorized key from
+  # the metadata ssh_authorized_keys. Without a key present the same script
+  # leaves passwords on and says so, because "disable password-based SSH where
+  # safe and verified" (§9.4) is conditional, and an unconditional drop-in is a
+  # lockout with longer uptime.
+  - sh -c 'if [ -s /home/${deploy_user}/.ssh/authorized_keys ]; then printf "PasswordAuthentication no\nPermitRootLogin no\nPubkeyAuthentication yes\nX11Forwarding no\nMaxAuthTries 4\n" > /etc/ssh/sshd_config.d/60-gms-hardening.conf; chmod 0644 /etc/ssh/sshd_config.d/60-gms-hardening.conf; systemctl reload ssh; echo "ssh hardening applied: authorized key verified present"; else echo "SKIPPING ssh hardening: no authorized key present for ${deploy_user} — password auth left on deliberately so this host is not unreachable"; fi'
+
+  - usermod -aG docker ${deploy_user}
+  - systemctl restart systemd-journald
+  - systemctl enable --now apt-daily-upgrade.timer
+
+  # Nothing here removes a package or stops a service beyond the defaults, and
+  # no snapshot is taken without a name. §9.4's "avoid unnecessary services" is
+  # satisfied by what this script installs, not by uninstalling the base image.
+
+final_message: "gms host hardening complete (third mandate 9.4)"

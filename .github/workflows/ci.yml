@@ -99,3 +99,101 @@ jobs:
 
       - name: Production build
         run: npm run build
+
+  infrastructure:
+    name: Infrastructure definitions
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    env:
+      # Same version as the tool of record on the operator's machine, and the
+      # same version whose SHA-256 is recorded in infra/oci/README.md. Upgrading
+      # it is a deliberate edit in two places, not a moving tag.
+      TOFU_VERSION: '1.13.2'
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      # No third-party OpenTofu action is used, so this adds nothing to pin and
+      # nothing to the supply chain: two downloads, and the archive is only
+      # unpacked after its digest matches the publisher's own SHA256SUMS.
+      - name: Install OpenTofu, checksum-verified
+        run: |
+          set -euo pipefail
+          v="$TOFU_VERSION"
+          base="https://github.com/opentofu/opentofu/releases/download/v${v}"
+          curl -fsSL -o "/tmp/tofu_${v}_linux_amd64.zip" "${base}/tofu_${v}_linux_amd64.zip"
+          curl -fsSL -o /tmp/sums.txt "${base}/tofu_${v}_SHA256SUMS"
+          grep "tofu_${v}_linux_amd64.zip\$" /tmp/sums.txt > /tmp/only.sum
+          ( cd /tmp && sha256sum --strict --check only.sum )
+          unzip -q -o "/tmp/tofu_${v}_linux_amd64.zip" tofu -d /usr/local/bin
+          tofu version
+
+      - name: Formatting is canonical
+        run: tofu fmt -check -recursive infra/oci
+
+      - name: Init without a backend
+        run: tofu -chdir=infra/oci init -backend=false -input=false
+
+      - name: Validate
+        run: tofu -chdir=infra/oci validate
+
+      # This is the step that earns its place. `tofu validate` does NOT evaluate
+      # variable validation blocks — measured on 2026-11-01: all seven invalid
+      # values below return exit 0 and "Success! The configuration is valid" from
+      # validate, and only `tofu plan` raises them. Plan also fails here on the
+      # missing ~/.oci/config, which is exactly right: the validation error is
+      # reported alongside it, not after it, so the guards are testable with no
+      # credentials and no cloud call. Deleting a validation block therefore
+      # breaks this job instead of quietly removing a production safety rule.
+      - name: Every plan-time guard still refuses the dangerous value
+        run: |
+          set -uo pipefail
+          # All three required variables are set here even when a check is about a different one.
+          # Without ssh_source_cidr the plan aborts on "No value for required variable" *before*
+          # validation runs, so six of the seven checks pass their tofu invocation and then report
+          # the guard as missing. That is how this step failed on its first real run, and it is the
+          # reason the suite is self-contained instead of relying on a terraform.tfvars that CI has
+          # never seen.
+          base=(-var="compartment_ocid=ocid1.compartment.oc1..caplaceholder"
+                -var="ssh_public_key_path=/tmp/ci_gms.pub"
+                -var="ssh_source_cidr=203.0.113.7/32")
+          fails=0
+          # The output is captured before it is matched, on purpose. `tofu plan … | grep -q` under
+          # `pipefail` inverts this step: grep exits the instant it matches, tofu takes SIGPIPE with
+          # status 141, the pipeline is non-zero, and all seven guards read as broken while every one
+          # of them is firing. That bug was in the first version of this step and cost an hour.
+          check() {
+            local label="$1" badvar="$2" out
+            out=$(tofu -chdir=infra/oci plan -input=false "${base[@]}" -var="$badvar" 2>&1 || true)
+            case "$out" in
+              *"Invalid value for variable"*)
+                echo "ok   ${label}" ;;
+              *)
+                echo "::error::${label}: no validation error was raised. The guard is missing, mis-typed, or was deleted."
+                printf '%s\n' "$out" | tail -20
+                fails=1 ;;
+            esac
+          }
+          check "broad SSH source 0.0.0.0/0"     "ssh_source_cidr=0.0.0.0/0"
+          check "SSH prefix wider than /32"      "ssh_source_cidr=203.0.113.0/24"
+          check "private key instead of .pub"    "ssh_public_key_path=/home/runner/.ssh/id_rsa"
+          check "compartment that is not an OCID" "compartment_ocid=tenancy-abc"
+          check "deploy_user=root"               "deploy_user=root"
+          check "shape_ocpus above the allowance" "shape_ocpus=8"
+          check "boot volume above the allowance" "boot_volume_size_gb=400"
+          exit "$fails"
+
+      # §9.2's port rules are the reason the security list exists, and the
+      # failure mode is a future edit adding one ingress rule "temporarily".
+      - name: Forbidden ports are not published
+        run: |
+          set -euo pipefail
+          if grep -nE 'min[[:space:]]*=[[:space:]]*(5432|8080|3000)|max[[:space:]]*=[[:space:]]*(5432|8080|3000)' \
+               infra/oci/network.tf; then
+            echo "::error::network.tf publishes a port §9.2 forbids (5432, 8080, 3000)"
+            exit 1
+          fi
+          if ! grep -q 'local.shape' infra/oci/compute.tf || ! grep -q 'VM.Standard.A1.Flex' infra/oci/data.tf; then
+            echo "::error::the instance shape is no longer the Always Free ARM shape fixed in data.tf — paid shapes are excluded by construction, not by default"
+            exit 1
+          fi
+

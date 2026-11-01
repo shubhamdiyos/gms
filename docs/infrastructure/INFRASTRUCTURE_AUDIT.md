@@ -1008,7 +1008,7 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 | Repository, branches, PRs, workflow files | **Full** | `gh` authenticated as the owner; token scopes `gist, read:org, repo, workflow`; `workflow_dispatch` and `workflow` edits both work |
 | Branch protection / required checks / secrets inventory | **Full (admin)** | `gh api …/branches/master/protection` reads and writes; `gh secret list` works. Values are never readable, only their names — by design |
 | Backend/frontend builds, tests, container builds | **Full locally** | `mvn`, `node`, `docker`/Compose v5.6.1, BuildKit present; arm64 already matches the OCI target. Needs Colima started, which costs nothing but time |
-| Oracle Cloud provisioning | **Tooling installed, authentication missing** | `oci` CLI **3.95.1** now present in `~/.venvs/oci-cli` (installed after the owner withdrew the browser route; `brew` could not be used — it aborts on `unknown or unsupported macOS version: "27.0.1"`). No `~/.oci/config`, no key pair, so no API call has been made and **nothing has been created or inspected in the tenancy**. `terraform`/`tofu` are not installed. `oci setup config` is interactive-only, which is the one step that genuinely needs the owner (§9.3: their public key, never their private one) |
+| Oracle Cloud provisioning | **Tooling installed, stack written and validated, authentication missing** | `oci` CLI **3.95.1** in `~/.venvs/oci-cli` (installed after the owner withdrew the browser route; `brew` could not be used — it aborts on `unknown or unsupported macOS version: "27.0.1"`). **OpenTofu v1.13.2** now in `~/.local/bin/tofu`, archive SHA-256 verified against the published `tofu_1.13.2_SHA256SUMS`, provider `oracle/oci` **9.11.0** pinned in `.terraform.lock.hcl` (ADR-018). [`infra/oci/`](../../infra/oci/README.md) holds §9's VCN/IGW/subnet/security-list/instance and passes `tofu validate`; its seven plan-time guards were each fired on this machine. Still true: no `~/.oci/config`, no key pair, so **no API call has been made, nothing has been inspected in the tenancy and nothing has been created**. `oci setup config` takes no options at all (verified against its `--help`), so it is the one step that genuinely needs the owner (§9.3: their public key, never their private one) |
 | Neon provisioning | **None** | no `neonctl`, no API key, no account session. `neonctl` installs from npm; auth needs the owner's login |
 | DNS for `bytencia.com` | **Unknown** | no registrar/DNS provider identified in the repository or in tooling. Until DNS is reachable, Caddy has no hostname to obtain a certificate for, so INF-01 cannot close |
 
@@ -1016,9 +1016,13 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 1. **Neon account** — creation needs email verification (third mandate §8.1 permits stopping here and nowhere earlier).
    After that, an API key or `neonctl auth` session lets me create `gms-production` and the least-privilege role.
-2. **OCI API credentials** — an API signing key pair plus `tenancy/user/fingerprint/region` in `~/.oci/config`, or
-   a console session I can drive. The private key must never enter chat or git (§9.3, §14); it is written locally by
-   the owner, and I only ever read the config path.
+2. **OCI API credentials** — the single step `oci setup config` forces a human to take, because it accepts no
+   options and therefore cannot be driven from here. [`infra/oci/README.md`](../../infra/oci/README.md) holds the
+   five prompts and where each value comes from; the CLI generates the key pair locally, only
+   `~/.oci/oci_api_key_public.pem` is ever uploaded to the Console, and the passphrase is typed once in the
+   owner's terminal. Nothing in that sequence needs to enter chat (§9.3, §14), and once `oci iam region list`
+   returns a table every remaining step — preflight, plan, cost verification, apply, post-apply checks — is
+   scriptable from here.
 3. **DNS access for `bytencia.com`** — which provider serves the zone, and a record I can add. Free if it is the
    registrar's own DNS.
 4. **The branch-protection decision, stated under this table** — the one blocker that is a *choice* rather than a
