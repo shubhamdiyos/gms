@@ -878,6 +878,8 @@ These are not M0 results, so they are kept separate rather than retro-fitted int
 | actionlint 1.7.12 against both workflows | **exit 0** locally (binary downloaded, not installed system-wide) and **exit 0** in CI on run 41283277168 |
 | Every action reference SHA-pinned | **9 of 9** — 6 in `ci.yml` (this PR), 3 in `validate-workflows.yml`; the guard enumerates them by `grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]'` |
 | Each pinned SHA against its upstream tag | **verified before pinning**: `11d5960`=checkout v4.4.0, `cf277c6`=setup-java v4.9.1, `ea165f8`=upload-artifact v4.6.2, `49933ea`=setup-node v4.4.0, `3d3c42e`=checkout v7.0.1, `914e7df`=actionlint v1.7.12 |
+| A documentation-only PR after the gate reached `master` | **no Actions run at all** — measured on PR #15 (4 files, all `docs/**`): `gh run list --branch docs/record-inf23-gate-merge` is empty and `gh pr checks 15` shows only the Vercel app's two contexts. Correct for both path filters, and the reason neither filter can be left in place while its jobs are marked required (INF-10) |
+| CI on `master` after `gms_frontend/vercel.json` was deleted | **run 41283928312, success** on merge commit `964acad`. Notable because it contradicts an assumption carried into the retirement: `vercel.json` is not in `ci.yml`'s `paths-ignore`, so deleting a frontend config file *is* a CI-relevant change, and the frontend job passing is the evidence that nothing depended on it |
 
 ### 7.1 Image build result
 
