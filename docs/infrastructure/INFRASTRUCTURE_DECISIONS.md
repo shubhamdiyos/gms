@@ -586,7 +586,8 @@ route just withdrawn, and it holds no state, so it cannot answer "does this alre
 question that prevents a second VCN.
 
 **The part that matters more than the tool choice.** Four of §9's rules are enforced by construction rather
-than by care, and every row below was executed on this machine, not assumed:
+than by care, and every row below was executed rather than assumed — first on this machine, and since PR #18 on every
+change to the stack in CI:
 
 | Rule in §9 | Mechanism | Measured |
 |---|---|---|
@@ -610,9 +611,14 @@ and anyone documenting this stack has to say which of the two they ran.
 One caveat belongs in the record because it happened: a first pass of that test reported all seven as *caught*
 by `tofu validate`, and three later reproductions of the same command — including the identical piping — report
 all seven as *not* caught, with captured exit codes. The discrepancy is in the harness (a pipe-then-`grep -q`
-loop in an interactive zsh), not in OpenTofu, and it is not resolved. The exit-code runs are the ones cited, and
-a claim that flips when the test is written differently is a reason to write the test down, not to pick the
-convenient answer.
+loop in an interactive zsh: `grep -q` exits the moment it decides, SIGPIPEs the producer, and the pipeline reports
+failure for a command that succeeded), not in OpenTofu. That is now closed rather than merely noted. Two
+independent things happened since: the exit-code runs kept saying the same thing, and the same assertion was
+re-run on GitHub's runners with the output captured into a variable instead of piped — where a guard physically
+deleted from `variables.tf` left `tofu validate` **green** (run 41289417174). A harness written differently is no
+longer the only evidence, and both readings agree. The lesson survives the resolution: a claim that flips when the
+test is written differently is a reason to write the test down, not to pick the convenient answer — and writing it
+down, in CI, is what closed it.
 
 State is local and gitignored. That is honest for one operator on one laptop and unsafe the moment a second
 exists: two working copies against one local `terraform.tfstate` is how production gets two VCNs. Remote state
@@ -621,7 +627,15 @@ is a migration to plan, not a backend block to add on hope.
 **Cost.** ₹0 — OpenTofu and the provider are downloads, and nothing in this decision contacts OCI.
 **Verification.** `tofu version` = v1.13.2 (archive SHA-256 checked against the published `SHA256SUMS`),
 `tofu init` resolving `registry.opentofu.org/oracle/oci` 9.11.0, `tofu validate` →
-`Success! The configuration is valid`, and the guard table above reproduced by running the plans.
+`Success! The configuration is valid`, and the guard table above reproduced by running the plans. The suite then
+moved off this machine, because a table of results I ran once is not a gate: PR #18 added a `ci.yml` job that runs
+`fmt -check`, `init -backend=false`, `validate`, the seven-value guard suite and the §9.2 port grep, and it executed
+on the pull request (run 41287513214) and on the push to `master` at that PR's own merge commit (run 41287750885),
+7/7 `ok` in each. So a deleted guard now fails a build rather than only failing to be noticed — and that last claim
+was itself tested, by deleting one: PR #19 (closed unmerged) removed the `ssh_source_cidr` validation block, and run
+41289417174 came back green through `validate` and red at the guard step with exactly the two SSH-source assertions
+failing. `tofu validate` passing across a physically deleted guard, on GitHub's runner, is this ADR's central claim
+reproduced somewhere other than the machine that wrote it.
 **Not verified, and not claimable yet: any plan or apply against the real tenancy**, because
 `oci setup config` is interactive-only and the owner has not run it. See ADR-015.
 
@@ -645,7 +659,7 @@ is a migration to plan, not a backend block to add on hope.
 | 012 | `Infra-M` vs security `M` naming | Accepted | — |
 | 013 | Vercel SPA, API-only origin | Proposed, origin re-targeted; EC2 rewrite deleted | domain decision |
 | 014 | Declared interruption, no zero-downtime claim | Accepted | — |
-| 015 | OCI Always Free ARM64 VM + Compose | Accepted as target, **not provisioned**; stack now exists in `infra/oci` and validates, but nothing has been applied | **`oci setup config` (interactive); free-eligibility + public-IP cost confirmation** |
+| 015 | OCI Always Free ARM64 VM + Compose | Accepted as target, **not provisioned**; the stack is on `master` in `infra/oci`, validates, and its guards run in CI — but nothing has been applied | **`oci setup config` (interactive); free-eligibility + public-IP cost confirmation** |
 | 016 | Fresh owner-owned Neon; old Neon retired | Accepted, **not created** | **account creation, email verification** |
 | 017 | OCI deployment transport | Proposed, deferred until the host exists | — |
 | 018 | OpenTofu for OCI infra; §9 rules encoded as HCL guards | **Accepted** | — |

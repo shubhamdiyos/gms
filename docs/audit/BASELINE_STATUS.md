@@ -359,23 +359,45 @@ override. On a single-account repository the configured rule (`required_approvin
 `require_last_push_approval = true`) can never be satisfied, because GitHub refuses an author's own approval;
 Infra-M2 has to choose a protection shape that is satisfiable rather than rely on repeated bypasses.
 
-**Seven consecutive PRs have now needed one.** #13 (EC2 retirement, `964acad`, 2026-11-01T07:13:33Z) and #14 (the
+**Nine consecutive PRs have now needed one.** #13 (EC2 retirement, `964acad`, 2026-11-01T07:13:33Z) and #14 (the
 workflow-validation gate, `13bc2ed`, 07:14:21Z) both hit `REVIEW_REQUIRED` and both went in on the owner's standing
 instruction to manage the PR lifecycle rather than queue it for a reviewer who cannot approve their own work, followed
-by #15 (`d274ebc`, 07:27:32Z) — the documentation pass that recorded those two — and #16 (`7fb25b8`, 07:27:41Z), the
-citation-key fix, ninety seconds after the pair that preceded them and **nine seconds** after #15: two branches
-stacked on one base, merged as fast as the CLI would let them be. No required check was bypassed: #13's CI jobs,
-#14's two `Workflow validation` jobs and #15/#16's absence of runs under `paths-ignore` are all consistent, and
-`Workflow validation` re-ran green on master's own `7fb25b8` (run 41284869478). What is overridden every single time is
-review, not verification, and that distinction is why the override keeps feeling defensible while the rule keeps being
-meaningless.
+by #15 (`d274ebc`, 07:27:31Z) — the documentation pass that recorded those two — and #16 (`7fb25b8`, 07:27:41Z), the
+citation-key fix, **nine seconds** after #15: two branches stacked on one base, merged as fast as the CLI would let
+them be. Then #17 (`ea3cebf`, 07:33:52Z), the pass that counted seven, and #18 (`3cf8fa1`, 08:10:46Z), the OpenTofu
+stack, thirty-seven minutes later.
 
-The count is stated as seven rather than as "every PR this year" because of what the API can and cannot prove.
-`GET /pulls/N/reviews` is an empty array for #10 through #16, so none of them ever held an approving review, and
-`required_approving_review_count` has been 1 across that whole window. #8 and #9 also report zero reviews and
-`mergeable_state: blocked`, but that field is recomputed against the *current* protection rules, so it cannot show
-what the configuration was when a May 2026 PR merged. The defensible claim is therefore the window this programme
-owns: seven merges, seven overrides, zero reviews.
+No required check was bypassed: #13's CI jobs, #14's two `Workflow validation` jobs and #15/#16's absence of runs under
+`paths-ignore` are all consistent, and `Workflow validation` re-ran green on master's own `7fb25b8` (run 41284869478).
+#18's run is the one that changes what this paragraph can say. All three `ci.yml` jobs were green on the pull request
+(run 41287513214) and the new `Infrastructure definitions` job then re-executed on the push to `master` at its own
+merge commit (run 41287750885, job 124792405019), where each of its seven guard assertions printed `ok` and the §9.2
+port grep found nothing. So the merge that *added a check* was itself gated by nothing: the new job is not in
+`contexts` either, and with `contexts = []` a fourth green job is exactly as non-binding as the first three. The number
+of assertions in `ci.yml` is therefore not a proxy for protection, and growing the gate cannot close INF-10 — only the
+protection shape can. What is overridden every single time is review, not verification, and that distinction is why the
+override keeps feeling defensible while the rule keeps being meaningless.
+
+The count is stated as nine rather than as "every PR this year" because of what the API can and cannot prove.
+`GET /pulls/N/reviews` was called once per PR for #10 through #18 and returned an empty array nine times, so none of
+them ever held an approving review, and `required_approving_review_count` has been 1 across that whole window —
+re-read after the ninth merge, still `contexts: []`, `strict: false`, `enforce_admins: false`, i.e. nothing about the
+configuration changed to make any of this necessary. #8 and #9 also report zero reviews and `mergeable_state: blocked`,
+but that field is recomputed against the *current* protection rules, so it cannot show what the configuration was when a
+May 2026 PR merged. The defensible claim is therefore the window this programme owns: nine merges, nine overrides, zero
+reviews. The merge that lands this paragraph is the tenth, and the pass that counts it is the eleventh — a documentation
+loop that only ends when the rule changes, not when it is measured.
+
+Two measurement corrections belong here, because an earlier version of this section got them wrong and the errors were
+in the direction of sounding worse. #13 and #14 are **forty-eight** seconds apart, not eighty-eight, and #15 follows
+#14 by thirteen minutes, not ninety seconds; both figures now come from the merge commits themselves. Those commits are
+also the timestamp source for #18, for a reason worth recording: `GET /pulls/18` reports `merged_at`
+`2026-11-01T09:10:46Z` and `GET /actions/runs/41287750885` reports `created_at` `09:10:49Z`, while
+`GET /commits/3cf8fa1` reports a committer date of `08:10:46Z` and the runner's own log lines for that job are stamped
+`08:10:59Z`–`08:11:06Z`. GitHub is therefore disagreeing with itself by exactly one hour about a merge that happened
+eleven minutes ago, and the commit plus the runner clock are the two surfaces that agree with each other. #10 through
+#17 show no such split — commit date and `merged_at` match to the second — so this is not a systematic offset in one of
+the two fields, and the interval claims above use one source throughout rather than mixing them.
 
 The change that would make the override unnecessary is recorded in
 [INFRASTRUCTURE_AUDIT.md §11](../infrastructure/INFRASTRUCTURE_AUDIT.md) and is one settings call away.
