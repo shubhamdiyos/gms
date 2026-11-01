@@ -248,18 +248,23 @@ tracked by finding ID.
 
 ## 🧪 Testing
 
-**There are no automated tests in this repository yet** (finding OPS-14), and this section previously told you
-otherwise:
+**The backend has tests; the frontend does not.** Measured 2026-11-01 on `mvn -B verify` — 36 tests in 6 classes,
+0 failures — so this section's earlier claim that the repository had none is no longer true, and it is corrected
+rather than left to rot.
 
 | Command | What actually happens today |
 | --- | --- |
-| `mvn test` | exits `BUILD SUCCESS` after printing `No tests to run.` — `gms_backend/src/test` does not exist |
-| `npm test` | fails: `gms_frontend/package.json` has no `test` script and no test runner installed |
-| JaCoCo | declared in `pom.xml` with no `<executions>`, so it never instruments and never reports (OPS-12) |
-| CI | the single workflow (`.github/workflows/deploy-backend.yml`) deploys to production on push to `master` and runs no build, test or scan job (OPS-01) |
+| `mvn -B verify` | runs `gms_backend/src/test` — `JwtTokenProviderTest`, `SuperAdminBootstrapPropertiesTest`, `CustomUserDetailsServiceTest`, `LoginAttemptServiceTest`, `UserServiceImplRoleGuardTest`, `GlobalExceptionHandlerTest` — and writes `target/site/jacoco/index.html` |
+| `mvn -DskipTests` | still the command the production image build uses (`gms_backend/Dockerfile:11`), so the shipped jar is not built from a tested compile — see INF-09 |
+| `npm test` | fails: `gms_frontend/package.json` has no `test` script and no runner is installed. CI's "Unit tests" step runs it with `continue-on-error: true`, so that step always fails and is swallowed — it proves nothing and is labelled as such (`ci.yml`) |
+| `npm run lint` | runs, and currently reports 47 errors across 22 files (FE-14); advisory in CI, with the count recorded there |
+| JaCoCo | bound to `prepare-agent` + `report` at `verify`, so coverage is measured; there is still no coverage **threshold** that can fail a build |
+| CI | **two** workflows now: `.github/workflows/ci.yml` builds and tests on PRs and on `master`, and `.github/workflows/deploy-backend.yml` deploys to production on push to `master` with no build or test job upstream of it, and none of the checks are marked **required** (OPS-01, INF-10) |
+| `scripts/verify-security.sh` | 18 executable security assertions against a local boot — see [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md) §13.2 |
 
-Until the testing milestones land, the only manual verification path is the Postman collection — 45 requests against
-roughly 230 endpoint mappings — documented in
+What is still missing is the part that makes refactoring safe: no integration tests against a real database, no
+frontend tests, no end-to-end suite. Until those land, the manual verification path is the Postman collection —
+45 requests against roughly 230 endpoint mappings — documented in
 [docs/WindsurfGMS-Postman-Testing-Guide.md](docs/WindsurfGMS-Postman-Testing-Guide.md). Run it against a disposable
 database only.
 
