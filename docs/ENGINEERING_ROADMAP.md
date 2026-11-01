@@ -273,7 +273,7 @@ reachable by inheritance.
 |---|---|---|
 | C-1 | Delete `AbstractCRUDController` / `AbstractCRUDService` and make every extendee declare its own endpoints (`ADR-023`). Measured live surface on 2026-11-01: 6 controllers extend it; `GET /{id}` is inherited-and-unguarded on 3 (`Parent`, `Student`, `Employee` — `Subject:64`, `Classroom:64`, `School:81` override it); `DELETE /{id}` is inherited-and-unguarded on **all 6**, because `EmployeeController:68` maps `/toggle`, which does not shadow `/{id}`; the comment at `EmployeeController.java:65-67` records that a hand-written `getById` was *deleted* precisely because the base class supplied one. That comment is the case for deleting the base class rather than guarding it. **Done 2026-11-01 on the branch**: both classes deleted, 25 service impls and all 36 controllers detached, the two frontend-called deletes re-declared tenant-scoped, three tenancy holes closed (`ParentServiceImpl.findBySchool` returned every platform's parents; `UserService.getById`/`deleteById` had no tenant predicate; `SchoolService.getById` did not exist). Measured: 33-test suite green, live script 29/29, control red on exactly 2 assertions, full suite 79/79 | `SEC-05` |
 | C-2 | One tenant resolution path: the `schoolId` claim parsed once per request into a request-scoped context; services and repositories take it from there instead of a parameter that a caller may forget. **Done 2026-11-01 on the branch**: `SecurityUtil` deleted — it re-parsed and re-verified the JWT signature on every one of 325 call sites across 41 files — and replaced by `security/TenantContext`, a request-scoped holder the filter fills from the claims it has already verified and clears in a `finally` so a pooled thread cannot carry one caller's tenant forward. 35 service interfaces and 31 implementations rewritten: 221 methods took a `schoolId`/`empId`/`creatorEmpId`/`updaterEmpId`/`employeeId` argument and no longer do; 201 now-dead controller locals removed. Two regressions found by review and repaired: the transformation rewrote the string literal `"schoolId"` inside three `BeanUtils.copyProperties` ignore-lists, and it silently turned `AuthController.selfRegister`'s `findByEmployee_Id(employee.getId())` into the caller's own employee — the self-registration uniqueness check would have read an empty tenant. A cross-tenant refusal was answered 400 on the write path and 403 on the read path; `TenantAccessDeniedException` makes both 403. Measured: 86-test suite green, `verify-c1-tenancy.sh` 29/29, new `verify-c2-tenant-context.sh` 32/32, control red on exactly the "verified once" assertion | `TEN-01…07`, debt #5 |
-| C-3 | School-scoped repository methods for the 6 repositories that have none (`ExamSubject`, `Parent`, `Result`, `StudentExam`, `Timetable`, `TimetableSlot`) and for the 10 entities with no direct school link, via their owning aggregate | `TEN-*`, `DB-03` |
+| C-3 | School-scoped repository methods for the reads that span schools. **Done 2026-11-01 on the branch**: measured with `RepositoryTenantScopeArchTest` run against the build that ended `C-2` — 170 declared repository reads, 55 carrying no tenant, 37 of them neither scoped nor explainable. 17 repository interfaces and 13 services (22 call sites) rewritten so the tenant arrives in the query; the same scan now reports 168 reads, 150 carrying the tenant, 18 that do not and every one allow-listed with the reason the schema supports it. Two dead cross-tenant log queries deleted, one true duplicate deleted, the platform-wide `timetableRepository.findAll()` and `studentRepository.findAllById(ids)` replaced with tenant-keyed forms. Measured: 87-test suite green, `verify-c1-tenancy.sh` 29/29, `verify-c2-tenant-context.sh` 32/32, new `verify-c3-scoped-reads.sh` 25/25 — and that same script run against the pre-C-3 build fails 6 checks, one of them a live read of school A's timetable by school B | the query half of `TEN-01…07`; `TEN-06` **partly** — explicit predicates, not a session filter, and inherited reads plus level 3 stay open (`C-4`, `C-7`). `DB-03` was already closed by `B-3` |
 | C-4 | Put the ownership check where the JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list | `SEC-06` |
 | C-5 | `@PreAuthorize` on every mutating endpoint; deny-by-default verified by a mapping scan that fails the build on an unannotated handler | `SEC-04`, `OPS-*` |
 | C-6 | Resolve the role vocabulary: 39 guards name `ACCOUNTANT`, which is in no enum, issued by no code and unknown to the frontend (`SEC-17`). Either the role exists and `RoleEnum` plus provisioning grow, or those guards collapse to `ADMIN` and the string disappears | `SEC-16`, `SEC-17` |
@@ -361,12 +361,68 @@ needed an explicit `AccessDeniedException` catch because its `catch (Exception)`
 refusal into a 404.
 
 **What `C-2` does not close.** `C-2` gives every service one way to learn the tenant; it does not give every
-*query* a school predicate. The queries that still span schools are listed in `C-3`: `resultRepository.findByStudentExam_Student_Id`,
-`studentExamRepository.findByStudentId`, `feePaymentRepository.findByStudentFee_Student_Id`,
-`invoiceRepository.findByStudentId`, `receiptRepository.findByStudentId`, `attendanceRepository.findByStudent_IdAndDateBetween`,
-`timetableRepository.findByClassroom_Id`, `teacherAssignmentRepository.findByTeacher_Id`, `parentRepository.findByStudentsId`,
-and `userRepository.findByRole`. `TEN-01` is therefore **partly** closed: the tenant is now unambiguous and cannot be
-named wrongly, but eight of the fifteen endpoints it names still need a school-scoped query.
+*query* a school predicate. That gap was `C-3`, and `C-3` has since closed it on this branch — see the card below.
+`TEN-01` is therefore **partly** closed by `C-2` alone: the tenant is unambiguous and cannot be named wrongly, but
+the reads it governs still reached across schools until `C-3`.
+
+**C-3, executed 2026-11-01 — the tenant reaches the SQL.**
+
+**The rule.** Every declared repository read must name the tenant, or be listed in
+`RepositoryTenantScopeArchTest` with the reason it is not a leak. `C-2` made the tenant available to every query;
+`C-3` is ADR-020's second layer — the tenant is a *predicate*, not a value the service might remember to pass on.
+
+**Measured, with the same instrument on both sides.** Run against `8981842` (the build that ended `C-2`) the scan
+reports **170 declared reads, 115 carrying the tenant, 55 carrying none**; the test is red there with **37 offences**
+— 55 minus the 18 that are global by design. Run against this branch: **168 reads, 150 carry the tenant, 18 do not**.
+The number is printed by the test on every build, so the roadmap figure is recomputed rather than transcribed. The 18
+left are 12 on `SchoolRepository` (that table *is* the tenant, so a query on it has no other tenant to leak), 4 on
+`UserRepository` (two because `uq_users_username` is global by V3:34 and login must stay a tenant-free lookup, two
+because the employee association already pins the school), and 2 on `ParentRepository` (`uq_parents_email`, V3:38, is
+global by decision D-2 — a parent deliberately links children across schools).
+
+**What changed.** 17 repository interfaces, 13 services, 22 call sites. The reads that took a bare `studentId`,
+`teacherId`, `classroomId`, `examId`, `studentExamId` or `parentId` now take the school through the owning
+association — `findByStudentExam_Student_School_IdAndStudentExam_Id`, `findByClassroom_School_IdAndClassroom_Id`,
+`findByStudents_School_IdAndStudents_Id` — because a `teacher_id` of 4 is a different person in every school.
+`UserRepository` and `EmployeeRepository` lost their global `findByEmail`/`existsByEmail`/`findByUserId`/`findByRole`
+forms; `TeacherAssignmentRepository` was rewritten whole; `TimetableSlotRepository` went from empty to two scoped
+reads. Removed outright, not rewritten: `EmailLog.findByToEmailAndDeliveryStatus…` and
+`SmsLog.findByToPhoneAndDeliveryStatus…` (each had a scoped sibling and no caller),
+`TeacherAssignment.findByAcademicYear` (a true duplicate of the scoped method that already existed),
+`TimetableRepository.findAll()` as used by `getTimetableForTeacher` (a platform-wide walk in Java that any
+authenticated caller could trigger), and `StudentRepository.findAllById(ids)` in
+`ParentStudentServiceImpl.getChildFees`, which is now `findBySchool_IdAndIdIn`.
+
+**One behaviour changed, deliberately.** User and employee email uniqueness moved from *global* to *per school*,
+which is what `uq_users_school_email` (V3:41) and `uq_employees_school_email` (V3:53) actually promise. The global
+check was both a stricter rule than the schema's and a cross-tenant oracle: it told school A that school B had
+already registered a mailbox. `verify-c3-scoped-reads.sh` pins both halves — the same address now registers in two
+schools and is still refused twice inside one.
+
+**Verified.** 87 tests green (`86 + 1` new arch test, JDK 21). The packaged jar boots against an empty database:
+Flyway applies V1→V5 and the context starts in 6.3s, which is what proves the new derived property paths resolve —
+Spring Data parses them at bean creation, and the `@WebMvcTest` suite excludes JPA, so no unit test can catch a bad
+path. That was checked rather than assumed: `findBySchool_IdAndNotARealProperty` added to `StudentRepository` makes
+startup abort with `PropertyReferenceException: No property 'notARealProperty' found for type 'Student'`. Live: C-1
+29/29, C-2 32/32, C-3 25/25. **Control:** the same C-3 script against the pre-C-3 build on port 8081 fails 6 checks,
+headed by `school B naming school A's classroom finds no timetable (expected 404, got 200)` — a live cross-tenant
+read, on a route (`GET /timetables/classroom/{id}`) that has no ownership guard and so depends entirely on the query.
+The generated SQL was captured with `JPA_SHOW_SQL=true`:
+
+```
+select t1_0.id, … from timetables t1_0 join classrooms c1_0 on c1_0.id = t1_0.classroom_id
+where c1_0.school_id = ? and t1_0.classroom_id = ?
+```
+
+**What `C-3` does not close.** Three things, and the first is the reason this is not the end of ADR-020. (1) The
+tenant predicate here travels through *joins* — `c1_0.school_id` — because V2's `timetables.school_id` column is
+still NULL: no Java entity maps it, so the application never writes it. Measured on the verification database: all
+nine V2 `school_id` columns exist, and the timetable row created by this run has `school_id = NULL`. That is `C-7`,
+and it matters for more than tidiness — a composite FK whose column is NULL is not enforced (Postgres MATCH SIMPLE),
+so V5's same-school constraint is currently bypassable by the application's own inserts. (2) `findById`, `findAll`,
+`findAllById` and `delete` are inherited by every repository and carry no tenant; this scan sees declarations only,
+so they are `C-4`'s, not because the test missed them but because an inherited method is not a declaration. (3) A
+school predicate is not an authorisation decision: `C-5` still owns deny-by-default on the endpoints themselves.
 
 ### Stage 4 — The MVP vertical slice
 
@@ -481,7 +537,7 @@ system, the remaining `DOC-*`).
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1` and `C-2` done on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter (86-test suite green, live scripts 29/29 and 32/32, control red on exactly the "verified once" assertion). `C-3…C-8` open | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1`, `C-2` and `C-3` done on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; and the tenant now travels in the query — 37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it (87-test suite green, live scripts 29/29, 32/32 and a new 25/25, the new script red on 6 against the pre-C-3 build, startup proved to catch a bad derived path). `C-4…C-8` open | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | Open | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |

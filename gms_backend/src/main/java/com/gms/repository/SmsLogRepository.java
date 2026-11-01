@@ -20,8 +20,6 @@ public interface SmsLogRepository extends JpaRepository<SmsLog, Integer> {
 
     List<SmsLog> findBySchoolIdAndRelatedEntityTypeAndRelatedEntityIdOrderBySentAtDesc(Integer schoolId, String entityType, Integer entityId);
 
-    List<SmsLog> findByToPhoneAndDeliveryStatusOrderBySentAtDesc(String toPhone, String deliveryStatus);
-
     @Query("SELECT s FROM SmsLog s WHERE s.school.id = :schoolId AND s.sentAt >= :startDate AND s.sentAt <= :endDate AND s.deliveryStatus = 'DELIVERED'")
     List<SmsLog> findDeliveredSmsByDateRange(@Param("schoolId") Integer schoolId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
 

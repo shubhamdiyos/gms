@@ -9,5 +9,11 @@ import java.util.List;
 @Repository
 public interface ExamSubjectRepository extends JpaRepository<ExamSubject, Integer> {
 
-    List<ExamSubject> findByExamId(Integer examId);
+    /**
+     * The subjects of one school's exams. {@code exam_subjects} carries no tenant column; the
+     * school belongs to the exam.
+     */
+    List<ExamSubject> findByExam_School_Id(Integer schoolId);
+
+    List<ExamSubject> findByExam_School_IdAndExam_Id(Integer schoolId, Integer examId);
 }

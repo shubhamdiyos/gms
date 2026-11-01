@@ -147,7 +147,7 @@ public class FeePaymentServiceImpl implements FeePaymentService {
 
     @Override
     public ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(Integer studentId) {
-        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_Id(studentId);
+        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_School_IdAndStudentFee_Student_Id(TenantContext.schoolId(), studentId);
         // Filter by the tenant's school if needed
         return ResponseEntity.ok(feePayments);
     }

@@ -150,7 +150,7 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     @Override
     public ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId) {
-        List<Invoice> invoices = invoiceRepository.findByStudentId(studentId);
+        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndStudent_Id(TenantContext.schoolId(), studentId);
         // Filter by the tenant's school if needed
         return ResponseEntity.ok(invoices);
     }

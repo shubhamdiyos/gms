@@ -64,7 +64,7 @@ public class ParentStudentServiceImpl implements ParentStudentService {
         }
 
         // Get all students
-        List<Student> students = studentRepository.findAllById(request.getStudentIds());
+        List<Student> students = studentRepository.findBySchool_IdAndIdIn(TenantContext.schoolId(), request.getStudentIds());
 
         // Assign students to parent
         parent.getStudents().clear();
@@ -131,7 +131,7 @@ public class ParentStudentServiceImpl implements ParentStudentService {
             return ResponseEntity.status(403).build();
         }
 
-        List<Parent> parents = parentRepository.findByStudentsId(studentId);
+        List<Parent> parents = parentRepository.findByStudents_School_IdAndStudents_Id(TenantContext.schoolId(), studentId);
         return ResponseEntity.ok(parents);
     }
 }

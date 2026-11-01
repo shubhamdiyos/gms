@@ -10,8 +10,12 @@ import java.util.Optional;
 @Repository
 public interface ResultRepository extends JpaRepository<Result, Integer> {
 
-    Optional<Result> findByStudentExamId(Integer studentExamId);
+    /**
+     * One student's result for one exam entry, scoped to the school that owns the student.
+     * {@code results} carries no tenant column yet ({@code C-7} adds it), so the school is reached
+     * through {@code studentExam.student}.
+     */
+    Optional<Result> findByStudentExam_Student_School_IdAndStudentExam_Id(Integer schoolId, Integer studentExamId);
 
-    // Fetch all results for a given student across all exams
-    List<Result> findByStudentExam_Student_Id(Integer studentId);
+    List<Result> findByStudentExam_Student_School_IdAndStudentExam_Student_Id(Integer schoolId, Integer studentId);
 }

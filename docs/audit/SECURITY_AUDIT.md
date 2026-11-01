@@ -202,8 +202,10 @@ Two facts about this closure that belong in the record rather than in a footnote
   why the ADR now carries the correction in the open.
 * **AP-3's shape survives in a narrower form.** The platform owner still holds a SUPERADMIN token that reaches across
   tenants by design, and `TEN-01…07` — tenancy resolved server-side from the authenticated principal rather than
-  trusted from the token — is still open. `C-1` closed the *unauthenticated* destruction path; it did not close the
-  *trusted-but-wrong-tenant* one. That is `C-2`, `C-3` and `C-4`.
+  trusted from the token — was still open. `C-1` closed the *unauthenticated* destruction path; it did not close the
+  *trusted-but-wrong-tenant* one. That was `C-2`, `C-3` and `C-4`. The first two have since landed (§5.3, §5.4), which
+  leaves `TEN-02`'s raw-id loads and `TEN-04`'s unmapped tenant column as what this bullet still describes — `C-4` and
+  `C-7`.
 
 One unrelated defect was found and fixed on the way, and it was not a Stage 3 finding: every method-level
 `@PreAuthorize` refusal was answering **500** instead of **403**, because `AuthorizationDeniedException` (a subclass of
@@ -236,17 +238,65 @@ What this closes, precisely:
 `scripts/verify-c1-tenancy.sh` re-run against the same build (29 live checks, 0 failures); the deliberate-failure
 control red on exactly the "parsed once" assertion; full suite **86 green**.
 
-**What is still open.** `SEC-REMED`'s second clause — *"every tenant-scoped repository method takes the tenant as a
-mandatory parameter"* — is `C-3`, and it is the half that matters for a cross-tenant **read**. `C-2` made the tenant
-unambiguous; it did not make every query school-scoped. The queries that still span schools are listed in
-[BASELINE_STATUS.md §15.8](BASELINE_STATUS.md) and are the remaining part of `TEN-01`. The audit's own rows for
+**What this left open.** `SEC-REMED`'s second clause — *"every tenant-scoped repository method takes the tenant as a
+mandatory parameter"* — was `C-3`, and it is the half that matters for a cross-tenant **read**. `C-2` made the tenant
+unambiguous; it did not make every query school-scoped. The queries that still span schools were listed in
+[BASELINE_STATUS.md §15.8](BASELINE_STATUS.md) and were the remaining part of `TEN-01`. The audit's own rows for
 `TEN-01` — the cross-tenant reads on `/fee-payments/student/{id}`, `/invoices/student/{id}`,
-`/receipts/student/{id}`, `/results/student/{id}`, `/student-exams/student/{id}` and `/attendance/student/{id}` — are
-therefore **not** closed by this card, and the table in §4 must not be read as saying otherwise.
+`/receipts/student/{id}`, `/results/student/{id}`, `/student-exams/student/{id}` and `/attendance/student/{id}` — were
+therefore **not** closed by this card, and the table in §4 must not be read as saying otherwise. `C-3` has since
+closed them for the reads a repository declares; §5.4 is that record.
 
 One inconsistency was closed along the way because the live run exposed it: a cross-tenant refusal answered **400** on
 the write path and **403** on the read path. 23 refusals now throw `TenantAccessDeniedException`, which extends
 `AccessDeniedException`, so both paths answer 403.
+
+### 5.4 Status after Stage 3 `C-3` (2026-11-01, `feat/stage2-flyway-baseline`)
+
+**The second clause of `SEC-REMED` is met — for the reads this repository declares.** At the close of `C-2` there were
+55 declared repository reads naming no school, 37 of them with no defence. Now every declared read either carries the
+school in its own predicate or sits on an allow-list that states the constraint making it global by design, and a
+build-failing test refuses a new declared read that does neither.
+
+The instrument is `RepositoryTenantScopeArchTest`, which reads the compiled repository interfaces rather than a
+hand-maintained list, because a list is what every previous count in these documents was and two of them were wrong.
+At the commit immediately before `C-3`: **170 declared reads, 115 carrying the tenant, 55 carrying none, 37
+offences** — the test red. On this branch: **168, 150, 18, 0** — green. The 18 are 12 in `SchoolRepository` (the
+tenant table itself; a query that *is* the school needs no school predicate), 4 in `UserRepository` (2 keyed on
+`uq_users_username`, V3:34, which is global, and 2 scoped transitively because the employee row they start from
+already belongs to one school) and 2 in `ParentRepository` (`uq_parents_email`, V3:38, global by owner decision D-2).
+Ten methods were deleted instead of rewritten where a scoped form already existed — the bug was two ways to ask the
+same question, one of them unsafe — and the rest were rewritten to name the school.
+
+*Evidence:* full suite **87 green**; `scripts/verify-c3-scoped-reads.sh` **25 checks, 0 failures** against the packaged
+jar on the same build and database that the `C-1` (29) and `C-2` (32) scripts pass; **the same script against the
+pre-`C-3` build gives 6 failures**, the first being school B reading school A's timetable through the unguarded
+`GET /timetables/classroom/{id}` — the defect `TEN-01` described, observed live on one side of a rebuild; the SQL the
+application emitted, captured from its own log, contains the school predicate; and four deliberate-failure controls,
+each red on exactly the assertion meant to catch it and no other. Two of those controls failed *before* the change
+they were meant to prove, and the reason (a restored file kept an older mtime, so Maven skipped recompiling it) is
+recorded in BASELINE_STATUS §16.4 — a control that passes for the wrong reason is worse than no control.
+
+Per-school email uniqueness is a **deliberate behaviour change**, not collateral: `POST /users/create` and
+`POST /employees/create` now collide against `uq_users_school_email` (V3:41) and `uq_employees_school_email` (V3:53)
+instead of a global `email`, because both keys were always per-school and the global check was a cross-tenant oracle
+that told school A which mailboxes school B had registered. Both directions are pinned — the same address is accepted
+in school B after school A claims it, and refused again in school A.
+
+*What this does not close.* Three things, in order of how easy they are to mistake for done:
+
+* **Inherited CRUD.** `JpaRepository` hands every repository `findById`, `findAll`, `findAllById` and `delete`, and a
+  declaration-level test cannot see them because no repository declares them. 67 call sites load a row by raw id with
+  no ownership check (`TEN-02`). That is `C-4`.
+* **Level 3 of ADR-020.** Postgres enforces a composite foreign key with MATCH SIMPLE, so a `NULL` tenant column
+  satisfies it — and the application writes `NULL`. On the verification database, after a live create through
+  `TimetableServiceImpl`, the `timetables` row has `school_id = NULL` even though `V2` added the column: nine entities
+  still do not map it. So `V5`'s same-school constraints bind the data a careful migration inserts and not the data
+  the running software writes. That is `C-7`, and until it lands the database layer of the three-layer claim is
+  unenforced on the application's own writes.
+* **Deny-by-default at the endpoint.** 23 mutating handlers still reach a service with no `@PreAuthorize`
+  (`SEC-REMED`'s last clause, `C-5`). A school-scoped query behind an unguarded route is a scoped read that any
+  authenticated caller may ask for; the scope makes it not-another-school's, it does not make it the caller's to ask.
 
 ### SEC-REMED — the invariant to introduce
 

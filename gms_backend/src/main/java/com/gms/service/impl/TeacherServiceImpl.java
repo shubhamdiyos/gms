@@ -6,6 +6,7 @@ import com.gms.model.response.EmployeeResponse;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.model.response.StudentResponse;
 import com.gms.repository.*;
+import com.gms.security.TenantContext;
 import com.gms.service.TeacherService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -63,7 +64,7 @@ public class TeacherServiceImpl implements TeacherService {
         }
 
         // Get actual assigned classrooms through teacher assignments
-        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_Id(teacher.getId());
+        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacher.getId());
         
         return assignments.stream()
                 .map(assignment -> {
@@ -92,7 +93,7 @@ public class TeacherServiceImpl implements TeacherService {
         }
 
         // Get all classrooms assigned to this teacher
-        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_Id(teacher.getId());
+        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacher.getId());
         List<Integer> assignedClassroomIds = assignments.stream()
                 .map(assignment -> assignment.getClassroom().getId())
                 .distinct()
@@ -103,7 +104,7 @@ public class TeacherServiceImpl implements TeacherService {
         }
 
         // Get students from assigned classrooms
-        List<Student> students = studentRepository.findByClassroom_IdInAndStatusNot(assignedClassroomIds, "0");
+        List<Student> students = studentRepository.findBySchool_IdAndClassroom_IdInAndStatusNot(TenantContext.schoolId(), assignedClassroomIds, "0");
         
         return students.stream()
                 .map(student -> new StudentResponse(

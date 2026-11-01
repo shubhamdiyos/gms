@@ -6,6 +6,7 @@ import com.gms.exception.NotFoundException;
 import com.gms.model.request.TimetableRequest;
 import com.gms.model.response.*;
 import com.gms.repository.*;
+import com.gms.security.TenantContext;
 import com.gms.service.TimetableService;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,17 +22,20 @@ public class TimetableServiceImpl implements TimetableService {
     private final TeacherAssignmentRepository teacherAssignmentRepository;
     private final StudentRepository studentRepository;
     private final UserRepository userRepository;
+    private final TimetableSlotRepository timetableSlotRepository;
 
     public TimetableServiceImpl(TimetableRepository timetableRepository, 
                                 ClassroomRepository classroomRepository, 
                                 TeacherAssignmentRepository teacherAssignmentRepository, 
                                 StudentRepository studentRepository,
-                                UserRepository userRepository) {
+                                UserRepository userRepository,
+                                TimetableSlotRepository timetableSlotRepository) {
         this.timetableRepository = timetableRepository;
         this.classroomRepository = classroomRepository;
         this.teacherAssignmentRepository = teacherAssignmentRepository;
         this.studentRepository = studentRepository;
         this.userRepository = userRepository;
+        this.timetableSlotRepository = timetableSlotRepository;
     }
 
     @Override
@@ -40,7 +44,7 @@ public class TimetableServiceImpl implements TimetableService {
         Classroom classroom = classroomRepository.findById(request.getClassroomId())
                 .orElseThrow(() -> new NotFoundException("CLASSROOM_NOT_FOUND", "Classroom not found"));
 
-        Timetable timetable = timetableRepository.findByClassroom_Id(request.getClassroomId())
+        Timetable timetable = timetableRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), request.getClassroomId())
                 .orElse(new Timetable());
 
         timetable.setClassroom(classroom);
@@ -70,7 +74,7 @@ public class TimetableServiceImpl implements TimetableService {
     @Override
     @Transactional(readOnly = true)
     public TimetableResponse getTimetableForClassroom(Integer classroomId) {
-        Timetable timetable = timetableRepository.findByClassroom_Id(classroomId)
+        Timetable timetable = timetableRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), classroomId)
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_NOT_FOUND", "Timetable not found for the given classroom"));
         return mapToResponse(timetable);
     }
@@ -78,15 +82,13 @@ public class TimetableServiceImpl implements TimetableService {
     @Override
     @Transactional(readOnly = true)
     public TimetableResponse getTimetableForTeacher(Integer teacherId) {
-        // This is a simplified implementation. A more performant version might involve a custom query.
-        List<Timetable> allTimetables = timetableRepository.findAll();
-        List<TimetableSlot> teacherSlots = allTimetables.stream()
-                .flatMap(t -> t.getSlots().stream())
-                .filter(s -> s.getAssignment().getTeacher().getId().equals(teacherId))
-                .collect(Collectors.toList());
-        
-        // We don't have a single timetable for a teacher, so we can't return a TimetableResponse directly.
-        // For now, we will return an empty response. A more complete implementation is needed.
+        List<TimetableSlot> teacherSlots = timetableSlotRepository
+                .findByAssignment_Teacher_School_IdAndAssignment_Teacher_Id(TenantContext.schoolId(), teacherId);
+
+        // A teacher has no single timetable, so there is no TimetableResponse to build from those
+        // slots yet — returning the empty response is ACD-02's stub, unchanged here. What changed is
+        // that the slots are read with the tenant in the query: the version this replaced walked
+        // every timetable in the platform in Java to reach the same rows.
         return new TimetableResponse();
     }
 

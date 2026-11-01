@@ -123,11 +123,32 @@ mechanism is what Stage 2's migrations and Stage 3's code must both agree on.
    of the token, 325 call sites in 41 files — is deleted, not wrapped. No service method may accept the tenant as
    an argument; `TenantParameterArchTest` fails the build if one does, so the "a caller may forget" path is
    closed rather than documented. A request that names another school's row is refused with 403
-   (`TenantAccessDeniedException`), not 400. What is *not* yet shipped is level 2 below: the tenant is available
-   everywhere, but not every query yet filters on it — that is `C-3`.
+   (`TenantAccessDeniedException`), not 400. What level 2 then still owed is recorded below.
 2. **Query.** Every repository method that reads tenant data takes the tenant explicitly, and Hibernate applies the
    discriminator at the SQL level, so an unscoped `findAll()` cannot be written by accident (`TEN-06`: `@Where` /
    `@Filter` appear nowhere today).
+
+   **Shipped 2026-11-01 (Stage 3 `C-3`), for the reads this repository declares.** `RepositoryTenantScopeArchTest`
+   fails the build when a declared repository read carries no tenant and records no reason. Measured with that test
+   on both sides: 170 declared reads with 55 carrying no tenant at the end of `C-2`, 37 of them indefensible; 168
+   declared reads with 18 carrying none now, every one listed with the constraint that makes it safe — 12 on
+   `SchoolRepository`, because that table *is* the tenant, and the rest on lookups whose column `V3` made globally
+   unique (`uq_users_username`, `uq_parents_email`) or whose association already pins the school. The proof is the
+   SQL, not the result set:
+
+   ```sql
+   select … from timetables t1_0 join classrooms c1_0 on c1_0.id = t1_0.classroom_id
+   where c1_0.school_id = ? and t1_0.classroom_id = ?
+   ```
+
+   Three limits, stated rather than implied. (a) This level governs *declared* methods. The `findById`, `findAll`,
+   `findAllById` and `delete` that `JpaRepository` hands to every repository are inherited, not declared, and still
+   carry no tenant — that is `C-4`. (b) The predicate above travels through a join to `classrooms.school_id`
+   because `timetables.school_id`, added by `V2`, is still NULL on rows the application writes: no entity maps it.
+   A composite FK with a NULL column is not enforced, so level 3's guarantee is currently bypassable by the
+   application's own inserts — that is `C-7`. (c) `@Where`/`@Filter` remain unused by choice: an explicit parameter
+   on every method is visible in the call site, whereas a session filter is invisible in exactly the way a forgotten
+   `schoolId` argument was.
 3. **Database.** The tenant key is *materialised* on child rows and constrained against the parent, so a mismatch
    is impossible rather than discouraged:
 

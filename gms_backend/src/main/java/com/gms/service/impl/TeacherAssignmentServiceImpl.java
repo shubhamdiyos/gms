@@ -59,8 +59,9 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
         }
 
         // Check for existing assignment
-        if (teacherAssignmentRepository.existsByTeacher_IdAndSubject_IdAndClassroom_IdAndAcademicYear(
-                request.getTeacherId(), request.getSubjectId(), request.getClassroomId(), request.getAcademicYear())) {
+        if (teacherAssignmentRepository.existsByTeacher_School_IdAndTeacher_IdAndSubject_IdAndClassroom_IdAndAcademicYear(
+                TenantContext.schoolId(), request.getTeacherId(), request.getSubjectId(), request.getClassroomId(),
+                request.getAcademicYear())) {
             throw new IllegalArgumentException("This assignment already exists.");
         }
 
@@ -93,7 +94,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
             throw new TenantAccessDeniedException("Teacher does not belong to the current school.");
         }
 
-        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_Id(teacherId);
+        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacherId);
         return assignments.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -109,7 +110,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
             throw new TenantAccessDeniedException("Classroom does not belong to the current school.");
         }
 
-        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByClassroom_Id(classroomId);
+        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), classroomId);
         return assignments.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());
@@ -195,7 +196,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
             throw new NotFoundException("TEACHER_NOT_FOUND", "Teacher profile not found for this user");
         }
 
-        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_Id(teacher.getId());
+        List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacher.getId());
         return assignments.stream()
                 .map(this::mapToResponse)
                 .collect(Collectors.toList());

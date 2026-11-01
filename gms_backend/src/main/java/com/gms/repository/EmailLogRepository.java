@@ -20,8 +20,6 @@ public interface EmailLogRepository extends JpaRepository<EmailLog, Integer> {
 
     List<EmailLog> findBySchoolIdAndRelatedEntityTypeAndRelatedEntityIdOrderBySentAtDesc(Integer schoolId, String entityType, Integer entityId);
 
-    List<EmailLog> findByToEmailAndDeliveryStatusOrderBySentAtDesc(String toEmail, String deliveryStatus);
-
     @Query("SELECT e FROM EmailLog e WHERE e.school.id = :schoolId AND e.sentAt >= :startDate AND e.sentAt <= :endDate AND e.deliveryStatus = 'DELIVERED'")
     List<EmailLog> findDeliveredEmailsByDateRange(@Param("schoolId") Integer schoolId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
 

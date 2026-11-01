@@ -180,7 +180,7 @@ public class SubjectServiceImpl implements SubjectService {
             return Collections.emptyList();
         }
 
-        return teacherAssignmentRepository.findByTeacher_Id(teacher.getId()).stream()
+        return teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacher.getId()).stream()
                 .map(assignment -> toResponse(assignment.getSubject()))
                 .distinct()
                 .collect(Collectors.toList());

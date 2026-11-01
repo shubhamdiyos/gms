@@ -14,7 +14,7 @@ public interface ReceiptRepository extends JpaRepository<Receipt, Integer> {
 
     List<Receipt> findBySchoolIdAndReceiptDateBetween(Integer schoolId, LocalDate startDate, LocalDate endDate);
 
-    List<Receipt> findByStudentId(Integer studentId);
+    List<Receipt> findBySchoolIdAndStudent_Id(Integer schoolId, Integer studentId);
 
-    List<Receipt> findByParentId(Integer parentId);
+    List<Receipt> findBySchoolIdAndParent_Id(Integer schoolId, Integer parentId);
 }

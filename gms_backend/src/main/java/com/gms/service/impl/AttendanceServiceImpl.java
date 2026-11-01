@@ -64,7 +64,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
 
         // Check if attendance already exists for this student on this date
-        List<Attendance> existingAttendance = attendanceRepository.findByStudent_IdAndDateBetween(
+        List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
                 request.getStudentId(), request.getDate(), request.getDate());
         
         if (!existingAttendance.isEmpty()) {
@@ -110,7 +110,7 @@ public class AttendanceServiceImpl implements AttendanceService {
             // }
 
             // Check if attendance already exists for this student on this date
-            List<Attendance> existingAttendance = attendanceRepository.findByStudent_IdAndDateBetween(
+            List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
                     item.getStudentId(), request.getDate(), request.getDate());
             
             if (existingAttendance.isEmpty()) {
@@ -199,14 +199,15 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceForStudent(Integer studentId, LocalDate from, LocalDate to) {
-        List<Attendance> attendances = attendanceRepository.findByStudent_IdAndDateBetween(studentId, from, to);
+        List<Attendance> attendances = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(), studentId, from, to);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceForClassroom(Integer classroomId, LocalDate date) {
-        List<Attendance> attendances = attendanceRepository.findByTimetableSlot_Timetable_Classroom_IdAndDate(classroomId, date);
+        List<Attendance> attendances = attendanceRepository.findByTimetableSlot_Timetable_Classroom_School_IdAndTimetableSlot_Timetable_Classroom_IdAndDate(
+                TenantContext.schoolId(), classroomId, date);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
     
@@ -220,7 +221,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceByStudentAndDateRange(Integer studentId, LocalDate startDate, LocalDate endDate) {
-        List<Attendance> attendances = attendanceRepository.findByStudent_IdAndDateBetween(studentId, startDate, endDate);
+        List<Attendance> attendances = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(), studentId, startDate, endDate);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 

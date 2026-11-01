@@ -3,6 +3,7 @@ package com.gms.service.impl;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.when;
 
 import com.gms.model.entity.School;
@@ -70,7 +71,9 @@ class UserServiceImplRoleGuardTest {
         school.setId(1);
         User creator = new User();
         creator.setId(99);
-        when(userRepository.existsByEmail(any())).thenReturn(false);
+        // Email is unique per school (uq_users_school_email, V3:41), so the collision check is
+        // asked of the caller's school — the tenant in the context, not an argument.
+        when(userRepository.existsBySchool_IdAndEmail(eq(1), any())).thenReturn(false);
         when(schoolService.findById(1)).thenReturn(Optional.of(school));
         when(userRepository.findByEmployee_Id(7)).thenReturn(Optional.of(creator));
     }

@@ -58,7 +58,7 @@ public class EmployeeServiceImpl implements EmployeeService {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        if (employeeRepository.existsByEmail(request.getEmail())) {
+        if (employeeRepository.existsBySchool_IdAndEmail(TenantContext.schoolId(), request.getEmail())) {
             throw new IllegalArgumentException("Employee email already in use");
         }
         School school = schoolService.findById(TenantContext.schoolId())

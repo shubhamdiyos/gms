@@ -54,7 +54,7 @@ public class ResultServiceImpl implements ResultService {
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Check if result already exists
-        if (resultRepository.findByStudentExamId(request.getStudentExamId()).isPresent()) {
+        if (resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Id(TenantContext.schoolId(), request.getStudentExamId()).isPresent()) {
             throw new IllegalArgumentException("Result already exists for this student exam");
         }
 
@@ -152,7 +152,7 @@ public class ResultServiceImpl implements ResultService {
         }
 
         // There should be at most one Result per StudentExam; repository returns Optional
-        Optional<Result> resultOpt = resultRepository.findByStudentExamId(studentExamId);
+        Optional<Result> resultOpt = resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Id(TenantContext.schoolId(), studentExamId);
         List<Result> results = resultOpt.map(List::of).orElseGet(List::of);
         return ResponseEntity.ok(results);
     }
@@ -163,7 +163,7 @@ public class ResultServiceImpl implements ResultService {
         // In a complete implementation, we would validate student and school
 
         // Get all results for this student across all exams
-        List<Result> results = resultRepository.findByStudentExam_Student_Id(studentId);
+        List<Result> results = resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Student_Id(TenantContext.schoolId(), studentId);
         return ResponseEntity.ok(results);
     }
 

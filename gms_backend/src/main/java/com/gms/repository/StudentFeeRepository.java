@@ -13,7 +13,7 @@ import java.util.List;
 @Repository
 public interface StudentFeeRepository extends JpaRepository<StudentFee, Integer> {
 
-    List<StudentFee> findByStudent_Id(Integer studentId);
+    List<StudentFee> findByStudent_School_IdAndStudent_Id(Integer schoolId, Integer studentId);
 
     List<StudentFee> findByStudent_School_IdAndStatus(Integer schoolId, String status);
 

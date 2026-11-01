@@ -59,7 +59,7 @@ public class UserServiceImpl implements UserService {
             throw new IllegalArgumentException("Employee ID or School ID cannot be null");
         }
 
-        if (userRepository.existsByEmail(request.getEmail())) {
+        if (userRepository.existsBySchool_IdAndEmail(TenantContext.schoolId(), request.getEmail())) {
             throw new IllegalArgumentException("Email already in use");
         }
 
@@ -213,7 +213,7 @@ public class UserServiceImpl implements UserService {
 
     @Override
     public boolean existsByEmail(String email) {
-        return userRepository.existsByEmail(email);
+        return userRepository.existsBySchool_IdAndEmail(TenantContext.schoolId(), email);
     }
     
     @Override

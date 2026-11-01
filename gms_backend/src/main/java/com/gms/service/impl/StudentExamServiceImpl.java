@@ -111,7 +111,7 @@ public class StudentExamServiceImpl implements StudentExamService {
 
         // In a complete implementation, we would validate school
 
-        List<StudentExam> studentExams = studentExamRepository.findByExamSubjectId(examSubjectId);
+        List<StudentExam> studentExams = studentExamRepository.findByExamSubject_Exam_School_IdAndExamSubject_Id(TenantContext.schoolId(), examSubjectId);
         return ResponseEntity.ok(studentExams);
     }
 
@@ -124,7 +124,7 @@ public class StudentExamServiceImpl implements StudentExamService {
             return ResponseEntity.status(403).build();
         }
 
-        List<StudentExam> studentExams = studentExamRepository.findByStudentId(studentId);
+        List<StudentExam> studentExams = studentExamRepository.findByStudent_School_IdAndStudent_Id(TenantContext.schoolId(), studentId);
         return ResponseEntity.ok(studentExams);
     }
 

@@ -808,7 +808,7 @@ because it changes what a parent sees.
 ### 15.8 What `C-2` does not close
 
 `C-2` gives every service one way to learn the tenant. It does not give every **query** a school predicate. The
-queries that still span schools, and are `C-3`'s work list:
+queries that still span schools, and were `C-3`'s work list:
 
 `resultRepository.findByStudentExam_Student_Id` · `studentExamRepository.findByStudentId` ·
 `feePaymentRepository.findByStudentFee_Student_Id` · `invoiceRepository.findByStudentId` ·
@@ -816,16 +816,107 @@ queries that still span schools, and are `C-3`'s work list:
 `timetableRepository.findByClassroom_Id` · `teacherAssignmentRepository.findByTeacher_Id` ·
 `parentRepository.findByStudentsId` · `userRepository.findByRole`
 
-`TEN-01` is therefore **partly** closed: the tenant is unambiguous and cannot be named wrongly, but eight of the
-fifteen endpoints it names still need a school-scoped query.
+`TEN-01` is therefore **partly** closed by `C-2` alone: the tenant is unambiguous and cannot be named wrongly, but
+the reads above still reached across schools. **`C-3` shipped on 2026-11-01 and every method in this list is gone** —
+rewritten tenant-keyed, or deleted with the scoped form kept. §16 records the measurement; the list is left here
+because it is the record of what `C-2` owed, and a document that quietly rewrites its own history is worth less than
+one that shows the correction.
 
 ### 15.9 State left on this machine by `C-2`
 
-* Container `gms-postgres` is running and holds four databases: `gms` (pre-existing, **untouched**),
-  `gms_flyway_verify`, `gms_c1_verify` and `gms_c2_verify` (the three disposable ones built by Flyway during these
-  verifications). `docker compose down -v` removes the container and all four.
-* The backend was left **running** on `:8080` against `gms_c2_verify`, started from the packaged jar with
-  `APP_SUPERADMIN_*` and `SECURITY_JWT_SECRET` supplied as environment variables for that run only. Stop with
-  `lsof -ti tcp:8080 | xargs kill`.
-* `/tmp/gms-c2-backend.log` holds the boot log referenced above and `/tmp/gms-c1-secret.env` (mode 600) holds the
-  disposable platform password. Both are outside the repository and contain no credential material in the repository.
+Superseded by §16.6.
+
+## 16. Stage 3 `C-3` — the tenant reaches the SQL (2026-11-01, `feat/stage2-flyway-baseline`)
+
+### 16.1 The rule, and the instrument that holds it
+
+`RepositoryTenantScopeArchTest` (`gms_backend/src/test/java/com/gms/repository/`) reads the declared methods of every
+Spring Data interface in `com.gms.repository` and fails the build when a read carries no tenant and records no reason.
+A read counts as scoped when its derived name walks into `school` (`…School_Id…`), when a parameter names the tenant,
+or when its `@Query` filters on `school.id`/`school_id`. The allow-list carries a reason per entry, and an entry whose
+method no longer exists fails the test too, so the list cannot outlive the code it describes.
+
+The test prints its own count on every build. Run against `8981842`, the build that ended `C-2`, it is red; run
+against this branch, green:
+
+| | declared reads | carry the tenant | carry none | offences |
+|---|---|---|---|---|
+| at `8981842` | 170 | 115 | 55 | **37** |
+| on this branch | 168 | 150 | 18 | **0** |
+
+The 18 are 12 on `SchoolRepository` (that table *is* the tenant), 4 on `UserRepository` (2 on `uq_users_username`,
+global by `V3:34`; 2 transitively scoped through the employee) and 2 on `ParentRepository` (`uq_parents_email`,
+global by `V3:38` and by owner decision D-2).
+
+**Two blind spots are recorded in the test, not hidden.** `SchoolRepository.findBySchoolId`/`existsBySchoolId`
+satisfy the name rule while meaning the school's *own* business code, not a tenant predicate — a name that reads like
+a scope passes. And the scan sees declarations only: the `findById`/`findAll`/`findAllById`/`delete` that
+`JpaRepository` hands every repository are inherited, and are `C-4`'s.
+
+### 16.2 Code changed
+
+17 repository interfaces and 13 services (22 call sites). `findByEmail`, `findByUserId`, `existsByUserId`,
+`existsByEmail` and `findByRole` are gone from `UserRepository`; `EmployeeRepository`'s four global forms are gone;
+`TeacherAssignmentRepository` was rewritten whole; `TimetableSlotRepository` went from empty to two scoped reads.
+Deleted rather than rewritten: the `EmailLog`/`SmsLog` `findByToEmail`/`findByToPhone` lookups (each had a scoped
+sibling and no caller), `TeacherAssignment.findByAcademicYear` (a true duplicate of the scoped method that already
+existed), `TimetableRepository.findAll()` as used by `getTimetableForTeacher` (a platform-wide walk any authenticated
+caller could trigger), and `StudentRepository.findAllById(ids)` in `ParentStudentServiceImpl.getChildFees`.
+
+### 16.3 One deliberate behaviour change
+
+User and employee email uniqueness went from **global** to **per school**, which is what `uq_users_school_email`
+(`V3:41`) and `uq_employees_school_email` (`V3:53`) promise. The global check was stricter than the schema and was a
+cross-tenant oracle: it told school A that school B had already registered a mailbox. Before changing it, every
+caller of `existsByEmail` was re-read to confirm it runs inside a tenant — a null tenant would have made the scoped
+check silently always-false, which is the exact defect `C-2` found in `selfRegister`.
+
+### 16.4 Verification
+
+* `mvn test` on JDK 21: **87 tests, 0 failures, 0 errors** (86 before this card, +1 arch test).
+* **The application boots.** Spring Data parses every derived path at bean creation and the `@WebMvcTest` suite
+  excludes JPA, so no unit test can catch a bad property path. The packaged jar was started against an empty
+  database: Flyway applied `V1`→`V5`, `Started GmsApplication in 6.189 seconds`. Proved to be a real check by adding
+  `findBySchool_IdAndNotARealProperty` to `StudentRepository`, which aborts startup with
+  `PropertyReferenceException: No property 'notARealProperty' found for type 'Student'`.
+* `scripts/verify-c3-scoped-reads.sh` — new, **25 checks, 0 failures, 0 skipped**.
+* Regressions on the same build and database: `verify-c1-tenancy.sh` **29/29**, `verify-c2-tenant-context.sh`
+  **32/32**.
+* **Deliberate-failure controls, four of them.** (1) An unscoped `findByName` added to `SubjectRepository` turns the
+  arch test red on exactly that entry. (2) An allow-list entry whose method does not exist turns it red on the stale
+  list — this control initially *passed* when it should have failed, because `cp`/`mv` restore an older mtime and
+  Maven then skips the recompile; the test was re-validated against forced-rebuilt bytecode before it was trusted.
+  (3) The invalid derived path above, against the boot. (4) The whole C-3 script re-run against the pre-C-3 build in
+  a separate worktree: **24 pass, 6 fail**, headed by
+  `school B naming school A's classroom finds no timetable (expected 404, got 200)`.
+* The predicate was captured from the running application, not inferred from a method name:
+
+  ```sql
+  select t1_0.id, … from timetables t1_0 join classrooms c1_0 on c1_0.id = t1_0.classroom_id
+  where c1_0.school_id = ? and t1_0.classroom_id = ?
+  ```
+
+### 16.5 What `C-3` does not close, and the measurement that says so
+
+The join in that SQL is the finding: the tenant travels through `classrooms.school_id` because `timetables.school_id`
+is **NULL**. Measured on the verification database after the run — all nine `V2` `school_id` columns exist, and the
+timetable row the application created through its own service has `school_id = NULL`; no Java entity maps the column.
+Since Postgres does not enforce a composite FK whose column is NULL (MATCH SIMPLE), `V5`'s same-school constraint is
+currently bypassable by the application's normal writes. That is `C-7`, and it is now measured rather than asserted.
+`C-4` (inherited reads), `C-5` (deny-by-default on endpoints) and `C-8` are untouched by this card.
+
+### 16.6 State left on this machine
+
+* Container `gms-postgres` is running. It now holds `gms` (pre-existing, **untouched**), `gms_schema_probea`,
+  `gms_schema_probeb`, `gms_v3_negative`, `gms_flyway_verify`, `gms_c1_verify`, `gms_c2_verify`, `gms_c3_r1` and
+  `gms_prec3_r1` — the last two built by Flyway during this card. All are disposable; `docker compose down -v`
+  removes the container and every one of them. No non-disposable database was connected to, and the retired
+  `gms-v1-neon` host was not contacted or read.
+* The backend is left **running** on `:8080` (pid in `lsof -ti tcp:8080`) against `gms_c3_r1`, started with
+  `APP_SUPERADMIN_*`, `SECURITY_JWT_SECRET` and `JPA_SHOW_SQL=true` supplied as environment variables for that run
+  only. Stop with `lsof -ti tcp:8080 | xargs kill`. The pre-C-3 control instance on `:8081` was stopped and its
+  `git worktree` removed; `git worktree list` shows only this repository.
+* `/tmp/gms-c3-app.log` (boot + SQL), `/tmp/gms-c3-boot.log`, `/tmp/gms-prec3-app.log` and
+  `/tmp/gms-c3-secret.env` (mode 600, disposable platform password) are outside the repository. No credential in
+  this document, the script, or the repository.
+

@@ -141,7 +141,7 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     @Override
     public ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId) {
-        List<Receipt> receipts = receiptRepository.findByStudentId(studentId);
+        List<Receipt> receipts = receiptRepository.findBySchoolIdAndStudent_Id(TenantContext.schoolId(), studentId);
         // Filter by the tenant's school if needed
         return ResponseEntity.ok(receipts);
     }
