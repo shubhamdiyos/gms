@@ -377,14 +377,27 @@ met by an override costs the protection its meaning and gains nothing.
 record the refusal); a deploy run shows an explicit `waiting` → approved transition attributable to a named
 reviewer; the token for a deploy run is read-only (`gh api` on the job's permissions).
 
-**One trap to test before switching anything on.** A required status check whose workflow does **not** run is not
-a pass — it is `Expected — Waiting for status to be reported`, and the PR cannot merge. `ci.yml` filters with
-`paths-ignore` and the new gate filters with `paths`, so naming either workflow's jobs as required without changing
-the filtering reintroduces stalls on every PR that touches only docs. The cheap fix is a status-completion job that
-always runs and reports a single context; the alternative is dropping the filters. **This is a prediction from the
-trigger definitions, not an observation** — no required check is configured yet, so nothing has stalled. The first
-action after INF-23's gate reaches `master` is to open a documentation-only PR and record whether
-`Workflow validation` reports or stays absent.
+**The trap is no longer a prediction — it is measured.** A required status check whose workflow does **not** run is
+not a pass; it is `Expected — Waiting for status to be reported`, and the PR cannot merge. Tested on PR #15 (4 files,
+all under `docs/**`): `gh run list --branch docs/record-inf23-gate-merge` returns **no runs at all**, and
+`gh pr checks 15` shows only the two Vercel contexts from the attached GitHub App. Neither `ci.yml` nor
+`validate-workflows.yml` started anything — correct behaviour for both filters, fatal if either job were named in
+`required_status_checks.contexts`.
+
+So the remediation order is now forced, not chosen. Adding the four existing jobs as required checks would stall
+every documentation PR in the programme, which is the most common PR type in Phase 0. The options, in the order they
+should be tried:
+
+1. **A filter-free completion job** — one small workflow with no `paths:`/`paths-ignore:` that always runs and
+   reports a single context, made the required check. Costs ~15 s of runner time per PR and keeps the filters.
+2. **Drop the filters** so `ci.yml` runs on every PR including docs-only ones — honest but wasteful: the backend job
+   is ~50 s plus Maven resolution on changes that cannot affect it.
+3. **Required checks with `strict: false`** and the filters left in place, accepting that a docs-only PR merges on
+   Vercel's word alone. Weakest: it makes the gate bind only the PRs that already look risky.
+
+**This needs the owner's settings change either way** — `contexts=[]` today, so none of the three is configured and
+nothing has ever stalled. It is recorded here so the choice is made with the measurement in hand rather than
+discovered when a documentation PR hangs.
 
 ---
 
@@ -392,7 +405,7 @@ action after INF-23's gate reaches `master` is to open a documentation-only PR a
 
 **Evidence.** `application-prod.properties` exists and is written correctly (`ddl-auto=validate`,
 `flyway.baseline-on-migrate=false`, no defaults), but it has never been executed: booting it requires the Neon
-credential that is still unrotated (SEC-01) and mandate §25 forbids connecting to production without
+credential that is still unrotated (SEC-01) and first mandate §25 forbids connecting to production without
 authorisation. `docker-compose.yml:39` sets `SPRING_PROFILES_ACTIVE` with a `dev` default, so the *only* container
 configuration in the repository boots the relaxed profile. GitHub's `Preview` environment has no jobs and no
 protection rules.
@@ -402,7 +415,7 @@ protection rules.
 at boot, which converts "deploy" into "outage" until the baseline exists.
 
 **Remediation.** Create a compose-based staging stack on the existing host (or a second container set with its
-own volume) fed by a **masked sample dataset** (mandate §25.16 forbids fabricated data in production dashboards;
+own volume) fed by a **masked sample dataset** (first mandate §25 item 16 forbids fabricated data in production dashboards;
 a staging-only fixture is not a dashboard); boot `prod` there; require a green staging boot before the deploy
 gate clears. A second paid instance is not assumed affordable (§5 of the mandate says so explicitly), so the
 plan is one host, two stacks, isolated by network and port — recorded in [ADR-008](INFRASTRUCTURE_DECISIONS.md).
@@ -531,8 +544,8 @@ One platform behaviour measured rather than assumed, and it matters for INF-10: 
 (`a190c44`, no `.github/**` file touched) **still started the gate** — run 41283615154. For `pull_request`, GitHub
 evaluates a path filter against the whole base→head diff, not the newest commit, so a PR that once touched a
 workflow re-runs the gate on every push. Correct for this gate. It also means a PR whose *only* change is `docs/**`
-will never run it — which is the stall scenario described in INF-10's verification note if these contexts are made
-required without changing the filters.
+will never run it — measured on PR #15, which started no Actions run whatsoever, and turned into the forced remediation
+order recorded under INF-10 above.
 
 ---
 
@@ -719,8 +732,8 @@ the reverse direction (a consumed variable with no documented name) is asserted 
 Recorded because "checked and clear" is a result, and it prevents a later pass from re-flagging them.
 
 * Mock fallback: `apiSlice.js:16` and `authService.js:5` both gate on
-  `import.meta.env.VITE_MOCK_AUTH === 'true'`, so an unset variable is *off*. §25's "do not silently fall back to
-  mock APIs in production" holds by construction.
+  `import.meta.env.VITE_MOCK_AUTH === 'true'`, so an unset variable is *off*. The first mandate's §25 rule ("do not
+  silently fall back to mock APIs in production") holds by construction.
 * API origin fallback: `apiSlice.js:5-14` returns `/api/v1` when `import.meta.env.PROD`, and only falls back to
   `http://localhost:8080/api/v1` in a development build. A production bundle cannot point at localhost.
 
@@ -998,7 +1011,7 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 **The blockers are therefore exactly four, and all four are human-only for a named reason:**
 
-1. **Neon account** — creation needs email verification (mandate §8.1 permits stopping here and nowhere earlier).
+1. **Neon account** — creation needs email verification (third mandate §8.1 permits stopping here and nowhere earlier).
    After that, an API key or `neonctl auth` session lets me create `gms-production` and the least-privilege role.
 2. **OCI API credentials** — an API signing key pair plus `tenancy/user/fingerprint/region` in `~/.oci/config`, or
    a console session I can drive. The private key must never enter chat or git (§9.3, §14); it is written locally by
