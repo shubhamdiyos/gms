@@ -42,7 +42,7 @@ Read these first. If any other document contradicts one of them, the other docum
 |---|---|---|---|
 | [ENGINEERING_ROADMAP.md](ENGINEERING_ROADMAP.md) | **The one sequence**: stages 1–7, per-stage acceptance criteria, the six decomposed clauses of the definition of done, the standing constraints, and the mapping that absorbs the three older milestone series | names every other file's ids; owns none | Current, **and nothing past Stage 1 has started** |
 | [PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md) | Personas, roles, journeys, business requirements, the **frozen MVP scope** and its non-goals, the feature matrix, non-functional targets, open owner decisions | `BR-*` (new), `P-*`, `J-*`, `D-*`, `NFR-*` local to it | Current, Stage-1 deliverable |
-| [ARCHITECTURE.md](ARCHITECTURE.md) | Module map, data ownership, dependency direction, the tenancy mechanism, API contract standards, and the index/constraint design sized for ≥50,000 records per school — **§5.1 states that design as the V2–V6 migration DDL, and §5.2 records the run that corrected it** | `D-*`/`I-*` rules local to it; cites `TEN-*`, `DB-*`, `SEC-*` | Current, Stage-1 deliverable. The DDL **has** executed once, against a schema derived from the entity files (`§5.2`); it has never run against a real baseline or populated tables, which is Stage 2's job |
+| [ARCHITECTURE.md](ARCHITECTURE.md) | Module map, data ownership, dependency direction, the tenancy mechanism, API contract standards, and the index/constraint design sized for ≥50,000 records per school — **§5.1 states that design as the V2–V6 migration DDL, §5.2 records the run that corrected it, and §5.3 records what executing it against the real baseline found** | `D-*`/`I-*` rules local to it; cites `TEN-*`, `DB-*`, `SEC-*` | §5.1's DDL has now run **twice**: once against a schema derived from the entity files (`§5.2`) and once against the `V1` baseline as `V2`–`V5`, on a live PostgreSQL 16 (`§5.3`). It has still never run against populated tables — that is Stage 5's seeded database |
 | [audit/REPOSITORY_AUDIT.md](audit/REPOSITORY_AUDIT.md) | The application's audit: what the code is, what it does, what is broken; the M1 remediation record | `SEC-*`, `BKL-*`, `OPS-*`, `TEN-*`, `FE-*`, `ACD-*`, `AP-*`; cites `DB-*` (defined in `TECHNICAL_DEBT §1`) | Current — `DB-05` re-measured and `DB-07` added by Stage 1 |
 | [audit/SECURITY_AUDIT.md](audit/SECURITY_AUDIT.md) | Exposure model and severity-ranked security findings | `SEC-*` by severity | Current, with §1 amended for the EC2 retirement |
 | [audit/TECHNICAL_DEBT.md](audit/TECHNICAL_DEBT.md) | Debt register and sequencing for the application | cross-references by id | Current |
@@ -142,5 +142,8 @@ begin until a reviewer has read the three new documents.
 **What Stage 1 did not do, stated so the gap is visible:** it changed no application code, ran no test that had not
 run before, and proved no defect. Every quantitative claim in the three documents is a `grep`/`find`/`ls` over
 `master` at `bcbb71c` on 2026-11-01, and `ARCHITECTURE.md §1` lists the command shape per row precisely so the next
-reader can re-run rather than trust. The design in `§5` and the mechanism in `§4` are **proposed until Stage 2 and
-Stage 3 execute them** — `implemented` ≠ `tested` ≠ `verified` applies to a document as much as to a patch.
+reader can re-run rather than trust. `§5`'s design **became migrations** in Stage 2 — `V1`–`V5` on
+`feat/stage2-flyway-baseline`, executed against a real baseline and asserted by `scripts/verify-schema.sh` — while
+`§4`'s tenancy mechanism remains proposed until Stage 3 writes the Java that uses it. `implemented` ≠ `tested` ≠
+`verified` applies to a document as much as to a patch, and the branch state of *one* of those two halves is exactly
+the distinction this paragraph exists to keep honest.

@@ -179,7 +179,7 @@ a composite starting with it already exists. **Rule I-3:** every natural key lis
 | `schools` | `uq_schools_school_code` (already `School.java:30` `unique = true`), `idx_schools_enabled_status` | P-1 list + filter |
 | `users` | `uq_users_username` (global — `User.java:73` already `unique = true`), `uq_users_school_email (school_id, email)`, `uq_users_school_user_id (school_id, user_id)`, `idx_users_school_status (school_id, user_status)`, `idx_users_employee_id`, `idx_users_student_id`, `idx_users_parent_id` | login, per-school staff lists, the three parallel `@OneToOne` pointers at `User.java:53-68` |
 | `user_roles` | `uq (user_id, role)`, `idx_user_roles_role (role)` | roles live here (`User.java:46-50`, an `@ElementCollection Set<String>`), so every "who is a TEACHER" query is a join into a collection table that has no index and no natural key today |
-| `students` | `uq_students_student_id (school_id, student_id)` — closes `ACD-08`'s cross-tenant numbering structurally, `idx_students_school_status (school_id, status)`, `idx_students_school_class (school_id, classroom_id)`, `idx_students_school_section (school_id, section_id)`, `idx_students_school_name (school_id, last_name, first_name)`, `idx_students_email`, `idx_students_dob` | the paged list, the default sort, search by admission number, name and email |
+| `students` | `uq_students_student_id (school_id, student_id)` — closes `ACD-08`'s cross-tenant numbering structurally, `idx_students_school_status (school_id, status)`, `idx_students_school_class (school_id, classroom_id)`, `idx_students_school_section (school_id, section_id)`, `idx_students_school_name (school_id, last_name, first_name)`, `uq_students_school_email (school_id, email) WHERE email IS NOT NULL AND email <> ''` (partial — `DB-02`'s fifth key, added by §5.3 correction 4), `idx_students_email`, `idx_students_dob` | the paged list, the default sort, search by admission number, name and email |
 | `employees` | `uq_employees_employee_id (school_id, employee_id)`, `uq_employees_school_email (school_id, email)`, `idx_employees_school_status (school_id, employee_status)`, `idx_employees_school_designation (school_id, designation)`, `idx_employees_school_department (school_id, department)`, `idx_employees_is_teaching` | staff lists filtered by status/role. `designation` is a plain `varchar(100)` on `Employee.java` (`@Column(name = "designation")`), **not** a FK to the unused `designations` table — a second `DB-05`-shaped split this design records rather than silently "fixes" |
 | `classrooms` | `uq_classrooms_school_name_grade_section (school_id, name, grade, section)` | `DB-02` |
 | `sections` | `uq_sections_school_name (school_id, name)` | `DB-02` |
@@ -283,6 +283,9 @@ ALTER TABLE users     ADD CONSTRAINT uq_users_username       UNIQUE (username);
 ALTER TABLE users     ADD CONSTRAINT uq_users_school_email   UNIQUE (school_id, email);
 ALTER TABLE users     ADD CONSTRAINT uq_users_school_user_id UNIQUE (school_id, user_id);
 ALTER TABLE students  ADD CONSTRAINT uq_students_school_student_id UNIQUE (school_id, student_id);
+-- partial: students.email is nullable and '' is "no mailbox", not "shared mailbox" (§5.3 correction 4)
+CREATE UNIQUE INDEX uq_students_school_email ON students (school_id, email)
+    WHERE email IS NOT NULL AND email <> '';
 ALTER TABLE employees ADD CONSTRAINT uq_employees_school_employee_id UNIQUE (school_id, employee_id);
 ALTER TABLE employees ADD CONSTRAINT uq_employees_school_email UNIQUE (school_id, email);
 ALTER TABLE classrooms ADD CONSTRAINT uq_classrooms_school_name_grade_section UNIQUE (school_id, name, grade, section);
@@ -578,6 +581,77 @@ described result rather than a checkout-reproducible one. `B-3` promotes it into
 `scripts/derive-entity-schema.py`, alongside the Testcontainers harness, so that "the DDL was run" stops being a
 sentence a reader has to take on trust. Until then, treat every number in this section as reported, not reproduced.
 
+### 5.3 What Stage 2's run against the real baseline changed
+
+`§5.2` ran `§5.1` against a schema derived from the annotations. Stage 2 ran it against the schema a server
+actually produced, and the difference is where the four corrections below came from. The method, now reproducible
+from a checkout rather than described: boot the application once against an empty disposable PostgreSQL 16.15 with
+`ddl-auto=update`, dump with `pg_dump --schema-only`, review, and that dump is `V1__baseline_current_schema.sql`.
+What Hibernate writes today, measured on that server:
+
+| | V1 alone | after V2–V5 |
+|---|---|---|
+| tables | 38 | 38 |
+| secondary `idx_*` indexes | **0** | 87 |
+| named `uq_*` constraints | 0 (14 opaque `uk…` hashes) | 35 |
+| named `uq_*` unique **indexes** on top of those | 0 | 3 — the two partial uniques §5.1 specifies (`uq_academic_years_one_current`, `uq_fee_payment_reference`) plus the one this run added (`uq_students_school_email`, correction 4) |
+| composite foreign keys | 0 | 11 |
+| tables carrying the tenant key | 26 | 35 |
+
+**1. Rule I-2 needed an exemption with a number attached to it.** The unindexed-foreign-key query returns **69 rows**
+against V1+V2+V3, and **62 of them are `created_by` or `updated_by`** — the audit references `BaseAuditEntity`
+declares on thirty-four tables. Indexing those would be 62 write-time taxes for a predicate no endpoint issues, and
+they cannot be folded into a tenant-scoped index because they do not carry the tenant. The rule is therefore
+*navigated* foreign keys, the exemption is expressed by column name inside the assertion so an unfamiliar relation
+still has to earn an index, and the remaining 7 (`students.classroom_id`, `students.section_id`,
+`student_admissions.classroom_id`, `financial_transactions.{school_id,student_id,employee_id,fee_payment_id}`) are
+indexed. The assertion is a `RAISE EXCEPTION` in `V4` and is re-run in `V5`, because `V5` is the file that introduces
+eleven new relations.
+
+**2. `SET NOT NULL` is a code change wearing a SQL costume.** `§5.1` flipped each materialised tenant column to NOT
+NULL in the same file that added it. Against the baseline that is a production outage: `grep -in "school"` over the
+ten affected entity files (`Attendance`, `ExamSubject`, `FeePayment`, `Result`, `StudentExam`, `StudentFee`,
+`TeacherAssignment`, `Timetable`, `TimetableSlot`, `Parent`) returns **nothing for all ten**. No entity maps the
+column, so no insert can set it, so the constraint would reject the application's own writes. `V2` adds, backfills and
+*asserts* — the assertion survives, because it is a statement about the existing rows and it is the one that tells an
+operator whether the data is tenant-clean — and the flip moves to `C-7` with the entity field and the service
+assignment that make it true. `parent_student` has the same problem in a sharper form: `Parent.java:41-47` declares it
+as `@ManyToMany @JoinTable`, so Hibernate's collection persistence inserts `(parent_id, student_id)` and nothing else.
+
+**3. `ddl-auto=validate` agrees with the migration chain, and that is the gate.** The application boots against a
+database it migrated itself: `Successfully applied 5 migrations … now at version v5`, `Started GmsApplication in 6.763
+seconds`, `/actuator/health/readiness` → `UP`, and `POST /api/auth/login` → `401` — a completed database read against a
+schema nobody hand-edited. Hibernate raised no validation error, which is the only claim `validate` can make and the
+one that decides whether the chain and the entity model describe the same database. `pg_dump --schema-only` of two
+independent runs of the chain diffs **empty** at 1503 lines each (`scripts/verify-schema.sh` §1).
+
+The first attempt at that boot is worth recording because it is the failure mode this project keeps meeting: it used a
+jar built *before* the `pom.xml` edit, so the log contains **no Flyway line at all** and the run dies at
+`Schema-validation: missing table [academic_years]` — the exact error `BASELINE_STATUS` R1 attributed to the absence of
+migrations. A stale artifact does not report a missing dependency; it reports a missing schema. Any gate that boots a
+jar has to build it first, and `unzip -l target/*.jar | grep -c flyway` is the one-line check that says which of the
+two failures is on screen.
+
+**4. A register is a checklist, and `V3` had missed one line of it.** `DB-02` names five missing natural keys; the
+first draft of `V3` shipped four and the write-up said "closed" — the finding had been checked against the migration,
+not the migration against the finding. The fifth is `students.email`, and it will not take the shape the other four
+took: the column is nullable (`Student.java:49`) and a blank means "this child has no mailbox", so a plain
+`UNIQUE (school_id, email)` would refuse the second sibling registered without an address. It ships as a partial
+unique, `uq_students_school_email … WHERE email IS NOT NULL AND email <> ''`, which is the same instrument `§5.1`
+already uses for `fee_payments.payment_reference`. `employees.email` keeps the plain key because
+`Employee.java:40` declares it `nullable = false` — the asymmetry is a fact about the data, not an inconsistency in
+the file. `scripts/verify-schema.sh` §6 tests the predicate in both directions, because a partial unique can fail by
+being too tight exactly as easily as by being decorative.
+
+The `§5.2` attack table was re-run against this baseline by `scripts/verify-schema.sh`, which is now the checkout
+reproducer `§5.2` said it was waiting for: the cross-tenant attendance row is refused by
+`fk_attendance_student_same_school`, the same-tenant row is accepted, `V3` fails on a seeded duplicate admission
+number with `could not create unique index "uq_students_school_student_id"`, and `DB-07` is tested in both
+directions — one `invoice_number` in two schools accepted, the same number twice in one school refused. `§5.2`'s
+closing caveat about uncommitted artifacts is superseded: `scripts/derive-entity-schema.py` is committed and, with the
+two parser bugs that section found now fixed in it, agrees with the live server on 38 of 38 tables and 598 of 598
+columns.
+
 ## 6. API contract standard
 
 Every endpoint is under `/api/v1/…` already (35 class-level mappings) — the version prefix survives; the rest is new
@@ -682,16 +756,30 @@ duplicates until one exists.
 4. **V4** — indexes (§5), all `CREATE INDEX` (non-concurrent for the local stack; `CONCURRENTLY` is a
    production-only variant in the same file behind a documented flag, because `CONCURRENTLY` cannot run inside a
    transaction and Flyway runs each migration in one).
-5. **V5** — composite FKs (`§4` level 3) on one table pair first (`students` → `attendances`), proven, then the
-   rest. This is the step that can fail on real data, so it lands after V3/V4 rather than before.
+5. **V5** — composite FKs (`§4` level 3). `§9`'s original instruction was one table pair first (`students` →
+   `attendances`), proven, then the rest; Stage 2 shipped all eleven at once. That is a deviation and it is recorded
+   as one: the reason the step was split was fear of what it would do to real data, and the probe answered that
+   question — the chain applies clean to an empty PostgreSQL 16.15 and the cross-tenant insert is refused — while the
+   risk that actually remained (`validate` agreeing with the migration chain) was closed by booting the application
+   against the migrated schema. A staged rollout would have bought one more observation of the same two facts.
 6. **V6** — the join tables (`notification_recipients`, `announcement_targets`, `message_recipients`), backfilled
    from the JSON-in-TEXT columns, with the old columns left in place and deprecated for one release (`DB-04`).
-7. `ddl-auto=validate` in `dev`, and `FlywayMigrationStrategy` doing migrate-on-start only in dev/test; in prod the
-   migration runs as a deployment step (`ADR-006`).
+   **Not shipped in Stage 2.** A migration nobody reads is schema with no behaviour attached, and the read path that
+   would use it is Stage 3's `C-8`.
+7. `ddl-auto=validate` in every profile — **done**, and as literals rather than `${JPA_DDL_AUTO:validate}`, so no
+   environment variable reaches `update`. The dev/test migrate-on-start half is done with Spring Boot's own Flyway
+   integration rather than a `FlywayMigrationStrategy` bean, because there was nothing to customise. The prod half is
+   **not** done as written: `application-prod.properties:15` (`spring.flyway.enabled=true`) leaves Flyway enabled on
+   boot, so a production migration still happens inside the process that serves traffic.
+   `ADR-006`'s expand-migrate-verify-contract step belongs to a deployment pipeline, and until Stage 6 builds one,
+   disabling migrations in prod would leave a fresh production database with no schema at all. That is the honest
+   state, not the intended one; the card that closes it is `C-9` in [ENGINEERING_ROADMAP.md](ENGINEERING_ROADMAP.md).
 
-V2–V6 above are not sketches: their text is `§5.1`, and `§5.2` is the report of running it. V1 is the one file with no
-draft, because V1 has to be authored against a real database rather than derived from the design, and `ADR-022`
-forbids generating it from Hibernate.
+V1–V5 above are not sketches: their text is `gms_backend/src/main/resources/db/migration/`, `§5.1` is the design they
+came from, `§5.2` is the report of running that design against a schema derived from the entities, and `§5.3` is the
+report of running it against the baseline itself. V1 has no *draft* because it cannot have one: it is what a real
+server produced, captured once from a disposable database and reviewed line by line, which is the route `ADR-022`
+names as its own compromise rather than the one it rejects.
 
 ## 10. Not yet decided
 

@@ -96,7 +96,7 @@ The `timetables.classroom_id` `unique = true` is a different defect wearing the 
 
 **`schools.school_id` is not a tenant key.** `School.java:24` maps a `varchar(20)` display code (`SCH001`) under the *same column name* the rest of the schema uses for the tenant FK, so the generated schema has a `school_id` column on **26** tables while only **25** carry the tenant. Any `WHERE school_id = :id` written against `schools` silently compares a string code to an integer id. Recorded as a design constraint on Stage 2's naming, not as a rename (a rename would break every generated schema in the field): the FK columns are `school_id integer REFERENCES schools(id)`, and the display code stays `schools.school_id varchar(20)`.
 
-**No schema is version-controlled.** Zero `.sql` files, no `flyway-core` or Liquibase dependency, yet `application.properties:16-17` enables Flyway against a nonexistent `classpath:db/migration`. `ddl-auto=validate` therefore validates against a schema that exists only inside the live Neon instance (DB-01).
+**No schema is version-controlled.** Zero `.sql` files, no `flyway-core` or Liquibase dependency, yet `application.properties:16-17` enables Flyway against a nonexistent `classpath:db/migration`. `ddl-auto=validate` therefore validates against a schema that exists only inside the live Neon instance (DB-01). *Changed on `feat/stage2-flyway-baseline`, not on `master`:* five migrations, both Flyway 10 artifacts, and a `V1` baseline captured from a disposable server — so the sentence "exists only inside the live Neon instance" is now about the *unrebuildable* production database, not about the repository having no schema at all. `ADR-022` carries the verification record.
 
 ## 5. Security architecture (as-is) and findings
 
@@ -458,6 +458,13 @@ with a cost — a lint regression can reach `master` — taken deliberately inst
 
 **OPS-07 (P1) — No migrations exist.** No `flyway-core` dependency, no `db/migration` directory, zero `.sql` files; `application.properties:16-17` enables Flyway against a path that does not exist. `ddl-auto` has three conflicting values — `validate` (`:11`), `update` (`docker-compose.yml:41`), `validate` (`.env.example:16`) — and the untracked EC2 script decides which applies. Hibernate `update` on a 40-table multi-tenant schema means the live schema has drifted from the entity model with no record, no version and no rebuild path (mandate §9.1).
 
+*Re-measured on `feat/stage2-flyway-baseline` (unmerged).* Every clause of that finding is still true of `master` —
+`git show master:gms_backend/pom.xml \| grep -ci flyway` → `0`, `git ls-tree -r master` → zero files under
+`db/migration`, `application-dev.properties:20` → `${JPA_DDL_AUTO:update}`. On the branch the dependency, the
+migrations and the three literal `validate`s exist, the compose and `.env.example` overrides are gone, and
+`scripts/verify-schema.sh` proves the chain rebuilds a schema Hibernate accepts. **Closed on branch; the finding is
+open until the branch merges.**
+
 **OPS-08 (P1) — Compose cannot start from a fresh clone.** `docker-compose.yml:8-9,32-33` require `env_file: .env`, which the repo does not ship and `.gitignore:2` forbids, so `make up` fails before the `${VAR:-default}` fallbacks at `:11-13` apply. `version: '3.8'` (`:1`) is obsolete. Both Postgres (`:15`) and app (`:47`) ports are published to the host, and `/actuator` is unauthenticated (SEC-13). No `restart:` policy on any service; `postgres.healthcheck` (`:18-22`) hardcodes `pg_isready -U gms_user -d gms` while user/db are templated, so overriding `DB_NAME` breaks `depends_on: service_healthy` (`:48-50`). `SUPERADMIN_PASSWORD` and the JWT secret are never passed, so a compose deployment inherits both insecure defaults
 (SEC-02, SEC-03) — and the bootstrap name is not even the one that binds (SEC-15).
 
@@ -571,6 +578,9 @@ verdict, and every row there is backed by an executed command rather than an exp
 | `docker compose up -d postgres` | success once `.env` exists |
 | App boot against an **empty** PostgreSQL 16 under the committed `ddl-auto=validate` | **confirmed failure**: `Schema-validation: missing table [academic_years]` (OPS-07) |
 | App boot with `ddl-auto=update` against the same database | success — Hibernate creates the schema; this is the only way the application can start today |
+| `bash scripts/verify-schema.sh` on `feat/stage2-flyway-baseline` | **ALL CHECKS PASSED** — six sections: determinism (two migrations, 1503-line dumps, empty diff), I-1/I-2 with the 62-row `created_by`/`updated_by` exemption counted aloud, the cross-tenant insert refused by `fk_attendance_student_same_school`, `V3` failing on a seeded duplicate admission number, and DB-07/DB-02 each proved in *both* directions |
+| App boot on the same branch, fresh database, packaged jar | success — `Successfully applied 5 migrations … now at version v5`, `Started GmsApplication in 6.763 seconds`, `/actuator/health/readiness` → `UP`. `ddl-auto=validate` no longer needs `update` to start, which is the whole of OPS-07's claim |
+| The same boot against a jar built **before** the `pom.xml` edit | **the failure above, verbatim** — `Schema-validation: missing table [academic_years]`, with no Flyway line in the log at all. A stale artifact does not report a missing dependency; it reports a missing table. `unzip -l target/*.jar \| grep -c flyway` distinguishes the two |
 | Runtime security probes | forged-token acceptance, default-credential login, hash logging, error-body leakage and a 500 on `GET /users` were all **reproduced**; see BASELINE_STATUS §4 |
 | App boot against live Neon | **not attempted** — production access requires owner authorisation |
 

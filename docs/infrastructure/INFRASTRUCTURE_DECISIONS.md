@@ -865,6 +865,44 @@ build step; and one negative control — a migration that must fail, by seeding 
 receive a `UNIQUE` constraint (`ARCHITECTURE.md §9` step 3). A constraint migration that cannot fail has not been
 tested.
 
+**Verification, as of Stage 2 (branch `feat/stage2-flyway-baseline`, not yet merged).** Of the four checks above:
+
+| Check | Observed |
+|---|---|
+| migrate-to-head twice, dump diff empty | **Yes.** `scripts/verify-schema.sh` §1 builds two throwaway databases from `V1`–`V5` and diffs `pg_dump --schema-only` of each → 1503 lines, **identical**. Repeating it is `bash scripts/verify-schema.sh`, not a description of a run. |
+| negative control | **Yes**, after one invalid attempt. The first control seeded a duplicate `invoices.invoice_number`, which `V1`'s own global unique rejects before `V3` ever runs — a control that passes for the wrong reason. The working control (`§4`) seeds a duplicate `students.student_id` into a database migrated only to `V2`, then runs `V3` and asserts it fails: `could not create unique index "uq_students_school_student_id" … is duplicated`. |
+| `ddl-auto` grep as a build step | **Partly.** The grep is true on the branch — `application.properties`, `-dev` and `-prod` now hold the literal `validate`, and `${JPA_DDL_AUTO:…}` is deleted from all three and from `.env.example`, so no environment variable can reintroduce `update`. It is **not a build step**: no CI job runs it, and `master` still carries the `${JPA_DDL_AUTO:update}` default. |
+| Testcontainers job in CI | **No.** Deferred with the rest of the automated-test work (`ENGINEERING_ROADMAP.md` Stage 5, criteria 4–5). |
+
+`§5` and `§6` of the same script add the two checks the ADR did not name, because a constraint that only ever gets
+tested in one direction is a guess: DB-07's relaxation is measured as *accepted* across two schools and *refused*
+inside one, and `students.email`'s partial unique is measured as accepting two blank emails, a `NULL` and the same
+address in a different school, then refusing a repeat inside one school.
+
+Two things this ADR could not have predicted:
+
+1. **`prod` still migrates on boot.** `application-prod.properties:15` — `spring.flyway.enabled=true` — was left
+   untouched, so the half of the decision that says *"in `prod` it is a deployment step executed before the new version
+   receives traffic"* is **not implemented**; `ddl-auto=validate` is the half that is. The gap is `C-9`.
+2. **`flyway-core` alone does not speak PostgreSQL.** Flyway 10 — which Spring Boot 3.3.3 manages, at 10.10.0 — moved
+   the dialect into `flyway-database-postgresql`; `flyway-core` 10.10.0 contains no PostgreSQL classes. Boot fails with
+   *"Unsupported Database: PostgreSQL 16.15"* unless both artifacts are declared. Neither this ADR nor
+   `ARCHITECTURE.md §9` said so, and a pom that "has Flyway" is precisely the property-true, system-false claim the ADR
+   was written to end.
+
+**The boot half, and the trap in it.** `DoD-5`'s other clause — the application starts against a schema the migrations
+own — was observed on a fresh database with the packaged jar: `Successfully applied 5 migrations … now at version v5`,
+`Started GmsApplication in 6.763 seconds`, `/actuator/health/readiness` → `{"status":"UP"}`. The trap: an earlier
+attempt run against a jar built *before* the pom edit logged **no Flyway line at all** and died at
+`Schema-validation: missing table [academic_years]`. A stale artifact does not skip migrations loudly; it skips them
+silently and then blames the schema. `unzip -l target/*.jar | grep -c flyway` is the check, and the rebuild is part of
+the gate, not a preamble to it.
+
+`ADR-020` gets its evidence here rather than in prose: `V5`'s composite keys are exercised by an insert that puts a
+`school_id = 2` attendance row on a `school_id = 1` student, and the server refuses it — `violates foreign key
+constraint "fk_attendance_student_same_school"` (`§3`). That is the ADR's entire argument, demonstrated by a database
+instead of asserted by a document.
+
 ### ADR-023 — Delete `AbstractCRUDController` and `AbstractCRUDService`
 
 **Status:** **Accepted**. **Date:** 2026-11-01. **Closes:** `SEC-05`. **Implements:** the mandate's *"Avoid

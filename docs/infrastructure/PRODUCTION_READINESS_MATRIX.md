@@ -78,7 +78,7 @@ Each item names the command or artefact that produced the status. An item with n
 | Secret scanning | `NOT_IMPLEMENTED` | no workflow, no `gitleaks`, no push-protection config in repo |
 | Dependency / image vulnerability scanning | `NOT_IMPLEMENTED` | no Trivy/grype/OSV step; no `.github/dependabot.yml`; no `CODEOWNERS` |
 | SBOM | `NOT_IMPLEMENTED` | none produced by any run |
-| Migration validation | `BLOCKED` | no migration tool exists (OPS-07) and the prod profile has never booted (INF-11) |
+| Migration validation | `PARTIALLY_IMPLEMENTED` | On `feat/stage2-flyway-baseline` (unmerged): the tool exists, five migrations exist, and `bash scripts/verify-schema.sh` executed in this session with `ALL CHECKS PASSED` across six sections — determinism, the two index invariants, the cross-tenant insert, a `V3` that must fail, and DB-07/DB-02 each proved in both directions. `PARTIALLY_` because nothing in CI runs it, and because the `prod` profile has still never booted (INF-11). On `master`, this row is unchanged `BLOCKED`: `git show master:gms_backend/pom.xml \| grep -ci flyway` → `0` |
 | Container smoke test | `NOT_IMPLEMENTED` | CI builds a jar, never an image, never starts a stack |
 | Integration tests against a real database | `NOT_IMPLEMENTED` | no Testcontainers; 42 unit tests only (36 from M1 + 6 in `fix/tenant-notification-recipients`) |
 | Advisory vs blocking gates distinguished honestly | `VERIFIED` | the lint step carries its measured count and its reason in `ci.yml`, and `npm test` remains explicitly non-blocking pending M3 of the security programme |
@@ -117,7 +117,7 @@ therefore historical: the control existed in a file that no longer exists.
 | Encrypted off-site backup | `NOT_IMPLEMENTED` → **`BLOCKED` on an owner cost decision** | no dump script at all (INF-13) |
 | Restore tested | `NOT_IMPLEMENTED` | never executed, and there is nothing to restore from |
 | Least-privilege database role | `NOT_IMPLEMENTED` | the app connects as the superuser-equivalent `POSTGRES_USER` created by the image |
-| Migrations as a controlled step | `NOT_IMPLEMENTED` | OPS-07 — no `flyway-core` in `pom.xml` (re-verified by grep), so all `spring.flyway.*` keys are inert and Hibernate `update` is the only schema mechanism |
+| Migrations as a controlled step | `PARTIALLY_IMPLEMENTED` | *the migrations* half exists on `feat/stage2-flyway-baseline`: both Flyway 10 artifacts in `pom.xml`, `V1`–`V5` in `db/migration`, `ddl-auto=validate` as a literal in all three profiles, and the `${JPA_DDL_AUTO:…}` fallback deleted from the properties and `.env.example` — so Hibernate writes no schema anywhere, which is stricter than the rule it was written to satisfy. *the controlled step* half does not: `spring.flyway.enabled=true` (`application-prod.properties:15`) still migrates inside the process that serves traffic, because flipping it before a pipeline exists would leave a fresh production database with no schema at all. That change and the migrate step ship together as `C-9` (roadmap Stage 6). On `master` the row reads as it always did — `flyway-core` absent, all `spring.flyway.*` keys inert, Hibernate `update` the only schema mechanism (OPS-07) |
 | Log rotation | `NOT_IMPLEMENTED` | measured `LogConfig = json-file, {}` |
 | Disk / memory pressure signals | `NOT_IMPLEMENTED` | no monitor, no alert, no threshold |
 

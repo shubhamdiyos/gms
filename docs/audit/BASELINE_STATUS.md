@@ -220,6 +220,18 @@ Walking the repository's own instructions from a clean clone:
 **There is today no path from a clean clone to a running system that does not touch production data.** That is the
 baseline this project starts from.
 
+**Re-measured on `feat/stage2-flyway-baseline` (2026-11-01, unmerged) — two rows of this table change, and one gains a
+new failure.**
+
+| Step | Now, on that branch |
+| --- | --- |
+| Start against a local database | ✅ **the row that made R1 famous is closed.** No `ddl-auto` override is needed: the boot logs `Successfully applied 5 migrations … now at version v5`, then `Started GmsApplication in 6.763 seconds` with `ddl-auto=validate`, and readiness answers `UP`. The repository can produce a schema. |
+| Start against a database an *older* build created with `ddl-auto=update` | ❌ **a new, deliberate failure**: `Found non-empty schema(s) "public" but no schema history table. Use baseline() or set baselineOnMigrate to true…`, and the application does not start. This is the correct behaviour and the reason is in `ADR-022`: a `update`-built schema is not a baseline, it is an unreviewed second schema, and silently baselining it would apply V2–V5 on top of whatever Hibernate guessed. The fix is to let the chain build the database — `dropdb`/`docker compose down -v` on a **local** volume — not to set `baselineOnMigrate=true`. |
+
+The second row is the one a developer meets first, because the local `gms` database on this machine is exactly the
+situation. It has been left in place rather than dropped: deleting a database is not reversible, and the rows in it
+(1 school, 2 users) are someone's, not the migration chain's.
+
 ---
 
 ## 6. Database reality (measured on the disposable instance)
