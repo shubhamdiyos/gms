@@ -351,10 +351,12 @@ approval — so the rule as configured can only ever be met by an override or by
 a gate. The first time (PR #10) that happened silently; the second time it was reported and explicitly authorized
 by the owner before the merge.
 `gh api …/environments/Production` and `/Preview` both
-return `protection_rules: []` with `can_admins_bypass: true`. Neither workflow declares `environment:`
-(`grep -n environment .github/workflows/*.yml` → no match), and `deploy-backend.yml` has no top-level
-`permissions:` block, so every run receives a default-writable `GITHUB_TOKEN`. `ci.yml:32` does declare
-`permissions: {contents: read}`.
+return `protection_rules: []` with `can_admins_bypass: true`. Neither workflow declared `environment:`
+(`grep -n environment .github/workflows/*.yml` → no match), and `deploy-backend.yml` had no top-level
+`permissions:` block, so every run received a default-writable `GITHUB_TOKEN`. `ci.yml:32` does declare
+`permissions: {contents: read}`. *Tense note: `deploy-backend.yml` is deleted by PR #13, so the second half of that
+sentence describes `master` until #13 merges — and its deletion is what let the new gate's `permissions:` guard pass
+instead of failing.*
 
 **Impact.** A green `ci.yml` is not what stops a merge; a maintainer with push access can merge unverified code,
 and merging to `master` immediately and automatically SSHes to production with no approval, no artefact
@@ -374,6 +376,15 @@ met by an override costs the protection its meaning and gains nothing.
 **Verification.** A PR that fails `ci.yml` cannot be merged *even as admin* (attempt it on a throwaway branch and
 record the refusal); a deploy run shows an explicit `waiting` → approved transition attributable to a named
 reviewer; the token for a deploy run is read-only (`gh api` on the job's permissions).
+
+**One trap to test before switching anything on.** A required status check whose workflow does **not** run is not
+a pass — it is `Expected — Waiting for status to be reported`, and the PR cannot merge. `ci.yml` filters with
+`paths-ignore` and the new gate filters with `paths`, so naming either workflow's jobs as required without changing
+the filtering reintroduces stalls on every PR that touches only docs. The cheap fix is a status-completion job that
+always runs and reports a single context; the alternative is dropping the filters. **This is a prediction from the
+trigger definitions, not an observation** — no required check is configured yet, so nothing has stalled. The first
+action after INF-23's gate reaches `master` is to open a documentation-only PR and record whether
+`Workflow validation` reports or stays absent.
 
 ---
 
@@ -513,6 +524,13 @@ produced nothing before this gate and produces red now, which is the failure mod
 **Still open inside INF-23.** The gate is advisory until its two jobs are named as required status checks, which is
 INF-10 — a repository-settings change. A workflow cannot detect its own deletion, and a deleted workflow reports the
 absence of a check, not a failure. That limit is written into the file itself.
+
+One platform behaviour measured rather than assumed, and it matters for INF-10: a docs-only commit
+(`a190c44`, no `.github/**` file touched) **still started the gate** — run 41283615154. For `pull_request`, GitHub
+evaluates a path filter against the whole base→head diff, not the newest commit, so a PR that once touched a
+workflow re-runs the gate on every push. Correct for this gate. It also means a PR whose *only* change is `docs/**`
+will never run it — which is the stall scenario described in INF-10's verification note if these contexts are made
+required without changing the filters.
 
 ---
 
@@ -828,7 +846,7 @@ outright wrong.
 | Live port bindings | **measured** — `0.0.0.0:5432` and `[::]:5432` published (INF-02) |
 | `make build` / `make up` | **FAIL by design of the file** — v1 binary absent (INF-12) |
 | `docker compose build backend frontend` | executed for §13; reported in §7.1 |
-| Frontend lint | **47 errors / 22 files** — unchanged, advisory |
+| Frontend lint | **47 errors / 22 files** — unchanged, advisory. The flag is `continue-on-error: true` at `ci.yml:94` (measured: `- name: Lint` is `ci.yml:86`, and the step's own comment block carries the flag to 94). It stays advisory until the frontend contract package fixes the errors, per INF-17 — making it blocking now would gate on noise |
 | Backend unit tests (`mvn -B verify` in CI) | **PASS** in CI runs 41245769121 / 41245531864 / 41245233160 |
 | Docs-only change starts no build | **PASS (negative case exercised)** — PR #11 is documentation-only and produced **no** `ci.yml` run (`gh run list` shows nothing for the branch), which is the `paths-ignore` contract at `ci.yml:11-22` observed from the other side. The deploy workflow's `paths:` filter is not proven by this, since it triggers only on `push` to `master`. |
 | A Vercel GitHub App is already in the delivery path | **observed** — PR #11 reports `Vercel / pass` against `shubhamdiyos-projects/gms-react`, so preview deployments are built per PR by a third party that no document in this repository names. Relevant to ADR-013 and to §8's privacy review: the access policy of those preview URLs is unverified. |
