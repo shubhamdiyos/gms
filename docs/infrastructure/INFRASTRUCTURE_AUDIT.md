@@ -342,10 +342,14 @@ refused by the workflow.
 `enforce_admins.enabled = false`. Reviews are configured (`required_approving_review_count = 1`,
 `require_last_push_approval = true`, `dismiss_stale_reviews = true`) but admins bypass them — and PR #10 was in
 fact merged with `--admin` on 2026-10-31, which is on the record in
-[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It is now the normal path rather than the exception**: seven
-consecutive PRs (#10–#16) merged with zero recorded reviews, the last pair nine seconds apart, and the full count with
-its merge SHAs and timestamps is carried in [§11 below](#11-what-i-can-execute-directly-and-the-genuine-human-blockers)
-rather than restated here. The structural cause is worth naming for the remediation below: on a single-account
+[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It is now the normal path rather than the exception**: nine
+consecutive PRs (#10–#18) merged with zero recorded reviews, the closest pair nine seconds apart, and the full count
+with its merge SHAs and timestamps is carried in [§11 below](#11-what-i-can-execute-directly-and-the-genuine-human-blockers)
+rather than restated here. The ninth of those merges is the one that settles what the finding means: PR #18 added a
+fourth CI job whose seven assertions ran green twice — on the pull request and again on the push to `master` at its own
+merge commit — and the merge still needed `--admin`, because `contexts` is still `[]`. Adding checks therefore cannot
+move this needle while the check set is empty; only the protection shape can. The structural cause is worth naming for
+the remediation below: on a single-account
 repository `required_approving_review_count = 1` with `require_last_push_approval = true` is **unsatisfiable by
 construction** — GitHub refuses an author's own approval — so the rule as configured can only ever be met by an
 override or by relaxing it, and an override is not a gate. The first time (PR #10) that happened silently; from PR #11
@@ -1008,7 +1012,7 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 | Repository, branches, PRs, workflow files | **Full** | `gh` authenticated as the owner; token scopes `gist, read:org, repo, workflow`; `workflow_dispatch` and `workflow` edits both work |
 | Branch protection / required checks / secrets inventory | **Full (admin)** | `gh api …/branches/master/protection` reads and writes; `gh secret list` works. Values are never readable, only their names — by design |
 | Backend/frontend builds, tests, container builds | **Full locally** | `mvn`, `node`, `docker`/Compose v5.6.1, BuildKit present; arm64 already matches the OCI target. Needs Colima started, which costs nothing but time |
-| Oracle Cloud provisioning | **Tooling installed, stack written and validated, authentication missing** | `oci` CLI **3.95.1** in `~/.venvs/oci-cli` (installed after the owner withdrew the browser route; `brew` could not be used — it aborts on `unknown or unsupported macOS version: "27.0.1"`). **OpenTofu v1.13.2** now in `~/.local/bin/tofu`, archive SHA-256 verified against the published `tofu_1.13.2_SHA256SUMS`, provider `oracle/oci` **9.11.0** pinned in `.terraform.lock.hcl` (ADR-018). [`infra/oci/`](../../infra/oci/README.md) holds §9's VCN/IGW/subnet/security-list/instance and passes `tofu validate`; its seven plan-time guards were each fired on this machine. Still true: no `~/.oci/config`, no key pair, so **no API call has been made, nothing has been inspected in the tenancy and nothing has been created**. `oci setup config` takes no options at all (verified against its `--help`), so it is the one step that genuinely needs the owner (§9.3: their public key, never their private one) |
+| Oracle Cloud provisioning | **Tooling installed, stack written, validated and CI-gated, authentication missing** | `oci` CLI **3.95.1** in `~/.venvs/oci-cli` (installed after the owner withdrew the browser route; `brew` could not be used — it aborts on `unknown or unsupported macOS version: "27.0.1"`). **OpenTofu v1.13.2** now in `~/.local/bin/tofu`, archive SHA-256 verified against the published `tofu_1.13.2_SHA256SUMS`, provider `oracle/oci` **9.11.0** pinned in `.terraform.lock.hcl` (ADR-018). [`infra/oci/`](../../infra/oci/README.md) holds §9's VCN/IGW/subnet/security-list/instance and passes `tofu validate`; its seven plan-time guards were each fired on this machine, and after PR #18 they fire in CI too — run 41287513214 (job 124791715614) on the pull request and run 41287750885 (job 124792405019) on the push to `master` at its own merge commit `3cf8fa1`, 7/7 `ok` in both. Still true: no `~/.oci/config`, no key pair, so **no API call has been made, nothing has been inspected in the tenancy and nothing has been created**. `oci setup config` takes no options at all (verified against its `--help`), so it is the one step that genuinely needs the owner (§9.3: their public key, never their private one) |
 | Neon provisioning | **None** | no `neonctl`, no API key, no account session. `neonctl` installs from npm; auth needs the owner's login |
 | DNS for `bytencia.com` | **Unknown** | no registrar/DNS provider identified in the repository or in tooling. Until DNS is reachable, Caddy has no hostname to obtain a certificate for, so INF-01 cannot close |
 
@@ -1030,21 +1034,32 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 
 **The protection problem, stated once.** `required_approving_review_count = 1` with
 `require_last_push_approval = true` cannot be satisfied on a single-account repository, because GitHub refuses an
-author's own approval. Every PR so far has therefore needed an `--admin` override. **Seven now carry one** — #10
-(2026-10-31), #11 (`483a41c`, 2026-11-01T04:42:25Z), #12 (`e9c6b3d`, 06:20:39Z), #13 (`964acad`, 07:13:33Z), #14
-(`13bc2ed`, 07:14:21Z), #15 (`d274ebc`, 07:27:32Z) and #16 (`7fb25b8`, 07:27:41Z) — measured as
-`GET /pulls/N/reviews` returning an empty array for each while the rule required one. The cadence is the finding, not
-the count: #13 and #14 went in eighty-eight seconds apart, #15 and #16 nine seconds apart, and the second pair was a
-documentation PR recording the first pair's overrides. A rule that is met by being bypassed twice a minute is not a
-gate; it is a prompt. The mandate contradicts itself in a **single section**: §2 says both "Never bypass branch
-protection, required reviews, CI checks" and "Do not ask me to manually review or merge every routine engineering
+author's own approval. Every PR so far has therefore needed an `--admin` override. **Nine now carry one** — #10
+(`7a75d39`, 2026-10-31T21:54:43Z), #11 (`483a41c`, 2026-11-01T04:42:25Z), #12 (`e9c6b3d`, 06:20:38Z), #13 (`964acad`,
+07:13:33Z), #14 (`13bc2ed`, 07:14:21Z), #15 (`d274ebc`, 07:27:31Z), #16 (`7fb25b8`, 07:27:41Z), #17 (`ea3cebf`,
+07:33:52Z) and #18 (`3cf8fa1`, 08:10:46Z) — measured as `GET /pulls/N/reviews` returning an empty array for each of the
+nine while the rule required one. Timestamps come from the merge commits, which match `merged_at` to the second for
+#10–#17 and disagree with it by one hour for #18; [BASELINE_STATUS.md §11.1](../audit/BASELINE_STATUS.md) carries that
+measurement and the reason this section does not mix the two sources. The cadence is the finding, not the count: #13 and
+#14 went in forty-eight seconds apart and #15 and #16 nine seconds apart, and in both cases the second merge was a
+documentation PR recording the first pair. #17 was another documentation PR, this one recording seven of the overrides,
+and #18 landed the OCI stack thirty-seven minutes later — at a normal pace, which is the point: nine is what the default
+path produces when nothing about the protection is changed, not an artefact of stacking branches in a hurry. #18 also
+settles what the finding is *about*: its new `Infrastructure definitions` job was green on the PR (run 41287513214) and
+green again on `master` at its own merge commit (run 41287750885), seven guard assertions firing in each, and the merge
+still needed `--admin` because `contexts` is still `[]`. A rule that is met by being bypassed twice a minute is not a
+gate; it is a prompt, and adding checks does not turn it into one. The mandate contradicts itself in a **single
+section**: §2 says both "Never bypass branch protection, required reviews, CI checks" and "Do not ask me to manually
+review or merge every routine engineering
 PR. You should manage the PR lifecycle yourself where repository permissions and protections allow it". The clause is
 conditional — *where protections allow* — and this configuration does not allow it, so the two readings are only
 reconcilable by changing the rule. The contradiction sits in one section, not across two mandates (an earlier draft of
 this paragraph cited "§43"; the current mandate has 23 sections).
 
-What reconciles them: make `Backend build and tests`, `Frontend lint and build` and the two
-`Workflow validation` jobs **required** with `strict` and `enforce_admins: true`, and set the review count to `0`.
+What reconciles them: make `Backend build and tests`, `Frontend lint and build`, `Infrastructure definitions` and the
+two `Workflow validation` jobs **required** with `strict` and `enforce_admins: true`, and set the review count to `0`.
 That converts a decoration into a gate that binds the owner too — and it is the only repository-settings change in
 the programme I cannot justify making alone, because reading the merge history above shows an override is already
-routine.
+routine. The set has grown since this paragraph was first written, which is the trap in it: PR #18 added a fifth check
+that passes, and a fifth passing check inside `contexts: []` protects nothing. Naming them is the change; writing more
+of them is not.
