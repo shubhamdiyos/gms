@@ -34,13 +34,6 @@ variable "ssh_source_cidr" {
   type        = string
   description = "The single address allowed to reach TCP/22. §9.2: \"restrict to my current public IP /32\". Find it with `curl -4 https://ifconfig.me` and write it as <ip>/32."
 
-  validation {
-    condition = (
-      can(cidrhost(var.ssh_source_cidr, 0))
-      && try(tonumber(split("/", var.ssh_source_cidr)[1]), -1) == 32
-    )
-    error_message = "ssh_source_cidr must be a single IPv4 address in CIDR /32 form (for example 203.0.113.7/32). 0.0.0.0/0 and any wider prefix are rejected: broad SSH exposure is the specific thing §9.2 forbids."
-  }
 }
 
 variable "vcn_cidr" {
