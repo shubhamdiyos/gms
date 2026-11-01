@@ -92,7 +92,12 @@ unconditional drop-in is a lockout.
 
 ## CI runs this stack before it reaches `master`
 
-`infra/**` is not in `ci.yml`'s `paths-ignore`, so any change here starts the
+Only markdown in `infra/**` is in `ci.yml`'s `paths-ignore` — the `infra/**/*.md`
+line that PR #22 added after PR #20 measured the hole: `*.md` matches one
+directory level, so a documentation-only edit that touched
+`infra/oci/README.md` started all three CI jobs on the pull request *and* again
+on the push to `master`, 140 runner-seconds for prose. No `.tf`, `.tftpl` or
+`.sh` path here is ignored, so any real change to this stack still starts the
 **Infrastructure definitions** job. It installs OpenTofu from the official
 release archive and refuses to unpack it unless the digest matches the
 publisher's `SHA256SUMS`, then runs `tofu fmt -check`, `tofu init

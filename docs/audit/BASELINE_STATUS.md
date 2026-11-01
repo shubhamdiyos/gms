@@ -359,13 +359,16 @@ override. On a single-account repository the configured rule (`required_approvin
 `require_last_push_approval = true`) can never be satisfied, because GitHub refuses an author's own approval;
 Infra-M2 has to choose a protection shape that is satisfiable rather than rely on repeated bypasses.
 
-**Nine consecutive PRs have now needed one.** #13 (EC2 retirement, `964acad`, 2026-11-01T07:13:33Z) and #14 (the
+**Twelve consecutive PRs have now needed one.** #13 (EC2 retirement, `964acad`, 2026-11-01T07:13:33Z) and #14 (the
 workflow-validation gate, `13bc2ed`, 07:14:21Z) both hit `REVIEW_REQUIRED` and both went in on the owner's standing
 instruction to manage the PR lifecycle rather than queue it for a reviewer who cannot approve their own work, followed
 by #15 (`d274ebc`, 07:27:31Z) — the documentation pass that recorded those two — and #16 (`7fb25b8`, 07:27:41Z), the
 citation-key fix, **nine seconds** after #15: two branches stacked on one base, merged as fast as the CLI would let
 them be. Then #17 (`ea3cebf`, 07:33:52Z), the pass that counted seven, and #18 (`3cf8fa1`, 08:10:46Z), the OpenTofu
-stack, thirty-seven minutes later.
+stack, thirty-seven minutes later. #20 (`88b6f17`, 08:48:41Z) recounted that list at nine, #21 (`04aff7b`, 09:56:05Z)
+closed part of TEN-03, and #22 (`3b6a6a5`, 10:14:04Z) narrowed this repository's own path filter. Twelve merges, twelve
+overrides — and two of the last three were documentation passes *about* the count, which is the loop this section keeps
+failing to exit.
 
 No required check was bypassed: #13's CI jobs, #14's two `Workflow validation` jobs and #15/#16's absence of runs under
 `paths-ignore` are all consistent, and `Workflow validation` re-ran green on master's own `7fb25b8` (run 41284869478).
@@ -378,26 +381,55 @@ of assertions in `ci.yml` is therefore not a proxy for protection, and growing t
 protection shape can. What is overridden every single time is review, not verification, and that distinction is why the
 override keeps feeling defensible while the rule keeps being meaningless.
 
-The count is stated as nine rather than as "every PR this year" because of what the API can and cannot prove.
-`GET /pulls/N/reviews` was called once per PR for #10 through #18 and returned an empty array nine times, so none of
+The filter gap #22 closed was measured rather than inferred, and it is worth its own paragraph because it was hiding in
+a comment that described itself. `ci.yml`'s `paths-ignore` held `docs/**`, which matches everything below `docs/`, and
+`*.md`, which matches **one directory level** — so prose under `docs/` was free while prose anywhere else was not. PR
+#20 changed four `docs/` files plus `infra/oci/README.md` and nothing else, and that single nested markdown file started
+the whole matrix twice: run 41290349536 on the pull request (backend 27s, frontend 31s, infrastructure 19s) and run
+41290409900 on the push to `master` (18s, 24s, 21s) — **140 runner-seconds for a documentation change**, on the very
+commit whose message argued that documentation changes should not cost builds. `infra/**/*.md` is now in both trigger
+sets, and the negative control is free: the PR that lands this paragraph touches `docs/**` and `infra/oci/README.md`
+only, so it starts **no** `ci.yml` run — same repository, same class of edit, six jobs then and zero now. What that
+buys is stated in the audit rather than glossed here: a prose-only change is now unverified by CI *by design*, so a
+wrong sentence in `docs/` cannot fail a build. The control ran on this paragraph's own PR: head commit
+`a5e2c0abcbd12d1c5d2c816c85975c2bbc5004e4` returns **zero** workflow runs from `GET /actions/runs?head_sha=`. That is
+the accepted half of INF-10's trade, and it is another reason the required-checks decision outranks the runner-minute
+saving.
+
+The count is stated as twelve rather than as "every PR this year" because of what the API can and cannot prove.
+`GET /pulls/N/reviews` was called once per PR for #10 through #22 and returned an empty array twelve times, so none of
 them ever held an approving review, and `required_approving_review_count` has been 1 across that whole window —
-re-read after the ninth merge, still `contexts: []`, `strict: false`, `enforce_admins: false`, i.e. nothing about the
+re-read after the twelfth merge, still `contexts: []`, `strict: false`, `enforce_admins: false`, i.e. nothing about the
 configuration changed to make any of this necessary. #8 and #9 also report zero reviews and `mergeable_state: blocked`,
 but that field is recomputed against the *current* protection rules, so it cannot show what the configuration was when a
-May 2026 PR merged. The defensible claim is therefore the window this programme owns: nine merges, nine overrides, zero
-reviews. The merge that lands this paragraph is the tenth, and the pass that counts it is the eleventh — a documentation
-loop that only ends when the rule changes, not when it is measured.
+May 2026 PR merged. The defensible claim is therefore the window this programme owns: twelve merges, twelve overrides,
+zero reviews. The merge that lands this paragraph is the thirteenth, and the pass that counts it is the fourteenth — a
+documentation loop that only ends when the rule changes, not when it is measured.
 
 Two measurement corrections belong here, because an earlier version of this section got them wrong and the errors were
 in the direction of sounding worse. #13 and #14 are **forty-eight** seconds apart, not eighty-eight, and #15 follows
 #14 by thirteen minutes, not ninety seconds; both figures now come from the merge commits themselves. Those commits are
-also the timestamp source for #18, for a reason worth recording: `GET /pulls/18` reports `merged_at`
-`2026-11-01T09:10:46Z` and `GET /actions/runs/41287750885` reports `created_at` `09:10:49Z`, while
+also the timestamp source for #18, for a reason that has since become a finding of its own. `GET /pulls/18` reports
+`merged_at` `2026-11-01T09:10:46Z` and `GET /actions/runs/41287750885` reports `created_at` `09:10:49Z`, while
 `GET /commits/3cf8fa1` reports a committer date of `08:10:46Z` and the runner's own log lines for that job are stamped
-`08:10:59Z`–`08:11:06Z`. GitHub is therefore disagreeing with itself by exactly one hour about a merge that happened
-eleven minutes ago, and the commit plus the runner clock are the two surfaces that agree with each other. #10 through
-#17 show no such split — commit date and `merged_at` match to the second — so this is not a systematic offset in one of
-the two fields, and the interval claims above use one source throughout rather than mixing them.
+`08:10:59Z`–`08:11:06Z` — one event described by two clocks exactly 3600 seconds apart. An earlier version of this
+section recorded that split and stopped, calling it a one-off about a merge that had happened eleven minutes ago. It was
+wrong to stop: #20 carries the identical gap (`merged_at` `09:48:41Z`, merge commit `08:48:41Z`, and the first log line
+of its `master` run reads `2026-11-01T08:48:48.3628913Z` while that run's own `started_at` says `09:48:47Z`), while #21
+and #22 carry none (`04aff7b` commit and `merged_at` both `09:56:05Z`; `3b6a6a5` `10:14:04Z` against `10:14:05Z`). Two
+merges in twelve, then — not a property of the repository, and not the systematic offset either.
+
+Which surface is the wall clock is settled without asking GitHub, because the commits *this machine* authored carry
+this machine's clock and they bracket the disputed events: `c3f7860` is stamped `14:15:39+05:30` and `82ea32c`
+`15:24:26+05:30`. If `merged_at` were the true clock, PR #20 landed at 15:18:41 IST — six minutes before the first
+commit of the TEN-03 package, which contains a service rewrite, six new tests and a full `mvn verify`, and whose pull
+run then started sixty-two minutes after the push that triggered it. On the commit clock the same two intervals are
+sixty-six minutes of work and two minutes ten seconds of queue, which is what actually happened. All four merges above
+carry `Committer: GitHub <noreply@github.com>`, so this is two GitHub services disagreeing, not a local merge artifact:
+the merge-commit dates and the runner logs are the wall clock, and `merged_at`/`created_at`/`started_at` ran an hour
+ahead for those two events. The practical rule, stated once: intervals in this programme come from merge commits and
+runner logs and are never mixed with `merged_at`, and any cross-source comparison is off by 3600 seconds for #18 and
+#20.
 
 The change that would make the override unnecessary is recorded in
 [INFRASTRUCTURE_AUDIT.md §11](../infrastructure/INFRASTRUCTURE_AUDIT.md) and is one settings call away.
