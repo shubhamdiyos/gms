@@ -1,0 +1,109 @@
+name: Workflow validation
+
+# The fix for INF-23. `ci.yml` lists `.github/**` in both of its `paths-ignore`
+# sets, so a change to any workflow started no run anywhere — proved by the audit
+# branch, where the commit that edited `ci.yml` itself produced zero runs. This
+# workflow triggers on exactly the path set that CI skips, which is what makes the
+# gate able to check itself.
+#
+# Pinning every action to a full commit SHA, and keeping it that way, is mandate §12.
+
+on:
+  pull_request:
+    paths:
+      - '.github/**'
+  push:
+    branches:
+      - master
+    paths:
+      - '.github/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: workflow-validation-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint every workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: actionlint
+        uses: rhysd/actionlint@914e7df21a07ef503a81201c76d2b11c789d3fca # v1.7.12
+
+  structure:
+    name: Check trigger sets and permissions
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    # Stated plainly, so nobody over-trusts this file: a guard inside a workflow cannot
+    # detect the deletion or rename of that same workflow — a removed file runs no
+    # checks, and GitHub reports a workflow that never ran as the *absence* of a check,
+    # which is exactly how INF-23 went unnoticed. These steps catch a careless edit, not
+    # a deliberate removal. The real answer is INF-10: name these jobs as required status
+    # checks, so a missing run blocks the merge. Until that is configured, an absent
+    # "Workflow validation" check is suspicious, not a pass.
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Every workflow declares least-privilege permissions
+        run: |
+          set -euo pipefail
+          missing=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -e "$f" ] || continue
+            if ! grep -q '^permissions:' "$f"; then
+              echo "::error::$f has no top-level permissions: block, so it inherits a writable GITHUB_TOKEN"
+              missing=1
+            fi
+          done
+          exit "$missing"
+
+      - name: Every action is pinned to an immutable SHA
+        run: |
+          set -euo pipefail
+          unpinned=0
+          for f in .github/workflows/*.yml .github/workflows/*.yaml; do
+            [ -e "$f" ] || continue
+            while IFS= read -r hit; do
+              if ! grep -qE '@[0-9a-f]{40}([[:space:]]|$)' <<<"$hit"; then
+                echo "::error::$(basename "$f"):${hit%%:*} — actions must pin to a full commit SHA (mandate §12)"
+                unpinned=1
+              fi
+            done < <(grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]' "$f" || true)
+          done
+          exit "$unpinned"
+
+      - name: The CI gate still triggers on pull requests
+        run: |
+          set -euo pipefail
+          if ! grep -qE '^  pull_request:' .github/workflows/ci.yml; then
+            echo "::error::ci.yml no longer triggers on pull_request — every other gate has just been switched off"
+            exit 1
+          fi
+          if ! grep -qE "^      - master" .github/workflows/ci.yml; then
+            echo "::error::ci.yml no longer triggers on pushes to master"
+            exit 1
+          fi
+
+      - name: This gate cannot be disabled by its own path filter
+        run: |
+          set -euo pipefail
+          if ! grep -qE "^      - '\.github/\*\*'" .github/workflows/validate-workflows.yml; then
+            echo "::error::validate-workflows.yml no longer triggers on .github/** — it can no longer validate its own edits"
+            exit 1
+          fi
+
+      - name: Warn on references to retired infrastructure
+        run: |
+          set -uo pipefail
+          if grep -rn 'secrets\.EC2_' .github/workflows/ 2>/dev/null; then
+            echo "::warning::a workflow still references EC2_* secrets; EC2 is permanently retired (see ADR-015/017)"
+          fi
+          exit 0

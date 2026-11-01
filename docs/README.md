@@ -79,8 +79,9 @@ PY
 
 ## 4. Not yet written
 
-The mandate §12 names documents that do not exist yet and will be created by the milestone that makes them true,
-not before — a runbook for a pipeline that does not exist would be fiction:
+Mandate §4 lists these documents as required, and §19 Phase 7 is the phase that says "Document deployment and
+recovery runbooks". They do not exist yet, and they will be written by the milestone that makes them true, not
+before — a runbook for a pipeline that does not exist would be fiction:
 
 `DEPLOYMENT_RUNBOOK.md` · `ROLLBACK_RUNBOOK.md` · `BACKUP_AND_RESTORE.md` · `INCIDENT_RESPONSE.md` ·
 `OPERATIONS_GUIDE.md` · the product requirements and feature matrix · the API reference (OpenAPI, generated from
