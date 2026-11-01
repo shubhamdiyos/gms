@@ -337,7 +337,7 @@ audit's truest rows and are now the largest changes: 16 test classes under `gms_
 (counted with `find … -name '*.java' | wc -l`), and seven migrations `V1`–`V7` in
 `gms_backend/src/main/resources/db/migration/`, with `flyway-core` in `gms_backend/pom.xml:54`. The later sections of
 this file (§13 onward) carry the counts for each card as it closed: §18 is the card evidence for `C-4`, `C-5`, `C-6` and
-`C-8`, and what is still open is the set of "does not close" / "still owed" lines at §17.6 and §18.1–§18.6.
+`C-8`, and what is still open is the set of "does not close" / "still open" lines at §17.6 and §18.1–§18.6.
 
 ---
 
@@ -1302,13 +1302,19 @@ ambiguity instead of routing around it.
 
 *Live.* `scripts/verify-mvp-e2e.sh`, the `C-8` feature block **F11**: **20 checks PROVED**.
 
-*Still owed for `C-8`.* **The deliberate-failure control has not been run.** §17.5 and §18.2 each record a card
-proving its own test can go red; `C-8` has the equivalent test not yet performed — drop `@CreatedBy`, watch F11 go red,
-restore it, and `touch` the file. Until that is done, F11's 20 checks demonstrate the behaviour but do not demonstrate
-that anything would notice if the behaviour stopped. And two things this card does not claim to have fixed: **hard
-deletes destroy the trail** — a row and its authorship disappear together, and no constraint exists to keep them apart —
-and **no API surfaces the trail to a school**, so the columns are evidence available to the database and not yet to the
-user.
+*The control was run, and it discriminated.* Deleting `@CreatedBy` and `@LastModifiedBy` from `AuthorshipEntity` — the
+columns still mapped, the eight keys still present, nothing else changed — takes the MVP suite from 294 passed / 0
+failed to **291 passed / 3 failed / 0 skipped** and the feature register from `11 of 11` to `10 of 11`. The three red
+checks are `F11 a pupil row records who wrote it`, `F11 an admission records who applied` and `F11 a classroom records
+who created it`, each printing `(expected 2, got )` — the blank is the point. The other 17 F11 checks stay green,
+including *"an account created through the API records its author"*, because `User.createdBy` is assigned by the service
+rather than by the listener, so the control fails on the mechanism and not merely on the column. Restoring the two
+annotations and re-running against a freshly created database returns **294/0/0 and 11 of 11**. `C-8` therefore matches
+§17.5 and §18.2: three cards in this stage have now been proved capable of going red.
+
+*Still open for `C-8`.* Two things this card does not claim to have fixed: **hard deletes destroy the trail** — a row
+and its authorship disappear together, and no constraint exists to keep them apart — and **no API surfaces the trail to
+a school**, so the columns are evidence available to the database and not yet to the user.
 
 ### 18.6 The whole-build measurement
 
