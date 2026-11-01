@@ -70,7 +70,7 @@ Each item names the command or artefact that produced the status. An item with n
 | Item | Status | Evidence / gap |
 |---|---|---|
 | Backend compile + test executes | `VERIFIED` | three `ci.yml` runs concluded `success`; job name `Backend build and tests`, `mvn -B verify` |
-| Workflow validation (mandate §6.1 stage 1) | `NOT_IMPLEMENTED` | `.github/**` is in both `ci.yml` `paths-ignore` lists, so no workflow can check a change to a workflow — measured: `6198d86` edits `ci.yml` and starts no run (INF-23) |
+| Workflow validation (mandate §12, "Workflow self-validation") | `NOT_IMPLEMENTED` — **fix in review as PR #14** | `.github/**` sits in both `ci.yml` `paths-ignore` lists, so no workflow can check a change to a workflow — measured: `6198d86` edits `ci.yml` and starts no run (INF-23). `validate-workflows.yml` now triggers on exactly that path set and its acceptance test has been executed (red on a deliberately broken trigger in run 41283176919, green on the revert in 41283277168). Still `NOT_IMPLEMENTED` here because the state of `master` is what this matrix scores — and it becomes a control, not just a signal, only when INF-10 names those jobs as required checks |
 | Frontend lint + production build executes | `VERIFIED` | same runs; `npm ci`, lint advisory (47 errors/22 files measured), `npm run build` |
 | Checks are *required* | `NOT_IMPLEMENTED` | `contexts=[]`, `strict=false`, `enforce_admins=false`; PR #10 and PR #11 both merged with `--admin` — the review rule cannot be satisfied by a single-account author |
 | Workflow-token least privilege | `PARTIALLY_IMPLEMENTED` | `ci.yml:32` declares `permissions: {contents: read}`; `deploy-backend.yml` declares none |

@@ -490,6 +490,30 @@ cover the gate's own edits.
 the branch cannot merge; restoring it turns green. The job must be marked required alongside the two CI checks
 (INF-10) or it inherits the same advisory weakness.
 
+**Status — implemented, and the verification above has now been executed** (PR #14, branch
+`ci/workflow-self-validation`, 2026-11-01). `.github/workflows/validate-workflows.yml` triggers on
+`pull_request` + `push: master` with `paths: ['.github/**']` — precisely the set `ci.yml` excludes — and runs
+actionlint plus four structural guards (`permissions:` in every file, every action SHA-pinned, `ci.yml`'s two
+triggers intact, this file's own trigger intact) and one warning (any `secrets.EC2_*` reference).
+
+Three commits on that branch produced three observations:
+
+| Commit | Run | Result |
+|---|---|---|
+| `0deee38` add the gate | 41283050527 | **green** — and it *ran*, which `6198d86` could not achieve |
+| `f82f39f` rename `ci.yml`'s `pull_request:` to `pull_request_typo:` | 41283176919 | **red** in both jobs: actionlint `unknown Webhook event "pull_request_typo"` + the guard's `ci.yml no longer triggers on pull_request` |
+| `639f391` revert | 41283277168 | **green** |
+
+A fourth data point came out of the break unasked: run 41283173874 (`push`, **0 jobs**, failure) is GitHub's own
+parse-failure record for the malformed file. So a *syntactically invalid* workflow does surface as a red run even
+where a path filter would not have triggered it — the filter is evaluated after parsing. That narrows this finding's
+impact by one case. It does not close it: a **valid** edit that silently removes a trigger or widens `paths-ignore`
+produced nothing before this gate and produces red now, which is the failure mode INF-23 was filed for.
+
+**Still open inside INF-23.** The gate is advisory until its two jobs are named as required status checks, which is
+INF-10 — a repository-settings change. A workflow cannot detect its own deletion, and a deleted workflow reports the
+absence of a check, not a failure. That limit is written into the file itself.
+
 ---
 
 ### INF-14 · MEDIUM — The deploy health gate depends on the exposure that must be closed
@@ -808,8 +832,19 @@ outright wrong.
 | Backend unit tests (`mvn -B verify` in CI) | **PASS** in CI runs 41245769121 / 41245531864 / 41245233160 |
 | Docs-only change starts no build | **PASS (negative case exercised)** — PR #11 is documentation-only and produced **no** `ci.yml` run (`gh run list` shows nothing for the branch), which is the `paths-ignore` contract at `ci.yml:11-22` observed from the other side. The deploy workflow's `paths:` filter is not proven by this, since it triggers only on `push` to `master`. |
 | A Vercel GitHub App is already in the delivery path | **observed** — PR #11 reports `Vercel / pass` against `shubhamdiyos-projects/gms-react`, so preview deployments are built per PR by a third party that no document in this repository names. Relevant to ADR-013 and to §8's privacy review: the access policy of those preview URLs is unverified. |
-| A workflow file edited on a PR branch starts **no** check | **FAIL — INF-23 proved by execution.** Commit `6198d86` changed `.github/workflows/ci.yml` (6 lines) and was pushed to PR #11; `gh run list --branch infra/gms-platform-audit` afterwards returns **empty**. `.github/**` is in both `paths-ignore` lists, so the gate that runs the tests cannot validate a change to itself, and GitHub reports a workflow that never ran as the *absence* of a check rather than a failure. |
+| A workflow file edited on a PR branch starts **no** check | **FAIL — INF-23 proved by execution.** Commit `6198d86` changed `.github/workflows/ci.yml` (6 lines) and was pushed to PR #11; `gh run list --branch infra/gms-platform-audit` afterwards returns **empty**. `.github/**` is in both `paths-ignore` lists, so the gate that runs the tests cannot validate a change to itself, and GitHub reports a workflow that never ran as the *absence* of a check rather than a failure. Remediated by PR #14; see the status block in INF-23. |
 | `scripts/verify-security.sh` (18 assertions) | **18/18 PASS** locally, recorded in [BASELINE_STATUS.md §13.2](../audit/BASELINE_STATUS.md) |
+
+### 7.2 Measurements taken after M0, while building the Infra-M2 gate
+
+These are not M0 results, so they are kept separate rather than retro-fitted into the table above.
+
+| Check | Result |
+|---|---|
+| `ubuntu-latest` under CI | **`Image: ubuntu-26.04`, `Version: 20261025.179.1`** (measured in run 41283176919's `Set up job`). The migration GitHub warned about for 19 Oct 2026 has already happened, and re-measuring the audit's own earlier runs shows they were on the same image: 41245233160 and 41245769121 both report `Image: ubuntu-26.04`. So there is **no drift inside this programme's evidence** — the claim that CI measurements are comparable across those runs checks out. What remains true is the forward risk: `ubuntu-latest` is a moving target by definition, unlike the action SHAs now pinned on PR #14. `INFRASTRUCTURE_DECISIONS.md` owes an ADR on whether to pin runner labels or accept the drift. |
+| actionlint 1.7.12 against both workflows | **exit 0** locally (binary downloaded, not installed system-wide) and **exit 0** in CI on run 41283277168 |
+| Every action reference SHA-pinned | **9 of 9** — 6 in `ci.yml` (this PR), 3 in `validate-workflows.yml`; the guard enumerates them by `grep -nE '^[[:space:]]*(-[[:space:]]+)?uses:[[:space:]]'` |
+| Each pinned SHA against its upstream tag | **verified before pinning**: `11d5960`=checkout v4.4.0, `cf277c6`=setup-java v4.9.1, `ea165f8`=upload-artifact v4.6.2, `49933ea`=setup-node v4.4.0, `3d3c42e`=checkout v7.0.1, `914e7df`=actionlint v1.7.12 |
 
 ### 7.1 Image build result
 
@@ -912,7 +947,7 @@ re-checked against the working tree or a live measurement on 2026-11-01, in the 
 | Makefile uses obsolete `docker-compose` | **OPEN** | 16 of 17 recipes; `make build` → `Error 1`, `make up` → exit 2 on this host (INF-12) |
 | Vercel routed API calls to the retired EC2 host over HTTP | **RETIRED (by deletion)** | `gms_frontend/vercel.json` deleted on this branch. Before deleting it, the target was probed: DNS still resolves to `65.0.109.47`, TCP connect to `:8080` times out after 8 s — the rewrite could not carry traffic, so removing it breaks no working path |
 | Old EC2 SSH deployment workflow | **RETIRED (by deletion)** | `.github/workflows/deploy-backend.yml` deleted; `gh run list` confirms its last attempt (41245769175) never reached the host |
-| CI does not validate its own workflow files | **OPEN** | proved twice: pushing a `ci.yml` edit started no run (INF-23) |
+| CI does not validate its own workflow files | **OPEN** | the defect is real and measured, not inferred: `6198d86` edited `ci.yml` and started no run anywhere (INF-23). The remediation is built and its acceptance test executed — PR #14's gate went red on a deliberately broken trigger and green on the revert — but it is not merged, and it stays OPEN until it is. It then becomes a *control* only when INF-10 names those jobs as required checks |
 | Lint and test checks advisory rather than enforced | **OPEN** | `required_status_checks.contexts=[]`, `enforce_admins=false`, lint step `continue-on-error: true` (INF-10) |
 | No Flyway migration foundation | **OPEN** | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` property is inert (OPS-07) |
 | No independently verified off-host backup/restore | **OPEN** | zero dumps and zero restores exist anywhere; now re-targeted at managed Neon (ADR-009) |
@@ -933,7 +968,7 @@ Mandate §23 asks for this split explicitly, so it is recorded rather than disco
 | Repository, branches, PRs, workflow files | **Full** | `gh` authenticated as the owner; token scopes `gist, read:org, repo, workflow`; `workflow_dispatch` and `workflow` edits both work |
 | Branch protection / required checks / secrets inventory | **Full (admin)** | `gh api …/branches/master/protection` reads and writes; `gh secret list` works. Values are never readable, only their names — by design |
 | Backend/frontend builds, tests, container builds | **Full locally** | `mvn`, `node`, `docker`/Compose v5.6.1, BuildKit present; arm64 already matches the OCI target. Needs Colima started, which costs nothing but time |
-| Oracle Cloud provisioning | **None** | no `oci` binary, no `~/.oci/config`, no `terraform`, no OCI env vars; the embedded browser cannot boot the console — `cloud.oracle.com` fails its own manifest fetches (`TypeError: Failed to fetch` ×2) and the tab wedges. Installing `oci-cli` is possible; authenticating it is not |
+| Oracle Cloud provisioning | **Tooling installed, authentication missing** | `oci` CLI **3.95.1** now present in `~/.venvs/oci-cli` (installed after the owner withdrew the browser route; `brew` could not be used — it aborts on `unknown or unsupported macOS version: "27.0.1"`). No `~/.oci/config`, no key pair, so no API call has been made and **nothing has been created or inspected in the tenancy**. `terraform`/`tofu` are not installed. `oci setup config` is interactive-only, which is the one step that genuinely needs the owner (§9.3: their public key, never their private one) |
 | Neon provisioning | **None** | no `neonctl`, no API key, no account session. `neonctl` installs from npm; auth needs the owner's login |
 | DNS for `bytencia.com` | **Unknown** | no registrar/DNS provider identified in the repository or in tooling. Until DNS is reachable, Caddy has no hostname to obtain a certificate for, so INF-01 cannot close |
 
