@@ -2,6 +2,7 @@
 package com.gms.service.impl;
 
 import com.gms.model.entity.Attendance;
+import com.gms.model.entity.School;
 import com.gms.model.entity.Student;
 import com.gms.model.entity.TimetableSlot;
 import com.gms.model.entity.User;
@@ -12,6 +13,8 @@ import com.gms.model.response.AttendanceResponse;
 import com.gms.model.response.StudentResponse;
 import com.gms.model.response.TimetableSlotResponse;
 import com.gms.repository.AttendanceRepository;
+import com.gms.repository.SchoolRepository;
+import com.gms.repository.TimetableSlotRepository;
 import com.gms.repository.UserRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
@@ -28,15 +31,21 @@ import java.util.stream.Collectors;
 public class AttendanceServiceImpl implements AttendanceService {
 
     private final AttendanceRepository attendanceRepository;
+    private final SchoolRepository schoolRepository;
+    private final TimetableSlotRepository timetableSlotRepository;
     private final StudentService studentService;
     private final TimetableService timetableService;
     private final UserService userService;
 
-    public AttendanceServiceImpl(AttendanceRepository attendanceRepository, 
-                               StudentService studentService, 
+    public AttendanceServiceImpl(AttendanceRepository attendanceRepository,
+                               SchoolRepository schoolRepository,
+                               TimetableSlotRepository timetableSlotRepository,
+                               StudentService studentService,
                                TimetableService timetableService,
                                UserService userService) {
         this.attendanceRepository = attendanceRepository;
+        this.schoolRepository = schoolRepository;
+        this.timetableSlotRepository = timetableSlotRepository;
         this.studentService = studentService;
         this.timetableService = timetableService;
         this.userService = userService;
@@ -56,12 +65,15 @@ public class AttendanceServiceImpl implements AttendanceService {
             return ResponseEntity.status(403).build();
         }
 
-        // Validate timetable slot if provided - temporarily simplified
-        TimetableSlot timetableSlot = null;
-        if (request.getTimetableSlotId() != null) {
-            // TODO: Add proper TimetableSlotService when available
-            // For now, skipping timetable slot validation
+        // The DTO calls this field optional; the schema does not — attendances.timetable_slot_id is
+        // NOT NULL, so the code that read the id and then dropped it could never write the row.
+        if (request.getTimetableSlotId() == null) {
+            return ResponseEntity.badRequest().build();
         }
+        TimetableSlot timetableSlot = timetableSlotRepository
+                .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
+                .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
+                        "Timetable slot not found for the current school"));
 
         // Check if attendance already exists for this student on this date
         List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
@@ -73,6 +85,7 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         // Create attendance record
         Attendance attendance = new Attendance();
+        attendance.setSchool(schoolRepository.getReferenceById(TenantContext.schoolId()));
         attendance.setStudent(student);
         attendance.setTimetableSlot(timetableSlot);
         attendance.setDate(request.getDate());
@@ -96,18 +109,21 @@ public class AttendanceServiceImpl implements AttendanceService {
             return ResponseEntity.badRequest().build();
         }
 
-        // Temporarily simplified - TimetableSlot operations need proper service
-        // TimetableSlot timetableSlot = timetableSlotRepository.findById(request.getTimetableSlotId())
-        //         .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND", "Timetable slot not found"));
+        // One slot for the whole class register, read with the tenant in the query.
+        TimetableSlot timetableSlot = timetableSlotRepository
+                .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
+                .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
+                        "Timetable slot not found for the current school"));
+
+        School school = schoolRepository.getReferenceById(TenantContext.schoolId());
 
         for (var item : request.getAttendance()) {
             Student student = studentService.findById(item.getStudentId())
                     .orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND", "Student not found"));
 
-            // Simplified validation - skipping timetable slot validation for now
-            // if (!student.getClassroomId().equals(timetableSlot.getTimetable().getClassroom().getId())) {
-            //     return ResponseEntity.badRequest().build();
-            // }
+            if (!student.getClassroomId().equals(timetableSlot.getTimetable().getClassroom().getId())) {
+                return ResponseEntity.badRequest().build();
+            }
 
             // Check if attendance already exists for this student on this date
             List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
@@ -115,8 +131,9 @@ public class AttendanceServiceImpl implements AttendanceService {
             
             if (existingAttendance.isEmpty()) {
                 Attendance attendance = new Attendance();
+                attendance.setSchool(school);
                 attendance.setStudent(student);
-                // attendance.setTimetableSlot(timetableSlot); // Commented until proper service available
+                attendance.setTimetableSlot(timetableSlot);
                 attendance.setDate(request.getDate());
                 attendance.setStatus(item.getStatus());
                 attendance.setRemarks(item.getRemarks());
@@ -155,16 +172,18 @@ public class AttendanceServiceImpl implements AttendanceService {
             return ResponseEntity.status(403).build();
         }
 
-        // Validate timetable slot if provided - temporarily skipped due to missing service
-        TimetableSlot timetableSlot = null;
+        // The register already has a slot, and the column is NOT NULL, so an update that does not name
+        // a new one keeps the existing one rather than writing a null over it.
         if (request.getTimetableSlotId() != null) {
-            // TODO: Add proper TimetableSlotService when available
-            // For now, skipping timetable slot validation
+            TimetableSlot timetableSlot = timetableSlotRepository
+                    .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
+                    .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
+                            "Timetable slot not found for the current school"));
+            attendance.setTimetableSlot(timetableSlot);
         }
 
         // Update attendance record
         attendance.setStudent(student);
-        attendance.setTimetableSlot(timetableSlot);
         attendance.setDate(request.getDate());
         attendance.setStatus(request.getStatus());
         attendance.setRemarks(request.getRemarks());

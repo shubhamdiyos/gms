@@ -178,6 +178,10 @@ Three things §5.1 got wrong, found by executing it rather than by re-reading it
    make it true, which is `C-7` below. Until then V5's composite keys hold the tenant for every row
    that has one and are permissive about the rows the old write path cannot fill — which is exactly
    the gap `DoD-5` measures.
+   *Closed 2026-11-01 by `C-7`, with one correction to the wording above: the grep covered **nine**
+   entity files, not ten, because `parent_student` is a `@ManyToMany` join table and has no file to
+   grep — which is why the tenth `SET NOT NULL` ships behind a database trigger rather than an entity
+   field. See `C-7, executed 2026-11-01` under Stage 3.*
 3. **The generator §5.2 leaned on had two silent bugs, and committing it forced them out.**
    `@JoinTable\([^)]*name` is greedy across a nested annotation, so it emitted a table called
    `parent_id` instead of `parent_student`; and the field pattern's type class omitted `.`, so
@@ -260,8 +264,11 @@ indefinitely"* is the instruction that moves them to Stage 5, where the CI job n
 be silently edited by Hibernate proves nothing.
 
 **Carried into Stage 3.** Two schema changes are waiting on application code rather than on more SQL:
-`C-7` lands the two `SET NOT NULL` flips that Stage 2 had to leave open, and `C-8` is B-4's join
-tables, which only earn their keep once the code that reads `recipient_ids` reads them instead.
+`C-7` landed the **ten** `SET NOT NULL` flips Stage 2 had to leave open — the count Stage 2's prose got wrong in
+two directions (it said "two", and it said the tenth column had an entity; it does not, so `parent_student` is held
+by a trigger) — and is done, as `V6`. `C-8` is B-4's join tables, which only earn their keep once the code that
+reads `recipient_ids` reads them instead; its migration is the `V7` this branch kept free by moving `C-7` down a
+number.
 
 ### Stage 3 — Security and tenant isolation
 
@@ -277,8 +284,8 @@ reachable by inheritance.
 | C-4 | Put the ownership check where the JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list | `SEC-06` |
 | C-5 | `@PreAuthorize` on every mutating endpoint; deny-by-default verified by a mapping scan that fails the build on an unannotated handler | `SEC-04`, `OPS-*` |
 | C-6 | Resolve the role vocabulary: 39 guards name `ACCOUNTANT`, which is in no enum, issued by no code and unknown to the frontend (`SEC-17`). Either the role exists and `RoleEnum` plus provisioning grow, or those guards collapse to `ADMIN` and the string disappears | `SEC-16`, `SEC-17` |
-| C-7 | Finish what Stage 2 deliberately left open: map `school_id` on the ten entities that do not carry it (`Attendance`, `ExamSubject`, `FeePayment`, `Result`, `StudentExam`, `StudentFee`, `TeacherAssignment`, `Timetable`, `TimetableSlot`, `Parent`), set it in the services that create those rows, then land the two deferred `SET NOT NULL` flips as a V7 — including `parent_student`, whose insert path is Hibernate's `@ManyToMany` collection persistence (`Parent.java:41-47`) and so needs the column mapped before it can be required. A tenant column the application may leave NULL is a column, not a control | `ADR-020` level 3 completed, Stage 2 finding 2 |
-| C-8 | §5.1's V6 as a migration and as code: `notification_recipients`, `announcement_targets`, `message_recipients`, per-recipient read state on `Notification`, and the repositories rewritten off `recipient_ids` | `DB-04`, `TEN-03`, moved from B-4 |
+| C-7 | Finish what Stage 2 deliberately left open: map `school_id` so the write path fills it, then land the deferred `SET NOT NULL` flips. A tenant column the application may leave NULL is a column, not a control. **Done 2026-11-01 on the branch** — and the card's own plan was wrong twice, which is the first finding. It named **ten** entities; the unmapped column is on **nine**, because `parent_student` is a `@ManyToMany` join table with no entity to map, so it is closed in the database instead: `trg_parent_student_tenant_key` derives the tenant from the student on `BEFORE INSERT OR UPDATE`, raises when the student is missing, and raises when a hand-written row disagrees with its student — a trigger, not a silent coercion, because re-deriving a *conflicting* value would make the column a cache rather than a key. It said the flips would land "as a V7"; they land as **V6**, the next number no committed file owns — `git ls-tree HEAD` against `db/migration/` returns `V1`–`V5` and nothing else — which returns the V7 slot §5.1 had reserved for this card's successor to `C-8`. The nine (`Attendance`, `ExamSubject`, `FeePayment`, `Result`, `StudentExam`, `StudentFee`, `TeacherAssignment`, `Timetable`, `TimetableSlot`) carry the canonical `@JsonIgnore` + `@ManyToOne(fetch = LAZY, optional = false)` + `@JoinColumn(name = "school_id", nullable = false)` block and 11 create paths in 8 services assign it — from `TenantContext.schoolId()`, never copied off the parent row, because a copied tenant makes the same-school FKs it is supposed to satisfy vacuous. The ten flips ship in one migration behind ten idempotent backfills and a ten-clause assertion that names the table it refused to flip, plus four candidate keys (`(id, school_id)`) and **seven** new same-school FKs, and re-runs the V4/V5 index guards because a guard that is checked only once is a guard against the migration that forgot it. Measured: **89-test suite green**; new `EntityTenantColumnArchTest` prints `C-7: 35 tables carry an integer school_id, 36 entity classes cover 34 of them, 1 have no entity and a reason`; `C-3`'s scan moved from 168/150 to **169/151** because the fix needed a new scoped read (`TimetableSlotRepository.findByIdAndSchool_Id`); a fresh database applies V1→V6 and boots with `ddl-auto=validate`; new `verify-c7-tenant-key.sh` **66 passed / 0 failed / 0 skipped**, including per-table "`written by school A, and by nobody else`" for all ten, ten rolled-back `SET school_id = NULL` probes that each first assert a row exists, and a cross-tenant timetable write refused with 403; `C-1`/`C-2`/`C-3`'s scripts re-run on this build 29/29, 32/32, 25/25. **Two controls, each red then restored:** dropping `Result`'s mapping turns the arch test red naming `Result`; pointing `Attendance`'s join column at `org_id` turns the live script red with `attendances: none -- the endpoint never wrote one`. **Three pre-existing bugs the verification surfaced and this card fixes** (each proven from the server log, none a C-7 regression): `POST /student-exams` and `POST /fee-payments` 500'd with `LazyInitializationException` because `mapToResponse` walked a lazy proxy outside a session — now `@Transactional`; `POST /attendance` could never have written a row, since the service read `timetableSlotId` and dropped it against a NOT NULL column, and resolving that slot tenant-scoped is also what makes `fk_attendance_slot_same_school` expressible; and a straddling `POST /timetables` answered **409** from the platform-wide `uq_timetable_classroom_year` before the tenant rule was reached, so `GlobalExceptionHandler` now distinguishes a `*_same_school` violation and returns 403 | `ADR-020` level 3 completed, Stage 2 finding 2, the level-3 half of `TEN-06` |
+| C-8 | §5.1's V6 as a migration and as code: `notification_recipients`, `announcement_targets`, `message_recipients`, per-recipient read state on `Notification`, and the repositories rewritten off `recipient_ids`. **Its migration is V7** — §5.1 and §9 of `ARCHITECTURE.md` reserved `V6` for exactly this work, `C-7` has taken that number, and the reservation moves with it; do not number it V8 to look sequential. It may also retire `C-7`'s `trg_parent_student_tenant_key`: the trigger exists because a `@ManyToMany` join table has no entity to map, and if this card gives `parent_student` an entity of its own, the assignment belongs in Java and the trigger should be deleted in the same migration, not left as a second writer of the same column | `DB-04`, `TEN-03`, moved from B-4 |
 
 **Acceptance criteria.**
 1. A parameterised integration test suite that, for **every** protected resource, authenticates as school A and
@@ -419,10 +426,114 @@ tenant predicate here travels through *joins* — `c1_0.school_id` — because V
 still NULL: no Java entity maps it, so the application never writes it. Measured on the verification database: all
 nine V2 `school_id` columns exist, and the timetable row created by this run has `school_id = NULL`. That is `C-7`,
 and it matters for more than tidiness — a composite FK whose column is NULL is not enforced (Postgres MATCH SIMPLE),
-so V5's same-school constraint is currently bypassable by the application's own inserts. (2) `findById`, `findAll`,
+so V5's same-school constraint is currently bypassable by the application's own inserts. **(1) is since closed by
+`C-7`, and the closing is measurable, not asserted:** the check C-3 could only make per-table now reports
+`rows with a NULL tenant, in any tenant table, platform-wide: 0`, `timetables` is one of the ten tables the live run
+proves "written by school A, and by nobody else", and `fk_attendance_slot_same_school` — which could not have been
+written while `attendances.school_id` was nullable, because a NULL column satisfies a composite FK — exists. (2) `findById`, `findAll`,
 `findAllById` and `delete` are inherited by every repository and carry no tenant; this scan sees declarations only,
 so they are `C-4`'s, not because the test missed them but because an inherited method is not a declaration. (3) A
 school predicate is not an authorisation decision: `C-5` still owns deny-by-default on the endpoints themselves.
+
+**C-7, executed 2026-11-01 — the tenant stops being a column and becomes a key.**
+
+**The rule.** ADR-020's third layer: the database refuses a row whose tenant disagrees with the tenants of the rows
+it points at. Layers 1 and 2 shipped as `C-2` and `C-3`, and both are politeness — if the code is wrong, nothing
+downstream notices. This layer is the one that survives the next developer.
+
+**Why it was written as a card before it was written as SQL.** Stage 2 had the correct DDL in §5.1 and chose not to
+ship it: a `SET NOT NULL` on a column no entity maps is an outage on the first row written after the deploy. The
+verification run proved the reasoning was sound in a way Stage 2 could not have — `POST /attendance` was, in the code
+as it stood, *unable* to write a row at all (below), so a NOT NULL there would not have degraded the feature, it would
+have deleted it.
+
+**What changed.** Nine entities carry the canonical block (`@JsonIgnore` + `@ManyToOne(fetch = LAZY, optional = false)`
++ `@JoinColumn(name = "school_id", nullable = false)`), and 11 create paths across 8 services assign it. The assigned
+value is `TenantContext.schoolId()` — the claim — not `exam.getSchool()`-style inheritance from the parent row. That
+distinction is the whole card: a tenant copied from the parent satisfies the NOT NULL while making the same-school FK
+vacuous, because the FK then compares a value to the row it was copied from and can never disagree. `parent_student`
+has no entity, so its tenant is materialised by `trg_parent_student_tenant_key` (`BEFORE INSERT OR UPDATE OF student_id,
+school_id`), which derives from the student, raises if the student is missing, and **raises** on a hand-written row that
+disagrees with its student rather than silently overwriting it — re-deriving a conflicting value would demote the column
+from a key to a cache.
+
+**The migration is V6, and the reason is a number in the repository rather than a number in a database.** Only `V1`–`V5`
+are committed (`git ls-tree HEAD` on `db/migration/`, and `git log --all --diff-filter=A` shows a single commit,
+`231bdab`, ever adding a migration file), so `V6` was the next free slot — and `C-8`, which §5.1 and §9 had numbered `V6`
+for the join tables, moves to `V7`. What the card originally wrote ("this branch's history is already at v7") is not
+true of the branch, and the correction is worth keeping because the *hazard* is real even though the database that
+showed it was disposable and local. For a while the file was named
+`V7__require_the_tenant_key.sql`; a local database migrated by that draft jar did report `now at version v7`, and when
+the draft was renumbered the same database refused the pending `V6` under Flyway's default `outOfOrder=false`. A
+later-pending earlier number is a red startup nobody can attribute to the change, and on a shared or long-lived
+database it is a real failure mode — it is just not the one this commit ships against. The other finding from that same
+draft run stands: `mvn -DskipTests package` without `clean` kept
+`target/classes/db/migration/V7__require_the_tenant_key.sql` after the file was renamed in the source tree, so the
+packaged jar carried a migration the repository no longer had; Flyway applied V6, then the ghost, and aborted on
+`42710 trigger "trg_parent_student_tenant_key" already exists`. `mvn clean package` produces the correct jar and CI is
+unaffected (`mvn -B verify` on a fresh checkout), but `package` is a lie without `clean` and that is a debt row.
+
+**V6, counted at the database rather than in the file.** Ten idempotent backfills, a ten-clause assertion that names
+the table it refused to flip, ten `SET NOT NULL`, one trigger, four `(id, school_id)` candidate keys and **seven** new
+same-school FKs, then V4's and V5's index rules re-run because a guard checked only at the moment it happens to be true
+is not an invariant. Measured on the migrated database: **39** tables, **35** integer `school_id` columns of which
+**33** are NOT NULL — the two that are not are `email_logs` and `sms_logs`, exempt in writing because `EmailLogService`
+and `SmsLogService` are interfaces with no implementation and no writer, and a NOT NULL on a column no code path can
+fill is not a control either. `schools.school_id` is excluded from the count entirely: it is a `varchar(20)` business
+key, not a tenant FK. **141** foreign keys in total, **18** of them same-school pairs (11 from V5, 7 from V6), **45**
+unique constraints, **175** indexes.
+
+**Verified.** 89 tests green (JDK 21, `mvn -B verify`). A fresh disposable database applies V1→V6 and the context
+starts with `spring.jpa.hibernate.ddl-auto=validate`, which is the check that the nine new mappings agree with the DDL
+column by column. Live: `verify-c7-tenant-key.sh` **66 passed / 0 failed / 0 skipped** — school A writes a whole term
+through its own endpoints (16 entities), then each of the ten tables is checked two ways ("written by school A" *and*
+"and by nobody else"), then ten `UPDATE … SET school_id = NULL` probes in rolled-back transactions, then four
+cross-tenant writes and the SQL itself. `C-1` 29/29, `C-2` 32/32 and `C-3` 25/25 re-run green on this build, and
+`C-3`'s own measurement moved from 168/150 to **169/151** because this card added a scoped read
+(`TimetableSlotRepository.findByIdAndSchool_Id`) — the two arch tests are counters that cannot be edited to match a
+claim. `EntityTenantColumnArchTest` prints `C-7: 35 tables carry an integer school_id, 36 entity classes cover 34 of
+them, 1 have no entity and a reason`, and fails on a stale allow-list entry as well as an unexplained table, with a
+`hasSizeGreaterThanOrEqualTo(30)` floor so a regex that stopped matching cannot turn red into green.
+
+**Two controls.** (1) Deleting `Result`'s `school` field — the faithful edit is a rename of the join column to
+`org_id`, not removal of the field, because removing it stops compilation (`cannot find symbol: setSchool`) and a
+build error is not a test failure — turns the arch test red naming `Result maps table results, which carries
+school_id, without mapping the column`. (2) Pointing `Attendance`'s join column at `org_id` on a live server turns the
+C-7 script red at exactly `attendances: none -- the endpoint never wrote one`, which is the check that the *write* path,
+not only the schema, depends on the mapping. Both restored, both green, and the files `touch`ed afterwards because an
+older mtime makes Maven silently skip recompiling a restored source.
+
+**Two vacuous checks, found by breaking them.** §3's "every row belongs to school A" also passes on an empty table, so
+it now asserts `MINE > 0` first; and the §5 NULL probes "accepted" three tables whose rows the application had never
+written — an `UPDATE` against zero rows affects zero rows and raises nothing. Each probe now refuses to run unless a row
+exists, with the comment that a probe against an empty table passes without testing anything, which is worse than a
+failure.
+
+**Three things this card did that were not on it.** All three are pre-existing defects the verification walked into,
+each proven from the server log rather than inferred, and each is a smaller fix than a follow-up card would be:
+`POST /student-exams` and `POST /fee-payments` returned **500** with `LazyInitializationException` (`Exam#1` /
+`Student#1`, "no Session") because `mapToResponse` walked a lazy proxy after `save()` outside a session — now
+`@Transactional` on those create paths, and on `ResultServiceImpl` for the same shape. `POST /attendance` could never
+have written a row: the service read `request.getTimetableSlotId()` and dropped it against a NOT NULL column, with a
+TODO in its place; resolving the slot tenant-scoped both fixes the endpoint and makes
+`fk_attendance_slot_same_school` expressible, which is why that FK is in this migration rather than deferred. And a
+cross-tenant `POST /timetables` answered **409**, not 403, because `uq_timetable_classroom_year` is platform-wide and
+is reached before the tenant rule — `GlobalExceptionHandler` now recognises a `*_same_school` violation and returns
+403 `That record belongs to another school.`, with a test that the constraint name and the table name do not reach the
+response body.
+
+**What `C-7` does not close.** (1) Inherited reads: `findById` is called from 155 sites across services and
+controllers and `getById` from 6, and `RepositoryTenantScopeArchTest` cannot see any of them because it scans
+*declarations* — an inherited method is not a declaration. A wrong-tenant id is still loaded before it is checked;
+level 3 constrains what may be written about the row once loaded, which is a different failure from a caller reading
+school B's record. That is `C-4`. (2) Deny-by-default on the endpoints is `C-5`. (3)
+`invoices` and `receipts` map and write `school_id` but never assign `student` (`InvoiceServiceImpl`,
+`ReceiptServiceImpl`), so their V5 same-school keys are vacuous for a reason that has nothing to do with tenancy —
+that is FIN-04's missing linkage, and it belongs to the financial package. (4) The bulk attendance path now enforces
+"the student is in the slot's classroom" for every row of the register, which is a rule the previous code commented out
+rather than applied — if the product ever wants a makeup register recorded against a slot the student does not attend,
+that guard is the line to argue about, and nothing here records the decision.
+
 
 ### Stage 4 — The MVP vertical slice
 
@@ -537,7 +648,7 @@ system, the remaining `DOC-*`).
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1`, `C-2` and `C-3` done on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; and the tenant now travels in the query — 37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it (87-test suite green, live scripts 29/29, 32/32 and a new 25/25, the new script red on 6 against the pre-C-3 build, startup proved to catch a bad derived path). `C-4…C-8` open | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **In progress** — `C-1`, `C-2`, `C-3` and `C-7` done on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant now travels in the query — 37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it; and with `C-7` the tenant is now a key the database enforces — nine entities map `school_id`, 11 create paths fill it from the claim, all ten deferred `SET NOT NULL` flips land as V6 behind backfill-and-assert, `parent_student` is held by trigger, and 7 more same-school FKs make a straddling row impossible (89-test suite green, live scripts 29/29, 32/32, 25/25 and a new 66/66, two controls red then restored, fresh database V1→V6 under `ddl-auto=validate`). `C-4`, `C-5`, `C-6`, `C-8` open | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | Open | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
@@ -549,6 +660,8 @@ merge itself: `master` requires one approving review with last-push approval, th
 and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
 branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
 still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
-receives. Stage 3 has started — `C-1` and `C-2` are implemented and measured on the same unmerged branch — and nothing above
-Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
+receives. Stage 3 has started — `C-1`, `C-2`, `C-3` and `C-7` are implemented and measured on the same unmerged branch,
+which widens the gap rather than narrowing it: the branch now applies **six** migrations and a schema that refuses a
+NULL tenant, while `master` applies none and lets Hibernate guess — so the longer PR #25 sits unreviewed, the further the
+merged description of this project drifts from the verified one. Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
 disagree, the proof wins and this table is wrong.

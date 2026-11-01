@@ -15,6 +15,7 @@ import com.gms.service.ResultService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -39,6 +40,7 @@ public class ResultServiceImpl implements ResultService {
         this.userRepository = userRepository;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<ResultResponse> recordResult(ResultRequest request) {
         // Validate school exists
@@ -68,6 +70,7 @@ public class ResultServiceImpl implements ResultService {
 
         // Create result
         Result result = new Result();
+        result.setSchool(school);
         result.setStudentExam(studentExam);
         result.setObtainedMarks(request.getObtainedMarks());
         result.setGrade(request.getGrade());

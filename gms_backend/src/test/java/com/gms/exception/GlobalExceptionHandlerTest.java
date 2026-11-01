@@ -118,6 +118,29 @@ class GlobalExceptionHandlerTest {
     }
 
     /**
+     * A row whose tenant disagrees with its parent's cannot exist, and the refusal is the caller's
+     * problem, not the server's. This is the shape {@code C-7} produces: {@code POST /timetables}
+     * reads its classroom with an unchecked {@code findById}, so school B naming school A's classroom
+     * reaches the database, and {@code fk_timetable_classroom_same_school} is what stops it. Measured
+     * live on 2026-11-01: the request answered 403 with no row written.
+     */
+    @Test
+    void crossTenantWriteRefusedByTheDatabaseIsForbiddenNotConflict() {
+        DataIntegrityViolationException ex = new DataIntegrityViolationException(
+                "could not execute statement",
+                new RuntimeException("ERROR: insert or update on table \"timetables\" violates "
+                        + "foreign key constraint \"fk_timetable_classroom_same_school\""));
+
+        ResponseEntity<Map<String, Object>> response = handler.handleConflict(ex, request);
+
+        assertThat(response.getStatusCode()).isEqualTo(HttpStatus.FORBIDDEN);
+        assertThat(response.getBody()).containsEntry("error", "Forbidden");
+        assertThat(String.valueOf(asMap(response.getBody())))
+                .doesNotContain("fk_timetable_classroom_same_school")
+                .doesNotContain("timetables");
+    }
+
+    /**
      * The method-level refusal that {@code @PreAuthorize} raises arrives as
      * {@code AuthorizationDeniedException}, a subclass of {@code AccessDeniedException}; before the
      * handler existed it fell through to the catch-all and answered 500 instead of 403.

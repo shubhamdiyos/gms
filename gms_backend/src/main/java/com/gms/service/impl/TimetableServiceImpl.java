@@ -21,6 +21,7 @@ public class TimetableServiceImpl implements TimetableService {
     private final ClassroomRepository classroomRepository;
     private final TeacherAssignmentRepository teacherAssignmentRepository;
     private final StudentRepository studentRepository;
+    private final SchoolRepository schoolRepository;
     private final UserRepository userRepository;
     private final TimetableSlotRepository timetableSlotRepository;
 
@@ -28,12 +29,14 @@ public class TimetableServiceImpl implements TimetableService {
                                 ClassroomRepository classroomRepository, 
                                 TeacherAssignmentRepository teacherAssignmentRepository, 
                                 StudentRepository studentRepository,
+                                SchoolRepository schoolRepository,
                                 UserRepository userRepository,
                                 TimetableSlotRepository timetableSlotRepository) {
         this.timetableRepository = timetableRepository;
         this.classroomRepository = classroomRepository;
         this.teacherAssignmentRepository = teacherAssignmentRepository;
         this.studentRepository = studentRepository;
+        this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
         this.timetableSlotRepository = timetableSlotRepository;
     }
@@ -47,6 +50,8 @@ public class TimetableServiceImpl implements TimetableService {
         Timetable timetable = timetableRepository.findByClassroom_School_IdAndClassroom_Id(TenantContext.schoolId(), request.getClassroomId())
                 .orElse(new Timetable());
 
+        School school = schoolRepository.getReferenceById(TenantContext.schoolId());
+        timetable.setSchool(school);
         timetable.setClassroom(classroom);
         timetable.setAcademicYear(request.getAcademicYear());
         timetable.getSlots().clear();
@@ -60,6 +65,7 @@ public class TimetableServiceImpl implements TimetableService {
             }
 
             TimetableSlot slot = new TimetableSlot();
+            slot.setSchool(school);
             slot.setTimetable(timetable);
             slot.setDayOfWeek(slotRequest.getDayOfWeek());
             slot.setPeriod(slotRequest.getPeriod());

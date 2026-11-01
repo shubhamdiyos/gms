@@ -65,6 +65,7 @@ public class ExamServiceImpl implements ExamService {
         if (examRequest.getExamSubjects() != null) {
             for (ExamSubjectRequest subjectRequest : examRequest.getExamSubjects()) {
                 ExamSubject examSubject = new ExamSubject();
+                examSubject.setSchool(school);
                 examSubject.setExam(exam);
                 examSubject.setSubject(subjectService.findById(subjectRequest.getSubjectId())
                         .orElseThrow(() -> new EntityNotFoundException("Subject not found")));

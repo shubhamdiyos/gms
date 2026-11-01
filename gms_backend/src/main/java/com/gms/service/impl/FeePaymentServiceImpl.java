@@ -12,6 +12,7 @@ import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -35,6 +36,7 @@ public class FeePaymentServiceImpl implements FeePaymentService {
         this.userService = userService;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request) {
         // Validate school exists
@@ -50,6 +52,7 @@ public class FeePaymentServiceImpl implements FeePaymentService {
 
         // Create fee payment
         FeePayment feePayment = new FeePayment();
+        feePayment.setSchool(school);
         feePayment.setStudentFee(studentFee);
         feePayment.setAmount(request.getAmount());
         feePayment.setPaymentDate(request.getPaymentDate());

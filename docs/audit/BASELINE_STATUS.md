@@ -905,6 +905,10 @@ Since Postgres does not enforce a composite FK whose column is NULL (MATCH SIMPL
 currently bypassable by the application's normal writes. That is `C-7`, and it is now measured rather than asserted.
 `C-4` (inherited reads), `C-5` (deny-by-default on endpoints) and `C-8` are untouched by this card.
 
+*Closed the same day by `C-7` — see §17. The measurement above is kept because it is what made the card's shape
+inevitable: the fix is not the DDL, which Stage 2 had already written, but the nine mappings and the eleven
+assignments that let the DDL be honest.*
+
 ### 16.6 State left on this machine
 
 * Container `gms-postgres` is running. It now holds `gms` (pre-existing, **untouched**), `gms_schema_probea`,
@@ -920,3 +924,163 @@ currently bypassable by the application's normal writes. That is `C-7`, and it i
   `/tmp/gms-c3-secret.env` (mode 600, disposable platform password) are outside the repository. No credential in
   this document, the script, or the repository.
 
+
+## 17. Stage 3 `C-7` — the tenant key becomes enforced (2026-11-01, `feat/stage2-flyway-baseline`)
+
+### 17.1 The rule, and the instrument that holds it
+
+`EntityTenantColumnArchTest` (`gms_backend/src/test/java/com/gms/model/entity/`) does the half of the job a repository
+test cannot: it reads every `V*.sql` off the classpath, collects the tables that declare `school_id integer`, maps the
+`@Entity` classes to their `@Table` names, and fails the build when a tenant table's entity does not map the column —
+or when an allow-listed entry no longer describes a real table. The allow-list has exactly one entry, with its reason:
+`parent_student` is a `@ManyToMany` join table (`Parent.java:41-47`), so Hibernate writes `parent_id` and `student_id`
+and there is no field for a third column; `V6` materialises its tenant with a trigger and `C-8` replaces it with an
+entity. The test also self-guards: `assertThat(tenantTables).hasSizeGreaterThanOrEqualTo(30)`, because a regex that
+stopped matching would shrink the set and turn a red test green without a line of code changing. It prints its own
+measurement on every build:
+
+```
+C-7: 35 tables carry an integer school_id, 36 entity classes cover 34 of them, 1 have no entity and a reason
+```
+
+The two numbers that are not the same size are the two facts. 36 entity classes cover 34 *tenant* tables because two of
+them (`School`, `Parent`) sit on tables that carry no tenant by design, and 34 + 1 = 35 because the one table without an
+entity is allow-listed with a reason rather than forgotten.
+
+**One number this card does not have.** The honest way to read an arch test is before-and-after, the way `C-3`'s is
+recorded in §16.1. `C-7`'s test cannot be run against the pre-`C-7` build without a worktree at `HEAD` plus a copy of
+the new test file and the new migration it reads, so no before/after pair is recorded here. §17.5's control says the
+same thing in a stronger form: the test is red on exactly the entity you break, and names it.
+
+### 17.2 Code changed
+
+* **Nine entities** now carry the canonical tenant block — `@JsonIgnore` + `@ManyToOne(fetch = LAZY, optional = false)`
+  + `@JoinColumn(name = "school_id", nullable = false)`: `Attendance`, `ExamSubject`, `FeePayment`, `Result`,
+  `StudentExam`, `StudentFee`, `TeacherAssignment`, `Timetable`, `TimetableSlot`. `@JsonIgnore` because the association
+  would otherwise serialise a lazy proxy from a controller that returns the entity.
+* **Eleven assignments across eight services** set it: `AttendanceServiceImpl` (×2 — single and bulk register),
+  `ExamServiceImpl` (exam subject), `FeePaymentServiceImpl`, `ResultServiceImpl`, `StudentExamServiceImpl`,
+  `StudentFeeServiceImpl`, `TeacherAssignmentServiceImpl`, `TimetableServiceImpl` (×2 — timetable and slot). Every one
+  takes the tenant from `TenantContext.schoolId()`, none copies it from the parent row. Copying is the failure this
+  card exists to avoid: a tenant inherited from `exam.getSchool()` satisfies the NOT NULL and makes
+  `fk_…_same_school` a comparison of a value against the row it was copied from, which can never disagree.
+* **`TimetableSlotRepository.findByIdAndSchool_Id`** — a new scoped read, and the reason `C-3`'s counter moved from
+  168/150 to 169/151 without either card touching the other's test.
+* **`AttendanceServiceImpl`** stopped discarding `request.getTimetableSlotId()`. It read the field, left a TODO where
+  the assignment belonged, and wrote the row against a NOT NULL column — so `POST /attendance` could not have
+  succeeded on any build since the column existed. The single path now refuses a missing slot with 400, resolves the
+  slot tenant-scoped, and sets it; the bulk path loads it once and restores the classroom match the code had commented
+  out; the `PUT` path keeps the existing slot when the request names none, instead of writing a null over it.
+* **Three create paths became `@Transactional`** (`StudentExamServiceImpl`, `FeePaymentServiceImpl`,
+  `ResultServiceImpl`): `mapToResponse` walked a lazy proxy after `save()` returned and outside any session, so
+  `POST /student-exams` and `POST /fee-payments` answered **500** with `LazyInitializationException` (`Exam#1`,
+  `Student#1`, "no Session"). Pre-existing, found by the live run, not caused by this card.
+* **`GlobalExceptionHandler.handleConflict`** now distinguishes a `*_same_school` violation (and the trigger's
+  `not the student's school`) from an ordinary integrity failure: **403** `That record belongs to another school.`,
+  with a test that neither the constraint name nor the table name reaches the response body.
+
+### 17.3 The migration, and why it is `V6`
+
+`V6__require_the_tenant_key.sql`, four sections: (1) ten idempotent backfills, a ten-clause `DO $$` assertion that names
+the table it refused to flip, and the ten `SET NOT NULL`; (2) `parent_student_tenant_key()` plus
+`CREATE TRIGGER trg_parent_student_tenant_key BEFORE INSERT OR UPDATE OF student_id, school_id` — derives from the
+student, raises if the student is missing, and **raises** on a disagreement rather than overwriting a value somebody
+hand-wrote; (3) four `(id, school_id)` candidate keys and seven same-school foreign keys; (4) `V4`'s and `V5`'s index
+rules re-run, copied rather than shared, and the assertion this file exists for — no table outside `schools`,
+`email_logs` and `sms_logs` still carries a nullable `school_id`.
+
+Measured on the migrated database: 39 tables; **35** integer `school_id` columns, **33** of them NOT NULL (the two
+exceptions are the dead log tables `COM-05` describes, and the exemptions are written in the migration with the reason
+— `EmailLogService` and `SmsLogService` have no implementation, so a NOT NULL on their tenant column is an outage
+waiting for the first writer rather than a control); **141** foreign keys of which **18** are same-school pairs (11 from
+`V5`, 7 from `V6`); **45** named unique constraints; **175** indexes. `schools.school_id` is excluded from the 35: it is
+`varchar(20)` and it is the school's own business code, not a tenant reference.
+
+It is `V6`, not the `V7` the card originally said — and the reason is a number in the repository, not a number in a
+database. `git ls-tree HEAD gms_backend/src/main/resources/db/migration/` returns `V1`–`V5` and nothing else, and
+`git log --all --diff-filter=A` shows exactly one commit (`231bdab`) ever adding a migration file, so no branch or
+database owned by this repository is at v7; the verification databases from Stage 2 and from `C-1`/`C-2`/`C-3` all read
+`1,2,3,4,5` in `flyway_schema_history`. `V6` was therefore the next free slot, and `V7` — the number §5.1 and §9 of
+`ARCHITECTURE.md` reserved for the recipient join tables — is released to `C-8`. The paragraph this one replaces claimed
+the branch's history already reached v7, which was true of this machine for an hour and is not true of the branch; the
+`outOfOrder=false` hazard it described is real and was observed, just not against any committed state. While the file was
+named `V7__require_the_tenant_key.sql` a local database migrated to v7, and after the rename Flyway refused the pending
+`V6` on that database. A later-pending earlier number is still a startup failure no operator can attribute to the
+change, which is why `C-8` must not be numbered `V8` to look sequential.
+
+**The failure that taught this, recorded because it is a build-trap and not a migration bug.** After renaming the file,
+`mvn -DskipTests package` (no `clean`) rebuilt the jar with **both** `V6__require_the_tenant_key.sql` and the old
+`V7__require_the_tenant_key.sql` inside `target/classes` — Maven copies resources and does not delete the ones that
+stopped existing upstream. That jar applied V6, then the ghost, and died on
+`42710: trigger "trg_parent_student_tenant_key" already exists`. Flyway's checksum validation did not and could not
+catch it: the ghost was byte-identical to a file that really existed once. `mvn clean package` produces the correct
+artifact (`unzip -l` lists V1…V6 and nothing else), CI is unaffected because it runs `mvn -B verify` on a fresh
+checkout, and the residue is numbered **OPS-18** in `TECHNICAL_DEBT.md`.
+
+### 17.4 Live verification
+
+`scripts/verify-c7-tenant-key.sh`, 389 lines, seven sections, **66 checks / 0 failures / 0 skipped** against a running
+application on a disposable database built by the migration chain (`gms_c7_r1`, V1→V6 applied by Flyway,
+`ddl-auto=validate`):
+
+| § | What it proves | checks |
+|---|---|---|
+| 1 | Platform login, two schools created through the API, both administrator tokens issued | 5 |
+| 2 | School A builds a whole term through its own endpoints — classroom, section, subject, employee, student, exam with a subject, exam registration, result, fee, student-fee, payment, assignment, timetable with a slot, attendance, admission applied and approved | 28 |
+| 3 | Each of the eight owned tables: `written by school A, and by nobody else` — a row count for the tenant **and** a count of rows outside it, plus the exam-subject and parent-link rows the service wrote | 11 |
+| 4 | 35 tenant tables at the database, `rows with a NULL tenant, in any tenant table, platform-wide: 0`, `tenant columns still nullable: 2` | 3 |
+| 5 | Ten `UPDATE … SET school_id = NULL` probes in rolled-back transactions, each preceded by `there is an API-written <t> row to probe`; then the trigger re-deriving a hand-written NULL, and refusing a link that names another school | 11 |
+| 6 | A write that straddles two schools refused with **403** and the right message; no timetable naming another school's classroom; no assignment naming another school's employee; the refused write left no row behind | 7 |
+| 7 | The generated SQL — `Hibernate: insert into attendances (…, school_id, …)` — captured from the running application | 1 |
+
+`C-1`'s, `C-2`'s and `C-3`'s scripts re-run against this build: **29/29, 32/32, 25/25**. `mvn -B verify`: **89 tests,
+0 failures** (87 before the card, +1 `EntityTenantColumnArchTest`, +1 `GlobalExceptionHandlerTest` case for the 403).
+A fresh database migrates V1→V6 and boots: `Successfully applied 6 migrations`, `now at version v6`.
+
+### 17.5 The deliberate-failure controls
+
+Two, each run red and then restored.
+
+1. **The static half.** `Result.java`'s join column renamed from `school_id` to `org_id` — the faithful edit is a
+   rename, not a deletion of the field, because deleting `school` stops compilation (`cannot find symbol: setSchool`)
+   and a build error is not a test failure. `EntityTenantColumnArchTest` goes red naming exactly one offence: `Result
+   maps table results, which carries school_id, without mapping the column`. Restored, green.
+2. **The write half.** The same rename on `Attendance.java`, against a running server. `verify-c7-tenant-key.sh` reports
+   `FAIL attendances: none -- the endpoint never wrote one`, which is §5's non-vacuity guard catching the missing write
+   rather than a constraint failing — the check that fails is the one that refuses to call an empty table a pass.
+   Restored, green, and both files `touch`ed afterwards: an older mtime makes Maven silently skip recompiling a
+   restored source, which would have made the "green" half of this control meaningless.
+
+Two vacuous checks were found and fixed in the script itself while writing it: §3's "no row is in the wrong school" is
+also true of a table the application never wrote to, so it now asserts a row count first; and three §5 probes reported
+"accepted" for tables with zero rows, because an `UPDATE` that matches nothing raises nothing, so each probe now
+refuses to run unless a row exists.
+
+### 17.6 What `C-7` does not close
+
+`C-4` — 155 `findById` and 6 `getById` call sites still resolve a row by raw id before anybody decides whether the
+caller may name it, and `RepositoryTenantScopeArchTest` cannot see any of them because they are inherited rather than
+declared. `C-5` — 23 mutating handlers reach a service with no `@PreAuthorize`. `C-8` — `V7`'s join tables, and the
+chance to retire this card's trigger by giving `parent_student` an entity. `FIN-04` — `invoices` and `receipts` map and
+write `school_id` but never assign `student`, so their `V5` keys are vacuous for a reason that has nothing to do with
+tenancy. `DB-08` — `uq_timetable_classroom_year` is platform-wide and is evaluated before `fk_timetable_classroom_same_school`,
+which is why §6 needs a distinct academic year to reach the constraint it is testing. `C-9` and Stage 6 — none of this
+is deployed, and `master` still has no migrations at all.
+
+### 17.7 State left on this machine
+
+* Container `gms-postgres` is running. It holds `gms` (pre-existing, **untouched by every card in Stage 3**), the
+  databases §15–§16 list, and `gms_c7_r1`. All of the latter are disposable; `docker compose down -v` removes the
+  container with all of them. The retired `gms-v1-neon` host was not contacted, read, or named in any command.
+* The backend on `:8080` was **stopped** at the end of this card (`lsof -ti tcp:8080` is empty). To reproduce §17.4:
+  start it against `gms_c7_r1` with `APP_SUPERADMIN_*`, `SECURITY_JWT_SECRET` and `JPA_SHOW_SQL=true` in the
+  environment, then run the script with `GMS_SUPERADMIN_USERNAME`, `GMS_SUPERADMIN_PASSWORD`, `GMS_VERIFY_DB=gms_c7_r1`,
+  `GMS_PG_PASSWORD_ENV` naming an exported variable that holds the local database password, and
+  `GMS_SQL_LOG=<the boot log>`. Everything else has a default — including `GMS_CROSS_TENANT_ACADEMIC_YEAR=2027-2028`,
+  which §6 needs in order to reach the tenant key instead of colliding on `uq_timetable_classroom_year` (`DB-08`).
+* Outside the repository: `/tmp/gms-c7-run.txt` (the 66-check transcript), `/tmp/gms-c7-boot.log` (boot + generated
+  SQL), `/tmp/gms-c7-final-verify.txt` (the 89-test run) and `/tmp/gms-c7-secret.env` (mode 600 — disposable platform
+  credentials and the local database password, which lives in the gitignored `.env` and appears in no file here). The
+  two control backups under `/tmp` were deleted once both files were restored.
+* No credential appears in this document, in `V6__require_the_tenant_key.sql`, in `scripts/verify-c7-tenant-key.sh`, or
+  anywhere else in the repository.

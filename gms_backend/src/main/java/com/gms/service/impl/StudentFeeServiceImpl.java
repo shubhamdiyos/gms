@@ -69,6 +69,7 @@ public class StudentFeeServiceImpl implements StudentFeeService {
 
         // Create student fee
         StudentFee studentFee = new StudentFee();
+        studentFee.setSchool(school);
         studentFee.setStudent(student);
         studentFee.setFee(fee);
         studentFee.setTotalAmount(fee.getAmount());

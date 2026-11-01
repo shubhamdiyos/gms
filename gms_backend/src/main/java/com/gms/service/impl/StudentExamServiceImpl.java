@@ -18,6 +18,7 @@ import com.gms.service.StudentExamService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
@@ -42,6 +43,7 @@ public class StudentExamServiceImpl implements StudentExamService {
         this.userRepository = userRepository;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<StudentExamResponse> registerStudentForExam(StudentExamRequest request) {
         // Validate school exists
@@ -68,6 +70,7 @@ public class StudentExamServiceImpl implements StudentExamService {
 
         // Create student exam registration
         StudentExam studentExam = new StudentExam();
+        studentExam.setSchool(school);
         studentExam.setStudent(student);
         studentExam.setExamSubject(examSubject);
         studentExam.setRegistrationDate(request.getRegistrationDate());

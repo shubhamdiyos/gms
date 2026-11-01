@@ -165,7 +165,8 @@ public class GlobalExceptionHandler {
     }
 
     /**
-     * The row is still referenced by another one, so the database refuses the delete.
+     * The row is still referenced by another one, or it names a parent from another school, so the
+     * database refuses the write.
      *
      * <p>Deleting a classroom that still has students violates the {@code students.classroom_id}
      * foreign key. The database's answer was reaching the catch-all as a <b>500</b>, which reads
@@ -176,12 +177,33 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(DataIntegrityViolationException.class)
     public ResponseEntity<Map<String, Object>> handleConflict(DataIntegrityViolationException ex,
                                                               HttpServletRequest request) {
-        log.warn("Conflict [traceId={}] {} {}: {}", traceId(request),
-                request.getMethod(), request.getRequestURI(), ex.getMostSpecificCause().getMessage());
+        String detail = String.valueOf(ex.getMostSpecificCause().getMessage());
         Map<String, Object> response = base(request);
+        if (isCrossTenantWrite(detail)) {
+            log.warn("Refused [traceId={}] {} {}: {}", traceId(request),
+                    request.getMethod(), request.getRequestURI(), detail);
+            response.put("error", "Forbidden");
+            response.put("message", "That record belongs to another school.");
+            return ResponseEntity.status(HttpStatus.FORBIDDEN).body(response);
+        }
+        log.warn("Conflict [traceId={}] {} {}: {}", traceId(request),
+                request.getMethod(), request.getRequestURI(), detail);
         response.put("error", "Conflict");
         response.put("message", "That record is still referenced by other records and cannot be deleted.");
         return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+    }
+
+    /**
+     * Whether the database refused a row whose tenant disagrees with its parent's.
+     *
+     * <p>Every constraint V5 and V6 add for that purpose carries {@code same_school} in its name, and
+     * the {@code parent_student} trigger raises a message with the same meaning, so the phrase is the
+     * contract rather than a coincidence of wording. This is ADR-020's third layer speaking in the
+     * application's voice: a service that forgot to check ownership still answers <b>403</b>, because
+     * the row it tried to write cannot exist, and it does not answer <b>500</b> on the way to saying so.</p>
+     */
+    private static boolean isCrossTenantWrite(String detail) {
+        return detail.contains("same_school") || detail.contains("not the student's school");
     }
 
     private static Map<String, String> fieldErrors(java.util.List<FieldError> errors) {

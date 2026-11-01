@@ -136,6 +136,18 @@ Legend — **P** = matched by a `SecurityConfig` path rule; **M** = has method s
 
 Structural conclusions: (a) 20 of 36 controllers have **no matching path rule**, so their gate is only the annotations they carry plus `authenticated()`; (b) 6 controllers carry **no method security at all** (Auth, User, Teacher, Attendance, Health, and the CRUD base); (c) tenant predicates are absent from 10 controllers' read paths. This is why mandate §6 requires an enforced invariant rather than 36 hand-gated files — see `SEC-REMED` below.
 
+*Reading this table in November 2026: it is the audit's as-is moment and the Verdict column carries the corrections of
+`C-1` as they were made, but the ✔ column is not current. `C-2` and `C-3` moved the tenant into `TenantContext` and
+then into the query for every declared repository read (§5.3, §5.4), and `C-7` — 2026-11-01 — changed the meaning of
+the **bold `no`s** in a way this table cannot show: for all nine entities that lacked the column — `Attendance`,
+`ExamSubject`, `FeePayment`, `Result`, `StudentExam`, `StudentFee`, `TeacherAssignment`, `Timetable`, `TimetableSlot` —
+the tenant is no longer only a service convention but a NOT NULL column the database compares against the row it
+points at. Concretely, the `no` at
+`/timetables` line 113 is now defended by `fk_timetable_classroom_same_school` as well as by the service, and the live
+run measures a straddling write refused at 403. What this table still describes accurately is (a) and (b): 23 mutating
+handlers reach a service with no `@PreAuthorize` (`C-5`), and a row is still loaded by raw id before anyone decides
+whether the caller may name it (`C-4`).*
+
 ## 4. What is genuinely good here
 
 Worth preserving, and easy to lose in a rewrite:
@@ -203,9 +215,11 @@ Two facts about this closure that belong in the record rather than in a footnote
 * **AP-3's shape survives in a narrower form.** The platform owner still holds a SUPERADMIN token that reaches across
   tenants by design, and `TEN-01…07` — tenancy resolved server-side from the authenticated principal rather than
   trusted from the token — was still open. `C-1` closed the *unauthenticated* destruction path; it did not close the
-  *trusted-but-wrong-tenant* one. That was `C-2`, `C-3` and `C-4`. The first two have since landed (§5.3, §5.4), which
-  leaves `TEN-02`'s raw-id loads and `TEN-04`'s unmapped tenant column as what this bullet still describes — `C-4` and
-  `C-7`.
+  *trusted-but-wrong-tenant* one. That was `C-2`, `C-3` and `C-4`. The first two have since landed (§5.3, §5.4) and so
+  has `C-7`, which removes `TEN-04`'s unmapped tenant column from the list — every tenant table with an entity now maps
+  `school_id`, and the one without an entity is held by a trigger. What this bullet still describes is
+  `TEN-02`'s raw-id loads, which is `C-4`: a token from school B can still *fetch* school A's row by id and get a 404
+  or a 403 only because a service remembers to check, not because anything below it cannot answer.
 
 One unrelated defect was found and fixed on the way, and it was not a Stage 3 finding: every method-level
 `@PreAuthorize` refusal was answering **500** instead of **403**, because `AuthorizationDeniedException` (a subclass of
@@ -288,12 +302,17 @@ in school B after school A claims it, and refused again in school A.
 * **Inherited CRUD.** `JpaRepository` hands every repository `findById`, `findAll`, `findAllById` and `delete`, and a
   declaration-level test cannot see them because no repository declares them. 67 call sites load a row by raw id with
   no ownership check (`TEN-02`). That is `C-4`.
-* **Level 3 of ADR-020.** Postgres enforces a composite foreign key with MATCH SIMPLE, so a `NULL` tenant column
-  satisfies it — and the application writes `NULL`. On the verification database, after a live create through
-  `TimetableServiceImpl`, the `timetables` row has `school_id = NULL` even though `V2` added the column: nine entities
-  still do not map it. So `V5`'s same-school constraints bind the data a careful migration inserts and not the data
-  the running software writes. That is `C-7`, and until it lands the database layer of the three-layer claim is
-  unenforced on the application's own writes.
+* **Level 3 of ADR-020 — closed 2026-11-01 by `C-7`, and it is worth reading what closed it.** Postgres enforces a
+  composite foreign key with MATCH SIMPLE, so a `NULL` tenant column satisfies it — and the application *was* writing
+  `NULL`: on the verification database, after a live create through `TimetableServiceImpl`, the `timetables` row had
+  `school_id = NULL` even though `V2` added the column, because nine entities did not map it. So `V5`'s same-school
+  constraints bound the data a careful migration inserts and not the data the running software writes. `C-7` maps the
+  nine, fills them from the claim rather than from the parent row, and lands all ten deferred `SET NOT NULL` flips as
+  `V6` behind backfill-and-assert, adds seven more same-school pairs, and holds `parent_student` — a `@ManyToMany` join
+  table with no entity to map — by database trigger. Measured now: `rows with a NULL tenant, in any tenant table,
+  platform-wide: 0`; 18 same-school FKs; and a cross-tenant `POST /timetables` refused with **403** by
+  `fk_timetable_classroom_same_school` rather than by a `WHERE` clause. What level 3 still does not do is stop school B
+  *reading* school A's row — it constrains what may be written about a row, which is why the bullet above it stays open.
 * **Deny-by-default at the endpoint.** 23 mutating handlers still reach a service with no `@PreAuthorize`
   (`SEC-REMED`'s last clause, `C-5`). A school-scoped query behind an unguarded route is a scoped read that any
   authenticated caller may ask for; the scope makes it not-another-school's, it does not make it the caller's to ask.

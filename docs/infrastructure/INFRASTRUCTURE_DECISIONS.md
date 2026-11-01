@@ -771,7 +771,7 @@ cross-tenant row becomes *impossible* rather than unlikely — has been observed
 there was no application in the loop, no HTTP request, no JWT, and the schema was derived mechanically from the
 entities rather than authored as a Flyway baseline. The two remaining proofs are exactly those absences.
 
-**Implementation status (2026-11-01, Stage 3 `C-2` and `C-3`).** Layer 1 — the claim — is **shipped**: `JwtAuthenticationFilter`
+**Implementation status (2026-11-01, Stage 3 `C-2`, `C-3` and `C-7`).** Layer 1 — the claim — is **shipped**: `JwtAuthenticationFilter`
 parses the token once per request and populates `security/TenantContext`, `util/SecurityUtil` (325 call sites in 41
 files, each re-parsing *and re-verifying* the signature) is deleted rather than wrapped, and `TenantParameterArchTest`
 fails the build if any service method accepts the tenant as an argument — the "a caller may forget" path that
@@ -789,23 +789,43 @@ that list stays here because it was measured against the branch rather than gues
 was rewritten to name the school or deleted where a scoped form already meant the same question. `RepositoryTenantScopeArchTest` fails the build when a
 declared read names no school, and it measures the repositories from their compiled interfaces rather than from a list
 somebody maintains: at the commit immediately before `C-3`, **170 declared reads, 115 carrying the tenant, 55 carrying
-none, 37 indefensible** (test red); on this branch, **168 / 150 / 18 / 0** (green). Each of the 18 is allow-listed with
+none, 37 indefensible** (test red); on this branch, **168 / 150 / 18 / 0** (green), re-measured after `C-7` at
+**169 / 151 / 18 / 0** — one read added and one more carrying the tenant, because closing layer 3 required
+`TimetableSlotRepository.findByIdAndSchool_Id`. Each of the 18 is allow-listed with
 the key that makes it global by design. Two limits belong to the claim rather than to a footnote: it reads
 *declarations*, so the `findById` / `findAll` / `findAllById` / `delete` that `JpaRepository` hands every repository are
 invisible to it and are `C-4`; and a predicate that reaches the tenant by travelling a join is only as good as the
 column it travels, which is the next paragraph.
 
-Layer 3 — the materialised key with the composite foreign key — is **not** shipped, and `C-3` measured precisely how
-not. All nine `V2` `school_id` columns exist on the verification database, and the `timetables` row the running
-application created through its own service has `school_id = NULL`, because no Java entity maps the column. PostgreSQL
-checks a composite foreign key with MATCH SIMPLE, so a NULL in one column satisfies `V5`'s same-school constraint
-instead of violating it: level 3 is real in the migrations and unenforced on the application's own writes until `C-7`
-maps the column and `C-8` cuts the join tables. Layers 1 and 2 are what protects HTTP traffic today; layer 3 is what
-would make a defect in layers 1 or 2 survivable, which is the point of having three.
+Layer 3 — the materialised key with the composite foreign key — **shipped on the same branch and the same day, by
+`C-7`**. The measurement that justified the card is quoted rather than deleted, because it is the reason this layer is
+described the way it is: all nine `V2` `school_id` columns existed and the `timetables` row the running application
+created through its own
+service had `school_id = NULL`, because no Java entity mapped the column. PostgreSQL checks a composite foreign key
+with MATCH SIMPLE, so a NULL in one column satisfied `V5`'s same-school constraint instead of violating it. What is
+now true instead: the nine entities (`Attendance`, `ExamSubject`, `FeePayment`, `Result`, `StudentExam`, `StudentFee`,
+`TeacherAssignment`, `Timetable`, `TimetableSlot`) map the column as a required `@ManyToOne` and 11 create paths in 8
+services fill it from `TenantContext.schoolId()` — **from the claim, never copied from the parent row**, because a
+copied tenant compares a value against the row it was copied from and can never disagree, which would make this layer
+the expensive half of a tautology. `V6` holds all ten deferred `SET NOT NULL` flips behind ten backfill-and-assert
+pairs, four `(id, school_id)` candidate keys and seven more same-school foreign keys join them; `parent_student`, a
+`@ManyToMany` join table with no entity to map, is materialised by `trg_parent_student_tenant_key`, which derives the
+tenant from the student and **raises** on a hand-written row that disagrees rather than silently overwriting it.
+Measured: `EntityTenantColumnArchTest` fails the build for a tenant table whose entity does not map the column
+(`C-7: 35 tables carry an integer school_id, 36 entity classes cover 34 of them, 1 have no entity and a reason`);
+`verify-c7-tenant-key.sh` 66/66, including a cross-tenant `POST /timetables` refused at **403** by
+`fk_timetable_classroom_same_school` and `rows with a NULL tenant, in any tenant table, platform-wide: 0`.
 
-`ARCHITECTURE.md §4` and the roadmap's `C-3` card carry the measurements and the four deliberate-failure controls; the
-verification of layer 1 is in [BASELINE_STATUS.md §16](../audit/BASELINE_STATUS.md). ADR-020 is therefore two-thirds
-closed on this branch, and the roadmap says so rather than marking the ADR done.
+Layers 1 and 2 protect HTTP traffic today; layer 3 is what makes a defect in layers 1 or 2 survivable, which is the
+point of having three. It does not make a wrong-tenant *read* impossible — `findById` is still inherited and still
+loads before the check, which is `C-4`, and level 3 constrains what may be written about a row rather than who may
+fetch it.
+
+`ARCHITECTURE.md §4` and the roadmap's `C-3` and `C-7` cards carry the measurements and the deliberate-failure controls;
+the verification of layer 1 is in [BASELINE_STATUS.md §16](../audit/BASELINE_STATUS.md) and of layer 3 in
+[§17](../audit/BASELINE_STATUS.md). ADR-020 is therefore **all three layers shipped** on this branch — and still not
+closed, because `C-4` owns the inherited reads, `C-5` owns deny-by-default at the endpoint, and RLS stays a Stage-7
+evaluation. The roadmap says so rather than marking the ADR done.
 
 ### ADR-021 — A modular monolith enforced by architecture tests, not by moving 282 files
 
@@ -1064,7 +1084,7 @@ missing parameter, type mismatch) is still outstanding and belongs to Stage 4's 
 | 017 | OCI deployment transport | Proposed, deferred until the host exists — which now has a date: Stage 6 | — |
 | 018 | OpenTofu for OCI infra; §9 rules encoded as HCL guards | **Accepted** | — |
 | 019 | Application first, cloud at Stage 6; Stages 1–5 need zero cloud resources | **Accepted**; supersedes the *sequencing* of 015/016, never their targets | nothing until Stage 6 |
-| 020 | Shared schema, `school_id` on every row, composite FK to the parent's `(id, school_id)` | **Accepted**; layer 1 (the claim) **shipped 2026-11-01** with Stage 3 `C-2`, layer 2 (the query discriminator) **shipped the same day** for every declared read with `C-3`; layer 3 (the materialised key) is `C-7`/`C-8` — the column exists in `V2` and the application still writes `NULL`, so `V5`'s composite keys bind nothing on its own writes — RLS deferred to a Stage-7 evaluation, deliberately kept addable | — |
+| 020 | Shared schema, `school_id` on every row, composite FK to the parent's `(id, school_id)` | **Accepted**; layer 1 (the claim) **shipped 2026-11-01** with Stage 3 `C-2`, layer 2 (the query discriminator) **shipped the same day** for every declared read with `C-3`, layer 3 (the materialised key) **shipped the same day** with `C-7` — the nine entities map the column, ten `SET NOT NULL` land as `V6` behind backfill-and-assert, `parent_student` is held by trigger, and 18 same-school foreign keys now bind the application's own writes; `C-8`'s join tables inherit `V7` — RLS deferred to a Stage-7 evaluation, deliberately kept addable. Not closed: inherited reads still load before they check (`C-4`), and the endpoint is not deny-by-default (`C-5`) | — |
 | 021 | Modular monolith enforced by ArchUnit over the existing package-by-layer layout | **Accepted**; re-packaging retained as a post-DoD mechanical step | — |
 | 022 | Flyway owns the schema; `ddl-auto=validate` in **every** profile | **Accepted**, amends 006 | — |
 | 023 | Delete `AbstractCRUDController` / `AbstractCRUDService` | **Accepted and implemented 2026-11-01**; closes `SEC-05` — 79 tests green, live tenancy run 29/29 | — |

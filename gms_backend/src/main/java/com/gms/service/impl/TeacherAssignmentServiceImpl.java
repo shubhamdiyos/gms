@@ -22,17 +22,20 @@ import java.util.stream.Collectors;
 public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
 
     private final TeacherAssignmentRepository teacherAssignmentRepository;
+    private final SchoolRepository schoolRepository;
     private final EmployeeService employeeService;
     private final SubjectService subjectService;
     private final ClassroomService classroomService;
     private final UserService userService;
 
     public TeacherAssignmentServiceImpl(TeacherAssignmentRepository teacherAssignmentRepository, 
+                                        SchoolRepository schoolRepository,
                                         EmployeeService employeeService, 
                                         SubjectService subjectService, 
                                         ClassroomService classroomService,
                                         UserService userService) {
         this.teacherAssignmentRepository = teacherAssignmentRepository;
+        this.schoolRepository = schoolRepository;
         this.employeeService = employeeService;
         this.subjectService = subjectService;
         this.classroomService = classroomService;
@@ -66,6 +69,7 @@ public class TeacherAssignmentServiceImpl implements TeacherAssignmentService {
         }
 
         TeacherAssignment assignment = new TeacherAssignment();
+        assignment.setSchool(schoolRepository.getReferenceById(TenantContext.schoolId()));
         assignment.setTeacher(teacher);
         assignment.setSubject(subject);
         assignment.setClassroom(classroom);

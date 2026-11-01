@@ -20,6 +20,11 @@ public class ExamSubject extends BaseAuditEntity {
 
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "school_id", nullable = false)
+    private School school;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "exam_id", nullable = false)
     private Exam exam;
 

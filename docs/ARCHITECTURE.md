@@ -144,9 +144,12 @@ mechanism is what Stage 2's migrations and Stage 3's code must both agree on.
    Three limits, stated rather than implied. (a) This level governs *declared* methods. The `findById`, `findAll`,
    `findAllById` and `delete` that `JpaRepository` hands to every repository are inherited, not declared, and still
    carry no tenant — that is `C-4`. (b) The predicate above travels through a join to `classrooms.school_id`
-   because `timetables.school_id`, added by `V2`, is still NULL on rows the application writes: no entity maps it.
-   A composite FK with a NULL column is not enforced, so level 3's guarantee is currently bypassable by the
-   application's own inserts — that is `C-7`. (c) `@Where`/`@Filter` remain unused by choice: an explicit parameter
+   because `timetables.school_id`, added by `V2`, was NULL on rows the application writes: no entity mapped it.
+   A composite FK with a NULL column is not enforced, so level 3's guarantee was bypassable by the application's own
+   inserts. **Closed by `C-7` on 2026-11-01**: nine entities map the column, the write path fills it from the claim,
+   and `V6` made all ten NOT NULL. The join predicate above still does the filtering — `C-7` did not rewrite the reads —
+   but it is no longer the *only* thing between school B and school A's rows, which is what made `C-3`'s measurement a
+   control rather than a courtesy. (c) `@Where`/`@Filter` remain unused by choice: an explicit parameter
    on every method is visible in the call site, whereas a session filter is invisible in exactly the way a forgotten
    `schoolId` argument was.
 3. **Database.** The tenant key is *materialised* on child rows and constrained against the parent, so a mismatch
@@ -476,10 +479,24 @@ CREATE INDEX idx_receipt_student        ON receipts (student_id);
 
 `timetable_slots` also references `teacher_assignments` (`assignment_id`), and that pair's tenant match is *transitive*
 through two parents, so V5 constrains it to `timetables` only; the assignment check is a Stage-5 finding with a
-measured query behind it rather than a constraint invented here.
+measured query behind it rather than a constraint invented here. **What shipped as V6 (C-7, 2026-11-01) added seven more
+same-school pairs** — `timetables.classroom_id`, `teacher_assignments.subject_id` and `.classroom_id`,
+`student_fees.fee_id`, `exam_subjects.subject_id`, `student_exams.exam_subject_id`, `attendances.timetable_slot_id` —
+and still not this one, so the transitive case above remains the open edge. It also made all ten of those columns NOT
+NULL, which is what turned the pair from advisory into enforced: a composite FK with a NULL column is satisfied, not
+checked.
+
+*Numbering, corrected when `C-7` landed:* the migration planned below as `V6__recipient_join_tables.sql` is **V7**.
+`C-7` took the next free number in the repository — `git ls-tree HEAD` against `db/migration/` lists `V1`–`V5` and
+nothing else, so `V6` was the slot that did not collide with a committed file, and `C-8` inherited the one it vacated.
+The `V7` this card first wrote down was an artefact of a draft: the file existed briefly as
+`V7__require_the_tenant_key.sql`, and a local database migrated by that draft jar reported `now at version v7`, which
+is when the out-of-order rule was actually observed — Flyway's default `outOfOrder=false` refused the pending `V6`
+against that database. The hazard is real; the history that triggered it was this machine's, not the branch's, and no
+committed database is at v7.
 
 ```sql
--- V6__recipient_join_tables.sql  (DB-04, BR-11, TEN-03; the TEXT columns stay and deprecate for one release)
+-- V7__recipient_join_tables.sql  (DB-04, BR-11, TEN-03; the TEXT columns stay and deprecate for one release)
 CREATE TABLE notification_recipients (
     notification_id integer NOT NULL REFERENCES notifications (id) ON DELETE CASCADE,
     user_id         integer NOT NULL REFERENCES users (id)         ON DELETE CASCADE,
@@ -519,7 +536,10 @@ CREATE INDEX idx_notification_recipient_reader
 
 **Rule I-2 is a query, not a promise.** The lists above were written by hand from the design, so they can miss a
 foreign key the author did not think about. This is the check that makes "every foreign key gets an index" a fact —
-run against a schema built only by V1–V6 it must return **zero rows**. It checks each constraint's *leading* column,
+run against a schema built only by V1–V7 it must return **zero rows**. It is not only a query: the same predicate is a
+`RAISE EXCEPTION` inside `V4`, `V5` and `V6` — re-run rather than shared, because a guard checked only at the moment it
+happens to be true is not an invariant — and `V7` is expected to carry it too.
+It checks each constraint's *leading* column,
 because the second half of a composite `(child_id, school_id)` key is never looked up on its own:
 
 ```sql
@@ -568,6 +588,12 @@ psql -d gms_ddl_probe_s1 -f i2_check.sql                        # the query abov
 **Result: 0 errors across the five files; the Rule I-2 query returns 0 rows.** 41 tables after the run (38 derived +
 the three join tables V6 creates). What landed: **68** named `idx_*` indexes, **36** `uq_*` unique indexes, **144**
 indexes total (primary keys included), and **11** composite foreign keys, **1** `CHECK`, **1** `PRIMARY KEY`.
+
+*This transcript is left in the tense it was measured in, because it is a record of a run rather than a plan. Two
+things have since changed about it: the file drafted here as `V6__recipient_join_tables.sql` ships as **V7** (`V6` was
+taken by `V6__require_the_tenant_key.sql` when `C-7` landed on 2026-11-01), and the probe's 11 composite foreign keys are
+now 18 — the same-school pairs `C-7` added on top of this design, on a PostgreSQL 16 built by real migrations rather
+than the `pg14` scratch cluster above.*
 
 Four things this run changed in the design, in the order it found them:
 
@@ -636,8 +662,9 @@ they cannot be folded into a tenant-scoped index because they do not carry the t
 *navigated* foreign keys, the exemption is expressed by column name inside the assertion so an unfamiliar relation
 still has to earn an index, and the remaining 7 (`students.classroom_id`, `students.section_id`,
 `student_admissions.classroom_id`, `financial_transactions.{school_id,student_id,employee_id,fee_payment_id}`) are
-indexed. The assertion is a `RAISE EXCEPTION` in `V4` and is re-run in `V5`, because `V5` is the file that introduces
-eleven new relations.
+indexed. The assertion is a `RAISE EXCEPTION` in `V4`, re-run in `V5` because `V5` introduces eleven new relations, and
+re-run a third time in `V6`, which introduces seven more — three files carrying the same predicate on purpose, because
+the file that adds a relation is the one that can forget its index.
 
 **2. `SET NOT NULL` is a code change wearing a SQL costume.** `§5.1` flipped each materialised tenant column to NOT
 NULL in the same file that added it. Against the baseline that is a production outage: `grep -in "school"` over the
@@ -649,12 +676,22 @@ operator whether the data is tenant-clean — and the flip moves to `C-7` with t
 assignment that make it true. `parent_student` has the same problem in a sharper form: `Parent.java:41-47` declares it
 as `@ManyToMany @JoinTable`, so Hibernate's collection persistence inserts `(parent_id, student_id)` and nothing else.
 
+*Closed 2026-11-01 by `C-7`, with the correction it found: the grep covered **nine** entity files, not ten, because
+`parent_student` is a join table and has no file to grep — which is why its tenth flip ships as
+`trg_parent_student_tenant_key` rather than an entity field. The nine now carry the mapping, eleven create paths in
+eight services assign the tenant from the claim rather than from the parent row, and `V6` holds the ten flips behind
+ten backfill-and-assert pairs. `verify-c7-tenant-key.sh` measures the result at 66/66, including
+`rows with a NULL tenant, in any tenant table, platform-wide: 0`.*
+
 **3. `ddl-auto=validate` agrees with the migration chain, and that is the gate.** The application boots against a
 database it migrated itself: `Successfully applied 5 migrations … now at version v5`, `Started GmsApplication in 6.763
 seconds`, `/actuator/health/readiness` → `UP`, and `POST /api/auth/login` → `401` — a completed database read against a
 schema nobody hand-edited. Hibernate raised no validation error, which is the only claim `validate` can make and the
 one that decides whether the chain and the entity model describe the same database. `pg_dump --schema-only` of two
-independent runs of the chain diffs **empty** at 1503 lines each (`scripts/verify-schema.sh` §1).
+independent runs of the chain diffs **empty** at 1503 lines each (`scripts/verify-schema.sh` §1). *Re-run 2026-11-01
+after `C-7`: `Successfully applied 6 migrations … now at version v6` on a freshly created database, with
+`ddl-auto=validate` and no validation error — which is the gate that proves nine new `@ManyToOne` mappings agree with
+the DDL column by column, and the one thing a unit test suite that excludes JPA cannot catch.*
 
 The first attempt at that boot is worth recording because it is the failure mode this project keeps meeting: it used a
 jar built *before* the `pom.xml` edit, so the log contains **no Flyway line at all** and the run dies at
@@ -793,7 +830,11 @@ duplicates until one exists.
 1. **V1** — baseline `CREATE TABLE` for all 36 tables from `ARCHITECTURE.md §2`'s ownership, using the *existing*
    column names so no code change is implied (`flyway baseline` is not used; V1 is authored, per `ADR-006`).
 2. **V2** — add `school_id` to the 10 tenant-less tables, backfilled from their parents (`UPDATE … FROM`),
-   `NOT NULL` only after the backfill is asserted zero-null.
+   `NOT NULL` only after the backfill is asserted zero-null. **Two corrections from what shipped:** V2 adds the column
+   to **nine** tables and the tenth, `parent_student`, is added by `V5` with its composite keys; and the flip did not
+   ship at all, because no entity mapped the column, so a NOT NULL there was an outage rather than a control — see
+   `ENGINEERING_ROADMAP.md`'s Stage 2 finding 2. All ten `SET NOT NULL` flips arrive as `V6`, with the entity fields
+   that make them true.
 3. **V3** — natural-key `UNIQUE` constraints (§5), on a database seeded with a deliberate duplicate to prove the
    migration **fails** — a constraint migration that cannot fail has not been tested.
 4. **V4** — indexes (§5), all `CREATE INDEX` (non-concurrent for the local stack; `CONCURRENTLY` is a
@@ -805,11 +846,20 @@ duplicates until one exists.
    question — the chain applies clean to an empty PostgreSQL 16.15 and the cross-tenant insert is refused — while the
    risk that actually remained (`validate` agreeing with the migration chain) was closed by booting the application
    against the migrated schema. A staged rollout would have bought one more observation of the same two facts.
-6. **V6** — the join tables (`notification_recipients`, `announcement_targets`, `message_recipients`), backfilled
+6. **V6** — `V6__require_the_tenant_key.sql`, **shipped 2026-11-01 by `C-7`**. This is the file §4's level 3 always
+   needed and §9 had no slot for: the ten `SET NOT NULL` flips Stage 2 deliberately deferred, each behind its own
+   backfill-and-assert, plus four `(id, school_id)` candidate keys, seven same-school FKs, the
+   `trg_parent_student_tenant_key` trigger for the join table that has no entity, and the index guards re-run. It took
+   `V6` because that was the next number no committed file owned (`git ls-tree HEAD` on `db/migration/` returns
+   `V1`–`V5`); the `V7` written on the original `C-7` card was a slip, and `V6` is the slot item 7 below has held for
+   `C-8` in every draft of this document, so that reservation is what moves. The `outOfOrder=false` rule is not a
+   theory here — it fired against this machine's draft jar, where a database had been migrated to v7 and then refused a
+   pending `V6`.
+7. **V7** — the join tables (`notification_recipients`, `announcement_targets`, `message_recipients`), backfilled
    from the JSON-in-TEXT columns, with the old columns left in place and deprecated for one release (`DB-04`).
-   **Not shipped in Stage 2.** A migration nobody reads is schema with no behaviour attached, and the read path that
-   would use it is Stage 3's `C-8`.
-7. `ddl-auto=validate` in every profile — **done**, and as literals rather than `${JPA_DDL_AUTO:validate}`, so no
+   **Not shipped.** A migration nobody reads is schema with no behaviour attached, and the read path that
+   would use it is Stage 3's `C-8`. It held the `V6` number in every draft of this document until `C-7` took it.
+8. `ddl-auto=validate` in every profile — **done**, and as literals rather than `${JPA_DDL_AUTO:validate}`, so no
    environment variable reaches `update`. The dev/test migrate-on-start half is done with Spring Boot's own Flyway
    integration rather than a `FlywayMigrationStrategy` bean, because there was nothing to customise. The prod half is
    **not** done as written: `application-prod.properties:15` (`spring.flyway.enabled=true`) leaves Flyway enabled on
@@ -818,7 +868,7 @@ duplicates until one exists.
    disabling migrations in prod would leave a fresh production database with no schema at all. That is the honest
    state, not the intended one; the card that closes it is `C-9` in [ENGINEERING_ROADMAP.md](ENGINEERING_ROADMAP.md).
 
-V1–V5 above are not sketches: their text is `gms_backend/src/main/resources/db/migration/`, `§5.1` is the design they
+V1–V6 above are not sketches: their text is `gms_backend/src/main/resources/db/migration/`, `§5.1` is the design they
 came from, `§5.2` is the report of running that design against a schema derived from the entities, and `§5.3` is the
 report of running it against the baseline itself. V1 has no *draft* because it cannot have one: it is what a real
 server produced, captured once from a disposable database and reviewed line by line, which is the route `ADR-022`
@@ -829,7 +879,7 @@ names as its own compromise rather than the one it rejects.
 | # | Question | Blocked on | Default being carried |
 |---|---|---|---|
 | A-1 | Hibernate `@Filter`/`@Where` vs explicit method arguments for level 2 of §4 | a measured p95 difference on 50k rows (Stage 5) | explicit arguments — visible in the query, testable without a session trick |
-| A-2 | Composite-FK enforcement on all 10 child tables or the 5 that already have a single parent | V5's proof on `students`→`attendances` | 5 first |
+| A-2 | ~~Composite-FK enforcement on all 10 child tables or the 5 that already have a single parent~~ | nothing — `V5` shipped all 11 at once and `V6` added 7 more, so the choice was made by measurement, not by this table | **all 18 same-school pairs enforced.** The "5 first" default assumed a risk the probe had already measured away, and "5" was itself wrong: `V5`'s own count was 11 |
 | A-3 | Soft delete (`status`) as a global concept vs per-module | `BR-*` review after Stage 3 | per-module; hard delete exists nowhere after `ADR-023` |
 | A-4 | Whether `platform` reads aggregates through SQL views or query DSL | Stage 5's N+1 measurements | query DSL, one aggregate per dashboard card |
 | A-5 | `users.employee_id/student_id/parent_id` parallel pointers vs one principal link table | a schema decision inside V2 | keep the pointers, add the composite FKs; a `principal` refactor is post-DoD |
