@@ -2,7 +2,7 @@ name: CI
 
 # Gates every change before it can reach `master`. Runs on GitHub-hosted
 # ubuntu-latest only — no paid runners, no cloud services, no managed databases
-# (mandate §20 and the founder's standing zero-unexpected-cost rule).
+# (third mandate §20 and the founder's standing zero-unexpected-cost rule).
 # Documentation-only changes do not start a build; a change to `.github/**` is
 # checked by `validate-workflows.yml` instead.
 
