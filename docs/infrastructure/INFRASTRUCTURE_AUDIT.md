@@ -342,7 +342,15 @@ refused by the workflow.
 `enforce_admins.enabled = false`. Reviews are configured (`required_approving_review_count = 1`,
 `require_last_push_approval = true`, `dismiss_stale_reviews = true`) but admins bypass them — and PR #10 was in
 fact merged with `--admin` on 2026-10-31, which is on the record in
-[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). `gh api …/environments/Production` and `/Preview` both
+[BASELINE_STATUS.md §11](../audit/BASELINE_STATUS.md). **It has now happened twice**: PR #11 (this audit) hit
+`mergeStateStatus: BLOCKED` / `reviewDecision: REVIEW_REQUIRED`, and after the blocker was reported to the owner
+was merged with an owner-authorized `--admin` override on 2026-11-01T04:42:25Z as `483a41c`. The structural cause
+is worth naming for the remediation below: on a single-account repository `required_approving_review_count = 1`
+with `require_last_push_approval = true` is **unsatisfiable by construction** — GitHub refuses an author's own
+approval — so the rule as configured can only ever be met by an override or by relaxing it, and an override is not
+a gate. The first time (PR #10) that happened silently; the second time it was reported and explicitly authorized
+by the owner before the merge.
+`gh api …/environments/Production` and `/Preview` both
 return `protection_rules: []` with `can_admins_bypass: true`. Neither workflow declares `environment:`
 (`grep -n environment .github/workflows/*.yml` → no match), and `deploy-backend.yml` has no top-level
 `permissions:` block, so every run receives a default-writable `GITHUB_TOKEN`. `ci.yml:32` does declare
@@ -356,6 +364,10 @@ verification and no build step (OPS-01). The two environments are decoration, no
 set `enforce_admins: true`, attach `environment: production` with required reviewers to the deploy job, narrow
 `permissions` in `deploy-backend.yml` to `contents: read`, and pin `webfactory/ssh-agent` to a SHA. The gate must
 be turned on in repository settings, which is an owner action; the workflow edits are code and land in Infra-M2.
+One decision the owner has to make rather than inherit: with one account in the repository, a *review* requirement
+is unsatisfiable, so the gate must be the **status checks** — either set `required_approving_review_count = 0` and
+make the checks required with `enforce_admins`, or add a second reviewer identity. Keeping a rule that is only ever
+met by an override costs the protection its meaning and gains nothing.
 
 **Cost.** $0.
 
@@ -686,7 +698,7 @@ The first audit already owns these; this table records only what Infra-M0 change
 
 | Finding | Status after Infra-M0 | What this pass added |
 |---|---|---|
-| OPS-01 deploy has no gate | Still open, now with numbers | `required_status_checks.contexts=[]` and `protection_rules: []` fetched; merged via `--admin` once — INF-10 |
+| OPS-01 deploy has no gate | Still open, now with numbers | `required_status_checks.contexts=[]` and `protection_rules: []` fetched; merged via `--admin` twice (PR #10, PR #11) — INF-10 |
 | OPS-02 unversioned deploy script | Still open, escalated | absorbed into INF-03 (CRITICAL): it is why rollback and DR are blocked, not merely undocumented |
 | OPS-03 host-key verification disabled | **Closed in code, verified executed** | run 41245769175 log: `##[error]secret EC2_SSH_KNOWN_HOSTS is not set … Deploy is refused` — this is the one infra control with runtime proof |
 | OPS-04 hostname echoed in logs | **Largely not real** | the failing run's log shows `EC2_HOST: ***` and `***@***`; GitHub masks secret *values*. `:67` still prints the first 10 characters deliberately. Downgraded; the committed DNS name in `vercel.json:5` is the actual exposure (INF-01) |
