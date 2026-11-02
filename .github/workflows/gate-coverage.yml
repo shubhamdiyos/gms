@@ -9,7 +9,7 @@ name: Gate coverage
 # unnoticed across four commits.
 #
 # So this is the one workflow in the repository that declares NO path filter, on purpose: it runs on
-# every pull request, always, and it computes the verdict the platform cannot — which of the six gate
+# every pull request, always, and it computes the verdict the platform cannot — which of the seven gate
 # jobs this commit was obliged to run, and whether each of them actually said success. It is a
 # measurement of the other files, not a build: no toolchain, no database, ~20 seconds of
 # `ubuntu-latest` of its own and then the wait for the gates it is watching.
@@ -28,9 +28,15 @@ name: Gate coverage
 # filtered and is not a failure. That distinction is the whole product: the same absence that is
 # policy on one PR is a broken pipeline on the next, and only the diff can tell them apart.
 #
-# Zero-unexpected-cost note: seven jobs across three workflows, all on `ubuntu-latest`, pinned actions
-# only, no services here and no artifacts. See `Every job runs on a GitHub-hosted ubuntu-latest` in
-# `validate-workflows.yml`, which refuses anything else before a PR can bill for it.
+# Zero-unexpected-cost note: eight jobs across three workflows — five in `ci.yml`, two in
+# `validate-workflows.yml`, and this one — all on `ubuntu-latest`, pinned actions only, no cloud
+# services and no artifacts beyond the build outputs. See `Every job runs on a GitHub-hosted
+# ubuntu-latest` in `validate-workflows.yml`, which refuses anything else before a PR can bill for it.
+# Measured on the last master push before `live-tenancy` became a gate (run 41462933910): the whole
+# `ci.yml` run is 79 s of wall clock — backend 75 s, frontend 34 s, infrastructure 22 s, scripts 5 s —
+# and this job waits out the slowest gate rather than doing work, so the honest figure for a PR is
+# "roughly the backend job plus the live-tenancy boot", both on free Linux minutes for a public
+# repository.
 
 on:
   pull_request:
@@ -50,7 +56,10 @@ jobs:
   coverage:
     name: Gate coverage
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Longer than DEADLINE_SECONDS below, deliberately: this job's own verdict is the one branch
+    # protection requires, so it must always be able to say "no verdict came" rather than be killed
+    # while waiting for a gate that has not finished. See the wait comment on the step.
+    timeout-minutes: 40
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
@@ -68,12 +77,19 @@ jobs:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           REPOSITORY: ${{ github.repository }}
-          # The wait, stated rather than buried in the loop: the slowest gate is `Backend build and
-          # tests`, measured at 42 runner-seconds before the Postgres sidecar landed and expected to
-          # reach roughly three minutes with the image pull and the Flyway chain. 1500s is that figure
-          # with room for a queued runner; past it, "absent" and "slow" are indistinguishable, and the
-          # honest answer is red.
-          DEADLINE_SECONDS: '1500'
+          # The wait, stated rather than buried in the loop. Measured 2026-11-02 on run 41462933910:
+          # `Backend build and tests` — the slowest gate until this job added one — ran 75 s, the whole
+          # `ci.yml` run 79 s, and this job's own wait was 96 s (run 41459455037). From `live-tenancy`
+          # onward the slowest gate is the boot: the backend job plus checkout, artifact download,
+          # setup-java, a `postgres:15` pull, the Flyway chain and nine suites, which the laptop harness
+          # puts at 9 s up and 27 s of suites and the runner has never yet timed. 2100 s is that
+          # estimate with an order of magnitude of runner-queue room. It is also exactly the sum of the
+          # two ceilings that stand behind it — `backend` at 20 min, `live-tenancy` at 15 — so a gate
+          # that finishes inside its own timeout always finishes inside this wait; and the job's own
+          # `timeout-minutes` is 40, five minutes past that sum, so the watcher gets to print a
+          # verdict rather than being killed mid-poll. Past the deadline, "absent" and "slow" are
+          # indistinguishable, and the honest answer is red.
+          DEADLINE_SECONDS: '2100'
           POLL_SECONDS: '20'
         run: |
           set -euo pipefail
@@ -84,12 +100,20 @@ jobs:
           # missing gate; `validate-workflows.yml`'s "Every required context still exists under the same
           # name" step holds this same list, and this step additionally refuses a name that no longer
           # appears in the file that claims to produce it.
+          #
+          # `Live tenancy suites` joined this list on 2026-11-02, replacing the disabled stub that had
+          # the same job id. It is the only gate with `needs:` on another gate, and GitHub gives a job
+          # skipped by a failed dependency the conclusion `skipped` — measured on run 41462933910, where
+          # the old stub reported `skipped` in the same second its upstream finished. So a red backend
+          # makes this step name two gates instead of one. That is not a false positive: the pull
+          # request is already refused, and the second line says which live behaviour never got asked.
           GATES = {
               "ci.yml": [
                   "Backend build and tests",
                   "Frontend lint and build",
                   "Verify scripts syntax and presence",
                   "Infrastructure definitions",
+                  "Live tenancy suites",
               ],
               "validate-workflows.yml": [
                   "Lint every workflow",
@@ -191,7 +215,7 @@ jobs:
           for f in files[:40]:
               print(f"  diff  {f}")
 
-          deadline = float(os.environ.get("DEADLINE_SECONDS", "1500"))
+          deadline = float(os.environ.get("DEADLINE_SECONDS", "2100"))
           poll = float(os.environ.get("POLL_SECONDS", "20"))
           started = time.time()
           latest = {}

@@ -213,12 +213,12 @@ jobs:
         # contract is broken, and the job-name guard below catches the looser version of the same
         # mistake (a name built from an expression, or a job that has no name at all).
         #
-        # What branch protection requires is `Gate coverage` alone, measured 2026-11-02: naming all six
-        # gates as required contexts would stall every pull request the two path filters legitimately
-        # skip, because a required check that never runs is indistinguishable from one that has not
-        # started yet. The six names stay here because the coverage gate reads them out of these two
-        # files and refuses a PR whose owed gate is missing or red — the enforcement moved from the
-        # protection rule into the check, which is the only place that can see both.
+        # What branch protection requires is `Gate coverage` alone, measured 2026-11-02: naming all
+        # seven gates as required contexts would stall every pull request the two path filters
+        # legitimately skip, because a required check that never runs is indistinguishable from one
+        # that has not started yet. The seven names stay here because the coverage gate reads them out
+        # of these two files and refuses a PR whose owed gate is missing or red — the enforcement
+        # moved from the protection rule into the check, which is the only place that can see both.
         run: |
           set -euo pipefail
           missing=0
@@ -227,6 +227,7 @@ jobs:
             "ci.yml|Frontend lint and build" \
             "ci.yml|Verify scripts syntax and presence" \
             "ci.yml|Infrastructure definitions" \
+            "ci.yml|Live tenancy suites" \
             "validate-workflows.yml|Lint every workflow" \
             "validate-workflows.yml|Check trigger sets and permissions" \
             "gate-coverage.yml|Gate coverage"; do
@@ -360,11 +361,18 @@ jobs:
       - name: No step runs a script that is not in the tree
         # The failure mode a parallel workstream creates: a step wired to `scripts/verify-mvp-e2e.sh`
         # before that file is committed. The run dies on `No such file or directory`, which reads as a
-        # build regression and is really a reference to a path that does not exist. `ci.yml` handles
-        # this with a presence probe (`Which live suites are in this tree`) and a per-step `if:`; a step
-        # whose own `if:` names that probe is exempt, because the guard *is* the check. Everything else
-        # must point at a file that exists in this commit. Enumeration in a `for` list is not an
-        # invocation and is not matched, so the probe's own loop stays legal.
+        # build regression and is really a reference to a path that does not exist. Every invocation
+        # must therefore point at a file that exists in this commit, with no exemption. There used to
+        # be one: `ci.yml` carried a presence probe and per-step `if:` guards, and a step whose own
+        # `if:` named that probe was skipped by this check because the probe *was* its gate. The
+        # `live-tenancy` job replaced the stub that probe protected on 2026-11-02, no workflow names
+        # `steps.probe` any more, and an exemption nothing uses is one way for a step to opt out of a
+        # check it exists to fail. `scripts/ci-live-tenancy.sh` closes the hole from the other side:
+        # its own suite list makes a missing or non-executable suite file a FATAL line, so the live job
+        # cannot report a pass over a suite that is not there.
+        #
+        # Enumeration in a `for` list is not an invocation and is not matched, so a step that only
+        # reports which suites are present (see `Verify scripts syntax and presence`) stays legal.
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -372,24 +380,12 @@ jobs:
 
           INLINE = re.compile(r"^[\s-]*run:[ \t]+(?:bash[ \t]+|sh[ \t]+)?((?:\./)?scripts/[A-Za-z0-9._/-]+\.sh)")
           BLOCKED = re.compile(r"^[ \t]+(?:bash|sh)[ \t]+(scripts/[A-Za-z0-9._/-]+\.sh)")
-          IF_LINE = re.compile(r"^[ \t]+if:[ \t]*")
-          # A new step begins here, and an `if:` belongs to exactly one step: carrying one step's
-          # presence gate onto its neighbour would exempt a line that has no guard at all, which is the
-          # one way this check can produce a false pass. Every step-start resets it.
-          STEP_START = re.compile(r"^[ \t]*-[ \t]+(?:name|uses|run):")
-          PROBE = "steps.probe.outputs"
 
           bad, checked = [], 0
           for path in sorted(glob.glob(".github/workflows/*.y*ml")):
               with open(path, encoding="utf-8") as fh:
                   lines = fh.readlines()
-              gated = False
               for index, line in enumerate(lines, 1):
-                  if STEP_START.match(line):
-                      gated = False
-                  if IF_LINE.match(line):
-                      gated = PROBE in line
-                      continue
                   hit = INLINE.match(line) or BLOCKED.match(line)
                   if not hit:
                       continue
@@ -397,16 +393,15 @@ jobs:
                   if target.startswith("./"):
                       target = target[2:]
                   checked += 1
-                  if gated:
-                      continue
                   if not os.path.isfile(target):
-                      bad.append(f"{path}:{index}: runs `{target}`, which is not in this tree - gate "
-                                 f"the step on the presence probe or add the file")
+                      bad.append(f"{path}:{index}: runs `{target}`, which is not in this tree - the "
+                                 f"job dies on `No such file or directory` and reads as a build "
+                                 f"regression; commit the script or drop the step")
           if bad:
               for item in bad:
                   print(f"::error::{item}")
               sys.exit(1)
-          print(f"script references: {checked} invocation(s), every target present or presence-gated")
+          print(f"script references: {checked} invocation(s), every target present")
           PY
 
       - name: Every job runs on a GitHub-hosted ubuntu-latest
@@ -486,9 +481,14 @@ jobs:
       - name: A secret value can only reach the environment, never a log
         # A `secrets.` reference is legal on exactly one shape: an `env:` or `with:` mapping whose whole
         # value is that reference, so it lands in the process environment. Interpolated into a command
-        # it can be echoed, and `set -x` would print every argument of every command that runs. The
-        # secret *names* in ci.yml's disabled live-tenancy stub are public and stay as they are — this
-        # comment avoids the interpolation shape on purpose, because the guard reads its own file.
+        # it can be echoed, and `set -x` would print every argument of every command that runs.
+        # Measured 2026-11-02, after `live-tenancy` stopped reading the twelve secret names the disabled
+        # stub declared: no workflow in this repository names a secret at all, so today this step has
+        # nothing to grade — which is the cheapest state it can be in, and the reason it stays. It also
+        # reads its own file, so it does not write the opener whole anywhere: the awk pattern escapes
+        # each character of it, and the one step that has to match it as text assembles it from those
+        # characters (`Every job declares a stable literal name`). An unclosed opener in this file is
+        # the INF-23-shaped failure `Every GitHub expression is closed` above exists to refuse.
         run: |
           set -euo pipefail
           leaked=0
