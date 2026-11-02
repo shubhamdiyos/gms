@@ -295,8 +295,9 @@ container. This list used to name six classes; the **thirteen** that arrived sin
 | `mvn -DskipTests` | still the command the production image build uses (`gms_backend/Dockerfile:11`), so the shipped jar is not built from a tested compile — see INF-09 |
 | `npm test` | **runs.** `gms_frontend/package.json` declares `"test": "vitest run"` and there are two suites — `ErrorBoundary.test.jsx` (4) and `ProtectedRoute.test.jsx` (5) — **9 tests, 2 files, green**. In CI the step is blocking and refuses two things it used to tolerate: a missing `test` script, and a script with no `src/**/*.test.*` file behind it (measured on `8a83d37`: `Test Files 2 passed (2)`, `Tests 9 passed (9)`). `--run` is passed explicitly so no future edit to the script can put a watcher on a runner |
 | `npm run lint` | runs, and reports **16 errors across 7 files** plus 1 warning — measured from CI's own summary line at `8a83d37`, not from this table's memory; it used to say 47 errors across 22 files, a count that no longer holds. CI fails the job only on the classes that break at runtime (`no-undef` under `src/`, any fatal parse error): the same run reports **0 in the gated classes**, so the gate is green while the count is recorded, not ignored |
+| `npm run e2e` (in `gms_frontend`) | **runs, and is the only path in this repository with a browser in it** — four tests, real Chromium, the built bundle, a real backend. It is the one command here that needs a backend already booted, so the harness is `scripts/ci-playwright-e2e.sh`; both are documented in §Browser journey (Playwright) below |
 | JaCoCo | bound to `prepare-agent` + `report` at `verify`, so coverage is measured; there is still no coverage **threshold** that can fail a build |
-| CI | **three** workflows now run on every pull request: `.github/workflows/ci.yml` (four jobs, and the `backend` job boots a `postgres:15` service container so the DB-backed tests really have a database), `.github/workflows/validate-workflows.yml` (actionlint plus fifteen structure guards over the yaml itself) and `.github/workflows/gate-coverage.yml` (a meta check that refuses a pull whose owed gates did not run). **Since 2026-11-02 `master` requires `Gate coverage`**, with `strict` and `enforce_admins` — a red or missing check now blocks a merge even for an administrator, demonstrated once in [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md) Stage 5 criterion 4. The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` still deploys nothing anywhere |
+| CI | **three** workflows now run on every pull request: `.github/workflows/ci.yml` (six jobs — backend, frontend, verify-scripts, infrastructure definitions, the live-tenancy gate and, new on this branch, the `Playwright e2e` browser gate; the `backend` job boots a `postgres:15` service container so the DB-backed tests really have a database), `.github/workflows/validate-workflows.yml` (actionlint plus fifteen structure guards over the yaml itself) and `.github/workflows/gate-coverage.yml` (a meta check that refuses a pull whose owed gates did not run). **Since 2026-11-02 `master` requires `Gate coverage`**, with `strict` and `enforce_admins` — a red or missing check now blocks a merge even for an administrator, demonstrated once in [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md) Stage 5 criterion 4. The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` still deploys nothing anywhere |
 | `scripts/verify-security.sh` | 18 executable security assertions against a local boot — see [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md) §13.2 |
 
 What this table's last paragraph used to say — "no integration tests against a real database, no frontend tests, no
@@ -314,12 +315,127 @@ in the README rather than only in the roadmap:
   there: **82 s, 626 assertions, 0 failed, 17 skips at their documented ceiling** (run `41488389433`), after the
   run before it came back red on two defects only a real runner could find.
 
-What is still genuinely missing for safe refactoring is coverage **thresholds**, a Playwright browser journey, and
-Testcontainers (the DB-backed tests use a real server, not a containerised-per-class one). Until those land, the
+What is still genuinely missing for safe refactoring is coverage **thresholds** and Testcontainers (the DB-backed
+tests use a real server, not a containerised-per-class one). The third thing this sentence used to name — "a
+Playwright browser journey" — has landed, so it is documented below rather than still owed. Until those two land, the
 manual verification path alongside the script above is the Postman collection — 45 requests against roughly 230
 endpoint mappings — documented in
 [docs/WindsurfGMS-Postman-Testing-Guide.md](docs/WindsurfGMS-Postman-Testing-Guide.md). Run it against a disposable
 database only.
+
+### 🌐 Browser journey (Playwright)
+
+`gms_frontend/e2e/` is a real Chromium driving the **built** bundle against a **real** backend: no mocks, no stubbed
+API, no second implementation of the login flow. The ten live suites in `scripts/` already prove behaviour over HTTP,
+but `verify-mvp-e2e.sh` has no browser in it and the Vitest suite has no server behind it, so nothing in this
+repository had ever proved that a human clicking the shipped build reaches a dashboard. Four tests live in
+`gms_frontend/e2e/admin-journey.spec.js`:
+
+- **a provisioned administrator reaches its dashboard only after rotating the password it was issued** — the login
+  response's `requirePasswordChange` sends the page to `/change-password`, `ProtectedRoute` holds
+  `/admin/dashboard` even when it is typed into the URL bar, and after the rotation a reload stays on the dashboard.
+- **the administrator registers a pupil through the dialog and the roll shows it** — the created row is on screen, the
+  page's own server-side search finds it, and `/students/search` run as that tenant returns `totalElements: 1`, so a
+  row living only in the grid's local state would fail.
+- **a second school's administrator searches for the first school's pupil and finds nothing** — the stranger's grid
+  answers `No students match this search`, its API search returns 0 and the owner's returns 1, and that second
+  number is what stops the 0 from being a tautology.
+- **the API refuses a browser whose origin the deployment has not allowed** — a page on the web port POSTs to the
+  absolute API origin and the call dies as `TypeError: Failed to fetch`; the same request replayed outside the
+  browser with that `Origin` header answers 403 `Invalid CORS request` with no
+  `Access-Control-Allow-Origin` on it. It needs no account, because the refusal happens before authentication.
+
+**What a run needs, in order.** `playwright.config.js`'s `webServer` starts `vite preview` and nothing else: **the
+suite does not boot the backend**, deliberately — the same reasoning that keeps the live suite list inside
+`scripts/ci-live-tenancy.sh` instead of in workflow YAML. So either run the harness, which boots the jar and then
+runs the suite, or boot a backend yourself.
+
+The one command, and the same one the CI job types, is the browser equivalent of `scripts/ci-live-tenancy.sh`:
+
+```bash
+# a running container named gms-postgres is a prerequisite: `docker compose up -d postgres`
+GMS_JAR=gms_backend/target/gms-0.1.0-SNAPSHOT.jar \
+DB_URL=jdbc:postgresql://localhost:5433/gms \
+DB_USERNAME=gms_user \
+DB_PASSWORD=<DB_PASSWORD from your .env> \
+GMS_SUPERADMIN_USERNAME=<platform administrator login name> \
+GMS_SUPERADMIN_PASSWORD=<its password — a local value; never commit one, never paste one here> \
+bash scripts/ci-playwright-e2e.sh
+```
+
+It creates a database that exists only for the run (`gms_e2e_<tag>`, so the role behind `DB_URL` must be able to
+`CREATE DATABASE`; the database name in your URL is replaced, never written to), boots the jar against it with **no
+Spring profile** so Flyway builds the schema and `StartupSecurityValidator` has to pass on the way, waits on
+`/actuator/health/liveness`, builds the bundle, runs the four tests, then stops the application and drops the
+database — including on a red run, because a gate that can only be run once per tag is a gate that gets its guard
+removed. It needs `curl docker java node npm openssl` on `PATH`, and refuses outright if something already answers on
+the web port: a suite driving a build this run did not make is the worst kind of green.
+
+To run the suite against a backend that is already up on `http://localhost:8080` with a platform account that may
+create schools:
+
+```bash
+cd gms_frontend
+npm ci
+npx playwright install chromium   # or: npm run e2e:install — same command, in package.json
+npm run build                     # vite preview serves dist/ from disk; a stale bundle is what you would drive
+```
+
+```bash
+export GMS_E2E_TAG=$(date +%s)                                  # ≤12 lowercase alphanumerics, unique per run
+export GMS_E2E_PLATFORM_USERNAME=<platform administrator login name>
+export GMS_E2E_PLATFORM_PASSWORD=<its password — placeholder only; never a real value in a document>
+npm run e2e
+```
+
+| Variable | Default | What it is for |
+| --- | --- | --- |
+| `GMS_E2E_API_ORIGIN` | `http://localhost:8080` | where the backend is: the target of `vite preview`'s `/api` proxy, and the absolute origin the fixture posts its arranging calls to and the fourth test measures the refusal against |
+| `GMS_E2E_WEB_PORT` | `4173` | the port `vite preview` binds, with `--strictPort` |
+| `GMS_E2E_BASE_URL` | `http://localhost:${GMS_E2E_WEB_PORT}` | the origin the browser is driven at; derived from the port, so set it only to point the suite at a server that already exists |
+| `GMS_E2E_TAG` | **none — required** | stamped into every school code the fixture mints (`E2E<tag><n><label>`), which is what makes two runs on one database not read each other's rows; `ci-playwright-e2e.sh` supplies it (the clock on a laptop, `r<run number>` in the workflow), and a hand run has to. Keep it ≤12 lowercase alphanumerics: that is the harness's own database-name guard (`^gms_e2e_[a-z0-9]{1,12}$`), and `SchoolRequest.schoolCode` is `@Size(max = 20)` besides — a longer tag turns the fixture's own school code into a 400 that reads as a backend defect |
+| `GMS_E2E_PLATFORM_USERNAME` | **none — required** | the platform account the fixture logs in as to create each tenant — the boot and the suite must be given the same one (`APP_SUPERADMIN_*` configures the boot; `scripts/ci-playwright-e2e.sh` exports the pair from `GMS_SUPERADMIN_USERNAME`, the name the live-tenancy harness already requires) |
+| `GMS_E2E_PLATFORM_PASSWORD` | **none — required** | its password |
+
+A missing required variable fails with a message that names it (`e2e/helpers/api.js` throws `${NAME} is not set`
+before the first navigation), so it does not arrive as a 60-second timeout, and on a database that already holds a
+previous run's rows the fixture checks the `schoolId` claim in the token it derived and refuses rather than driving
+the browser at someone else's tenant.
+
+**Why the built bundle behind a proxy, and not `vite dev`.** In production mode `getApiBaseUrl()`
+(`gms_frontend/src/constants/index.js:2-11`) returns the relative `/api/v1`, which is the wiring a real deployment
+uses, while the dev server defaults to an absolute `http://localhost:8080/api/v1` — a cross-origin call. The backend
+will not be loosened for that: `StartupSecurityValidator` (`gms_backend/src/main/java/com/gms/config/StartupSecurityValidator.java:57-65`)
+refuses to boot outside the dev profile with any `localhost` entry in `cors.allowed-origins`, and the harness boots
+with no profile on purpose. Serving `dist/` same-origin through `vite preview`'s `/api` proxy therefore needs no CORS
+exception, and nothing looser has to be smuggled into a boot that is otherwise the real one. One thing this does
+avoid rather than test: the proxy strips the `Origin` header on the way through, so `admin-journey.spec.js` covers
+the CORS refusal separately, from the other side, in its fourth test — the filter is not being hidden, only routed
+around on the three journey tests.
+
+**Result policy, and what has actually been measured.** One worker, zero retries, Chromium only — the engine the
+portal's users have, one worker so each test may provision its own tenant against a shared database without two runs
+inventing the same school code, and no retries because **a red run is a finding, not a flake**. Measured locally on
+this machine twice: on 2026-11-02 against a jar booted by hand (`4 passed (16.0s)`), and on 2026-11-03 through the
+harness itself — `scripts/ci-playwright-e2e.sh`, `4 passed (19.5s)`, exit 0, 37 s from preflight to a dropped
+database, with the bundle built by that run's `vite build`. Both on PostgreSQL 15, both with the jar booted with no
+Spring profile. That is a local result and labelled as one. The CI gate `Playwright e2e`
+(`.github/workflows/ci.yml`) has been added to the workflow and **has not yet run on the platform**, so nobody should
+read it as a passing check until a run URL is recorded next to it.
+
+**Where the evidence goes.** `gms_frontend/playwright-report/` is the HTML report (the config's own reporter, and the
+place a reader checks that the console guard actually ran). Failure traces and screenshots go to Playwright's output
+directory — the default `gms_frontend/test-results/` for a hand run, and `$GMS_CI_WORK_DIR/e2e-artifacts/` under the
+harness, because it passes `--output` so the traces sit next to `backend.log` and the suite transcript in one folder
+the CI job uploads. Both are gitignored, since a commit holding them grows with every red run. The console guard
+(`e2e/console-guard.fixture.js`) collects all three channels a browser complains on — `console.error`, `pageerror`,
+`requestfailed`, minus client-side-routing `ERR_ABORTED` — and every journey test ends by asserting the array is empty.
+Whatever that array held is then attached to the report as `browser console`, `(clean)` included: the transcript is
+written in the fixture's teardown, which runs on the failed test too, and a red run additionally records it as a
+`console-output` annotation. Measured on the harness run of 2026-11-03 — all four tests carry the attachment, so a
+report cannot be confused with a guard that never ran. A passing test therefore proves the clause by asserting it, not
+by printing nothing, and the CI job uploads the report and the work dir on a green run too (`if: always()`) for exactly
+that reason.
 
 ## 📝 Contributing
 

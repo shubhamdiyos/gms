@@ -492,6 +492,40 @@ kept duplicate-free by the partial per-school index `uq_students_school_email` (
 
 **ACD-12 (P1) — Admin bootstrap password is predictable and logged.** `SchoolServiceImpl.java:86-88` builds `firstInitial + surname + "@123"`, emailed at `:124` and printed at INFO three times by `EmailServiceImpl.java:59,63,67`.
 
+**ACD-13 (P1) — A provisioned administrator can be handed a credential that does not work.** Found 2026-11-03 by the Playwright browser suite.
+`SchoolServiceImpl.java:96-98` derives `base` from `adminFullName` (first initial plus surname, lower-cased, non-alphanumerics
+stripped) and sets `tempPassword = base + "@123"`, while the username it actually stores is the value returned by
+`generateUniqueUsername(base)` (`:309-318`) — a loop that appends an incrementing counter when the name is already taken, so
+`pa1` becomes `pa11`. On a colliding administrator name the pair handed out is internally inconsistent: the username is
+suffixed, the password is not.
+*Measured:* `psql` against the run's database returns `users` rows `pa1`/school 2 and `pa11`/school 6, both with
+`full_name='Playwright A1'`, both with a password derived from `pa1`. The DDL is the reason the loop exists: username
+uniqueness is global, not per-school — `User.java:74` (`unique = true`), the V1 baseline DDL `:1440-1441`, renamed by
+`V3__natural_keys.sql:33-34` to `uq_users_username`.
+*It reaches a person, not only a harness:* `EmailServiceImpl.java:32-42`, called at `SchoolServiceImpl.java:144`, puts the
+suffixed username and the unsuffixed password in the same welcome email, so a legitimate new administrator is mailed a pair
+that cannot authenticate.
+*Impact:* a test fixture that DERIVES the credential rather than reading it authenticates into the **wrong tenant** and
+cannot tell — this is how the suite's second run failed, with a 400 on a classroom name that collided in a school it had
+never created. **Tenant isolation itself held:** the server still scoped every read to the token's school. What failed is
+the provisioning contract, and the consequence is a credential a legitimate new administrator cannot use.
+*Coverage:* no test in `gms_backend/src/test/java` creates two schools with the same administrator name, and
+`SchoolServiceImpl` has no test class at all. `UserServiceImpl.java:298-306` is a dead duplicate of the generator — counter
+starts at 1, no 1000-attempt limit, zero call sites.
+*Consumers that guess the credential today:* `scripts/verify-mvp-e2e.sh:211-216`, `scripts/verify-c1-tenancy.sh:110-111`,
+`scripts/verify-c2-tenant-context.sh:103-108,131-136`, `scripts/verify-c3-scoped-reads.sh:91-96,121-122`,
+`scripts/verify-c4-owned-reads.sh:95-100,164-165` and `scripts/verify-c7-tenant-key.sh:134-160,205-208` — the last reads the
+username from the database but silently falls back to the guess. Already correct: `scripts/seed/p1_fixtures.sh:88-91`.
+*Related, not duplicate:* §7 **ACD-08** records that `generateUniqueUsername` is check-then-act and racy; §7 **ACD-12**
+records that the password is predictable and logged. Neither covers the base-versus-suffixed mismatch — that is two values
+built from different inputs, not either of those two defects.
+*Remediation (recommendation only — no work done):* the one-line fix is to derive the password from the value
+`generateUniqueUsername` returned rather than from `base`. The durable fix is to return the generated credential in the
+provisioning response, so no consumer has to restate a rule the server owns. The standing constraint that this repository
+does not redesign unless a defect is demonstrated is satisfied here: the defect is demonstrated above, and the fix is
+bounded to those two statements.
+*Status:* **Open** — new (2026-11-03). Recorded, not fixed; §16 vocabulary, **Open** = untouched.
+
 ## 8. Communication findings
 
 **COM-01 (P1) — Nothing is ever delivered.** `NotificationServiceImpl.java:62-63` stamps `PENDING`; no code writes `SENT` or `sentAt`; `sendScheduledNotifications` (`:210-217`) is a self-admitted stub. No `@Scheduled` or `@EnableScheduling` exists in the codebase, so no delivery job can run. All list queries filter `deliveryStatus='PENDING'` (`:133,151,157,163,169,175`), meaning anything marked SENT would vanish from the UI.
@@ -704,6 +738,39 @@ command that produces an artifact, and a `package`-time assertion that the jar's
 `ls gms_backend/src/main/resources/db/migration/`. Verification when closed: `unzip -l target/*.jar | grep db/migration`
 lists exactly the files the source directory has, after a rename of one of them.
 
+**OPS-22 (P2) — The documented frontend serving path cannot reach the API.** Found 2026-11-03 by the Playwright browser suite.
+`gms_frontend/nginx.conf:14-16` defines `location /` with `try_files $uri $uri/ /index.html;`, and `:19-22` a static-asset
+regex; the file carries **no `/api` location and no `proxy_pass`**. `gms_frontend/Dockerfile:25-28` ships that file into the
+image, and `docker-compose.yml:46-47,66-67` publishes frontend `3000:80` and backend `8080:8080` with nothing in front of
+both. The production bundle requests a **relative** `/api/v1` (`.env.production:1`, and the PROD branch of
+`getApiBaseUrl()` at `gms_frontend/src/constants/index.js:7-9`), so `/api/v1/...` matches `location /` and is answered with
+`index.html` — the SPA on that documented path cannot call its own API. The only `/api` forwarding anywhere in the
+repository is the test-only `preview.proxy` in `gms_frontend/vite.config.js`.
+*Deployment context:* `ADR-015` (`docs/infrastructure/INFRASTRUCTURE_DECISIONS.md:498-523`) is "Accepted … not provisioned"
+and is the decision that puts Caddy in front of both applications; `ADR-003` (`:92,:100-101`) is still Proposed. Neither
+names `CORS_ALLOWED_ORIGINS`, and `.env.example:66` offers only localhost dev origins, so an operator following the
+documented path is given no name to set.
+*The consequence for whoever deploys — the second half of this finding:* Spring's CORS filter treats any request carrying an
+`Origin` that is not in `cors.allowed-origins` as cross-origin and answers **403 `Invalid CORS request`**, with no
+same-origin bypass (`CorsConfig.java:35,:42`), and `StartupSecurityValidator.java:52-65` forces a non-empty, localhost-free
+list outside `dev`. Because nginx and Caddy forward `Origin` by default, a same-origin SPA deployment works only if
+`CORS_ALLOWED_ORIGINS` names the deployment's own public origin. The browser suite measured exactly this refusal: its first
+run's login failed with the console line `❌ Login error: Invalid CORS request`.
+*Coverage:* before today no test anywhere asserted the CORS filter's behaviour — `CorsConfig` is only `@Import`ed, at
+`TenantContextTest.java:48`, `EndpointInheritanceTest.java:73` and `EmptyCollectionContractTest.java:62`;
+`SqlStatementCountPerRequestTest.java:140` only populates it for chain traversal; and no suite under `scripts/` mentions
+CORS except `ci-live-tenancy.sh:166`. The suite now contains the negative test (`gms_frontend/e2e/admin-journey.spec.js`):
+the request is answered **403**, no `access-control-allow-origin` is handed back, and the page's `fetch` rejects with
+`TypeError: Failed to fetch`.
+*Related, not duplicate:* §11 **OPS-10** records the same absent `/api` proxy block and concludes that the container "404s
+every call"; what this row measures is the `try_files` fallback answering `index.html` to an API request, which is a
+different thing to diagnose, and OPS-10 says nothing about `Origin` or the CORS filter. `ADR-015` is the decision that
+would close the first half.
+*Status:* **Open** — new (2026-11-03). Recorded, not fixed; the path belongs to the deployment stage. This is not written
+as a release blocker: what it establishes is that the documented run instructions do not work as written.
+*Id note:* `OPS-19`, `OPS-20` and `OPS-21` are already in use at `docs/audit/TECHNICAL_DEBT.md:110-112` for entries this
+register has not yet carried, so the §11 sequence continues at **OPS-22**; neither list is renumbered.
+
 ## 12. Documentation findings
 
 **DOC-01 (P2)** — *partially remediated 2026-11-01.* `README.md:90-96` instructed developers to hand-edit
@@ -889,6 +956,7 @@ coordinate is where the described code actually sat.
 | `ci.yml` | `:51-56` / `:58-65` (INF-16) | `:57-62` / `:64-71` | the two `upload-artifact` steps |
 | `ci.yml` | `:94` (INF-17 lint flag) | *nowhere* | the key is gone from every workflow — `validate-workflows.yml` refuses `continue-on-error: true`, so the lint step blocks |
 | `ci.yml` | `:32` (INF-10, readiness matrix) | `:34-35` | `permissions: {contents: read}` — **`:32` was never this**, in any revision |
+| `CorsConfig.java` | `:21` — "(`finding SEC-12`)", cited for the CORS origin allowlist | not a coordinate shift — the pointer is wrong | §5 **SEC-12** is plaintext gateway secrets (`PaymentGateway.java:33,36`, `PaymentGatewayController.java:53,60`), and its §16 row is **Open**. **SEC-12 was never a CORS finding**, in any revision; until 2026-11-03 this register carried no CORS finding at all, which is why §11 **OPS-22** now records the allowlist's measured behaviour. The source comment still reads `SEC-12` and was not edited here |
 
 `gms_frontend/vercel.json` and `deploy-backend.yml` are also cited in the infrastructure audit and were *deleted* by
 PR #13, so those pointers resolve nowhere on `master` by design; the audit rows that report the deletion already say
