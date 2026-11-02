@@ -65,9 +65,7 @@ public class ParentController {
             return ResponseEntity.status(401).build();
         }
         List<ParentResponse> parents = parentService.findBySchool();
-        if (parents.isEmpty()) {
-            return ResponseEntity.noContent().build();
-        }
+        // 200 with an empty array, never 204 — see ClassroomController#getAll.
         return ResponseEntity.ok(parents);
     }
 
