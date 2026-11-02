@@ -347,9 +347,15 @@ Recorded so the environment is not silently different from before:
 
 * **Colima was started** (`colima start`) because Docker Desktop is not installed and no daemon socket existed. This
   also created and selected a Docker context named `colima`. Stop with `colima stop`.
-* **Container `gms-postgres` exists and is running** (`postgres:16-alpine`, port 5432), with volume
-  `gms-v1_postgres_data` holding a **disposable, Hibernate-generated schema and one bootstrap SuperAdmin row**. It
-  contains no production data. Remove with `docker compose down -v`.
+* **Container `gms-postgres` exists and is running** (`postgres:16-alpine`). Re-measured 2026-11-02,
+  `docker ps` reports `127.0.0.1:5433->5432/tcp` — loopback only, on the port `docker-compose.yml:18`
+  templates as `${DB_PORT:-5433}`; the `0.0.0.0:5432` binding this line originally recorded was INF-02
+  and is closed locally (see [INFRASTRUCTURE_AUDIT.md §INF-02](../infrastructure/INFRASTRUCTURE_AUDIT.md)).
+  Volume `gms-v1_postgres_data` holds the `gms` database: **38 tables and no `flyway_schema_history` row**, so
+  this particular schema is still the one Hibernate generated during the pre-Flyway baseline — disposable, one
+  bootstrap SuperAdmin row, no production data. The Flyway-built schemas in this container are the ones booted
+  after Stage 2, e.g. `gms_perf_seed`, which carries 39 tables and seven `Migrating schema` lines. Remove the
+  volume with `docker compose down -v`.
 * **`/Users/shubhamkumar/Desktop/GMS-V1/.env`** was created by copying `.env.example` (git-ignored; contains only the
   placeholder password from the example file). Delete it if you prefer a clean tree.
 * The backend process used for probes was **terminated**; port 8099 is closed.

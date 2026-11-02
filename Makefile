@@ -1,4 +1,5 @@
-.PHONY: help build up down restart logs clean rebuild stop start
+.PHONY: help build up down restart logs logs-db logs-backend logs-frontend clean rebuild stop \
+        start ps shell-backend shell-frontend shell-db
 
 # Default target
 help:
@@ -13,7 +14,7 @@ help:
 	@echo "  make logs-db    - Show database logs"
 	@echo "  make logs-backend - Show backend logs"
 	@echo "  make logs-frontend - Show frontend logs"
-	@echo "  make clean      - Stop containers and remove volumes (WARNING: deletes database data)"
+	@echo "  make clean      - Stop containers and remove volumes (DELETES DATABASE DATA; needs CONFIRM=yes)"
 	@echo "  make rebuild    - Rebuild and restart all services"
 	@echo "  make stop       - Stop all services"
 	@echo "  make start      - Start all services"
@@ -24,14 +25,14 @@ help:
 
 # Build all images
 build:
-	docker-compose build
+	docker compose build
 
 # Start all services
 up:
-	docker-compose up -d
+	docker compose up -d
 	@echo ""
 	@echo "Services started:"
-	@echo "  - Database:    http://localhost:5432"
+	@echo "  - Database:    127.0.0.1:5433 (psql over loopback, not a URL)"
 	@echo "  - Backend API: http://localhost:8080"
 	@echo "  - Frontend:    http://localhost:3000"
 	@echo ""
@@ -39,65 +40,72 @@ up:
 
 # Stop all services
 down:
-	docker-compose down
+	docker compose down
 
 # Restart all services
 restart:
-	docker-compose restart
+	docker compose restart
 
 # Show logs from all services
 logs:
-	docker-compose logs -f
+	docker compose logs -f
 
 # Show database logs
 logs-db:
-	docker-compose logs -f postgres
+	docker compose logs -f postgres
 
 # Show backend logs
 logs-backend:
-	docker-compose logs -f backend
+	docker compose logs -f backend
 
 # Show frontend logs
 logs-frontend:
-	docker-compose logs -f frontend
+	docker compose logs -f frontend
 
-# Clean everything including volumes (WARNING: deletes database data)
+# Clean everything including volumes. `down -v` removes the postgres_data volume and there is no
+# backup to restore from, so this is a database-destroying command; it now asks instead of
+# deleting first and printing the warning after.
 clean:
-	docker-compose down -v
+	@if [ "$${CONFIRM}" != "yes" ]; then \
+	  echo "REFUSED: make clean runs 'docker compose down -v', which deletes the postgres_data volume."; \
+	  echo "         There is no backup to restore from. Run 'make clean CONFIRM=yes' to mean it."; \
+	  exit 1; \
+	fi
+	docker compose down -v
 	@echo "All containers and volumes removed"
 
 # Rebuild and restart
 rebuild:
-	docker-compose down
-	docker-compose build --no-cache
-	docker-compose up -d
+	docker compose down
+	docker compose build --no-cache
+	docker compose up -d
 	@echo ""
 	@echo "Services rebuilt and started:"
-	@echo "  - Database:    http://localhost:5432"
+	@echo "  - Database:    127.0.0.1:5433 (psql over loopback, not a URL)"
 	@echo "  - Backend API: http://localhost:8080"
 	@echo "  - Frontend:    http://localhost:3000"
 
 # Stop services
 stop:
-	docker-compose stop
+	docker compose stop
 
 # Start services
 start:
-	docker-compose start
+	docker compose start
 
 # Show running containers
 ps:
-	docker-compose ps
+	docker compose ps
 
 # Open shell in backend container
 shell-backend:
-	docker-compose exec backend sh
+	docker compose exec backend sh
 
 # Open shell in frontend container
 shell-frontend:
-	docker-compose exec frontend sh
+	docker compose exec frontend sh
 
 # Open PostgreSQL shell
 shell-db:
-	docker-compose exec postgres psql -U gms_user -d gms
+	docker compose exec postgres psql -U gms_user -d gms
 

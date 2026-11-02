@@ -100,42 +100,52 @@ git clone https://github.com/shubhamdiyos/gms.git
 cd gms/gms_backend
 ```
 
-2. **Point the application at a database you own**
+2. **Give the application a database and a signing key**
 
-Do **not** hand-edit `gms_backend/src/main/resources/application.properties`: the committed file currently carries a
-hosted database credential (finding SEC-01 in
-[docs/audit/REPOSITORY_AUDIT.md](docs/audit/REPOSITORY_AUDIT.md)), and editing it is how a developer ends up working
-against production data by accident. Override the datasource at run time instead:
+`gms_backend/src/main/resources/application.properties` carries no host and no credential. The datasource is
+`${DB_URL:}` / `${DB_USERNAME:}` / `${DB_PASSWORD:}` (`:24-26`), each with an intentionally empty default, and
+`security.jwt.secret` (`:48`) has no default at all. That is the SEC-01 remediation, and the empty defaults are why a
+first run **fails instead of connecting somewhere you did not mean**: measured on 2026-11-02,
+`java -jar target/gms-0.1.0-SNAPSHOT.jar` with no environment stops with
+`IllegalStateException: security.jwt.secret is missing, shorter than 32 bytes, or a retired public default`
+(`JwtTokenProvider.java:64`). Set the three values rather than editing the file, so nothing local can become a
+committed default:
 
 ```bash
-# start the disposable Postgres from Compose
-cp .env.example .env
+export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # JDK 21 only — see below
+
+# the disposable Postgres; it publishes to 127.0.0.1:5433 and to no other interface (docker-compose.yml:18)
+cp .env.example .env        # then fill in DB_PASSWORD
 docker compose up -d postgres
 
-# run the backend against it (command-line properties win over the file)
-export JAVA_HOME=$(/usr/libexec/java_home -v 21)   # JDK 21 only — see below
-mvn spring-boot:run -Dspring-boot.run.arguments=" \
-  --spring.datasource.url=jdbc:postgresql://localhost:5432/gms?sslmode=disable \
-  --spring.datasource.username=gms_user \
-  --spring.datasource.password=<DB_PASSWORD from your .env>"
+export DB_URL=jdbc:postgresql://localhost:5433/gms
+export DB_USERNAME=gms_user
+export DB_PASSWORD=<DB_PASSWORD from your .env>
+export SECURITY_JWT_SECRET=$(openssl rand -base64 48)
+
+mvn spring-boot:run -Dspring-boot.run.profiles=dev
 ```
 
 Two caveats that are real today, not aspirational:
 
 * **Java 21 is required.** With a newer default JDK the build fails with
   `Fatal error compiling: … TypeTag :: UNKNOWN` (a Lombok/javac incompatibility). Nothing in the repository pins this
-  yet.
-* **The application cannot create its own schema from a clean database.** `ddl-auto` defaults to `validate` and there
-  are no migration files, so startup fails with `Schema-validation: missing table [academic_years]` until Flyway
-  migrations exist (OPS-07). The temporary workaround used during the baseline was
-  `--spring.jpa.hibernate.ddl-auto=update` **against a disposable database only** — never against a hosted one.
+  yet: there is no `.mvn/jvm.config`, no `maven-enforcer` rule and no `.java-version`, and `pom.xml:109`'s
+  `<source>${java.version}</source>` constrains the language level, not the compiler that reads it.
+* **The schema comes from Flyway, and only from Flyway.** `db/migration/` holds `V1` through `V7`,
+  `spring.flyway.enabled=${FLYWAY_ENABLED:true}` (`application.properties:43`) is on by default, and
+  `spring.jpa.hibernate.ddl-auto=validate` is a literal in all three profiles. An empty database is therefore built
+  during boot — the log shows `Migrating schema "public" to version` seven times, ending at
+  `"7 - record who wrote the pupil"` — and Hibernate never writes it. The `--spring.jpa.hibernate.ddl-auto=update`
+  workaround this section used to recommend is gone from the repository: ADR-022 removed the `${JPA_DDL_AUTO:…}`
+  indirection, so there is no environment variable left that can reach `update` in any profile.
 
 Full reproduction steps and measured outputs: [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md).
 
 3. **Start the backend**
 
-Use the command in step 2 — plain `mvn spring-boot:run` reads the committed datasource URL, which points at a hosted
-database.
+The command in step 2 is the start. Plain `mvn spring-boot:run` is not a shortcut around it: with no `DB_URL` and no
+`SECURITY_JWT_SECRET` exported, it refuses to boot for the reason quoted above.
 
 Backend will start on `http://localhost:8080`
 
