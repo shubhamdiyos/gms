@@ -164,8 +164,17 @@ export DB_URL DB_USERNAME DB_PASSWORD
 # repository can carry it forward.
 export SECURITY_JWT_SECRET="${SECURITY_JWT_SECRET:-$(openssl rand -base64 48)}"
 export CORS_ALLOWED_ORIGINS="${CORS_ALLOWED_ORIGINS:-https://live-tenancy-gate.invalid}"
-# verify-security.sh reads the database through the application's own variable names.
+# verify-security.sh predates this harness and reads the database through the application's own
+# variable names: `DB_NAME` for the database, and `GMS_DB_CONTAINER` — not `GMS_PG_CONTAINER`,
+# which the other nine suites use — for the container its `docker exec` probes travel through.
+# Every variable below is one the harness's own flag has to reach; leaving this out is invisible
+# on any machine whose container is literally named `gms-postgres`, because that is exactly the
+# default the suite falls back to. It is not invisible anywhere else: pointed at a second server,
+# the suite asked the first one for a database that does not exist there, three probes printed
+# `FATAL: database … does not exist` to stderr, and the throttling assertion failed on an empty
+# field — a red gate whose only defect was which container the pipe was welded to.
 export DB_NAME="$VERIFY_DB"
+export GMS_DB_CONTAINER="$PG_CONTAINER"
 
 # Built without back-references: BSD sed substitutes an unmatched group as the literal
 # `\2` rather than as empty, so a capture-group version of this line works on the CI

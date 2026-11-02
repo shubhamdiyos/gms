@@ -39,7 +39,7 @@ has been tested."* Decomposed so each clause can be argued with:
 | # | Clause | The test that decides it | Recorded in |
 |---|---|---|---|
 | DoD-1 | The MVP works end-to-end | A scripted journey — superadmin login → create school → provision admin → admin login → create students at 50k scale → paginated search → dashboard counts → teacher attendance → parent reads one child's result — executed against a database built only by migrations, with the HTTP results and row counts captured | `BASELINE_STATUS.md`, new § |
-| DoD-2 | The agreed performance tests pass | The published budget in [PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) met on ≥50,000 records per school, from `EXPLAIN (ANALYZE, BUFFERS)` and measured endpoint latency, on PostgreSQL 17 (local Docker *and* Testcontainers, which must agree). **The clause's environment is not yet met**: every number in Stage 5 came from Homebrew PostgreSQL **15.8** on the laptop's `127.0.0.1:5432`, no Testcontainers dependency exists, and the "16.15 in Colima on 5433" attribution first recorded with them is withdrawn there | evidence section named by DoD-1 |
+| DoD-2 | The agreed performance tests pass | The published budget in [PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) met on ≥50,000 records per school, from `EXPLAIN (ANALYZE, BUFFERS)` and measured endpoint latency, on PostgreSQL 17 (local Docker *and* Testcontainers, which must agree). **The clause's environment is not yet met**: every *latency* number in Stage 5 came from Homebrew PostgreSQL **15.8** on the laptop's `127.0.0.1:5432`, no Testcontainers dependency exists, and the "16.15 in Colima on 5433" attribution first recorded with them is withdrawn there. What has since run on 17 is the rest of the stack — the chain, the nine live suites and the whole Maven reactor, green on **17.11** in Docker (*PostgreSQL 17, measured*, end of Stage 5) — which makes the missing leg a measurement, not a compatibility question | evidence section named by DoD-1 |
 | DoD-3 | Tenant isolation is verified | Automated negative tests that **attempt** cross-tenant reads/writes on every protected resource and assert 403/404, plus one deliberate-failure control: a test that passes when the guard is removed and fails when it is in place | same |
 | DoD-4 | CI/CD works | Every check required in branch protection with `enforce_admins`; one PR that breaks a test proven unmergeable; the pipeline's own yaml validated by a gate that fires on its own edits | `PRODUCTION_READINESS_MATRIX.md` §2.2/2.3 |
 | DoD-5 | Migrations are reproducible | `flyway migrate` from an **empty** PostgreSQL database to head, twice, producing byte-identical schema (`pg_dump --schema-only` diff empty); `ddl-auto=validate` and never `update` in any profile | same |
@@ -1165,7 +1165,9 @@ warm); more than one instance; p99 with statistical strength (20 samples, worst-
 percentiles beyond the six probes. Connection-pool saturation was *not* among the things left
 unmeasured for long: the concurrent leg below runs eight and sixteen clients in flight against the same
 seed, and it is that leg which answers the pool question. `DoD-2` also names **PostgreSQL 17** and asks
-for Testcontainers alongside local Docker; no number in this stage was produced on 17, the sequential
+for Testcontainers alongside local Docker; no **latency** number in this stage was produced on 17 (the
+chain, the nine live suites and the whole Maven reactor have now run there — see *PostgreSQL 17, measured*
+at the end of this stage — but every p50/p95/p99 in the tables above came from 15.8), the sequential
 leg's 16.15 attribution is withdrawn above because the container cannot be reached to re-prove it, and
 the server that can be verified today is **15.8**. Changing the major is an owner decision, not a quiet
 edit, and the gap is recorded as open rather than closed by a nearby version.
@@ -1755,6 +1757,70 @@ numbers) and `verify-schema.sh` (creates and drops probe databases — destructi
 validates is validated by the boot above, which dies if Flyway and `ddl-auto=validate` disagree). *Open, and not a
 CI question:* PR #30 still needs the owner's review; nothing here has been merged.
 
+#### PostgreSQL 17, measured
+
+**Goal:** find out whether this project's schema, its data-access behaviour and its statement budgets hold
+on the major `DoD-2` names, without editing anything to make them hold.
+**State:** the chain, the live-tenancy gate and the Maven reactor ran green on **17.11** as it was; the
+latency half of `DoD-2` did not run there, and remains the open part of that clause.
+
+Nothing in the tree needed changing to run this. The verification is a container and eight environment
+variables: `postgres:17` published to the laptop's own `127.0.0.1:5434`, a fresh empty database per run,
+and the two commands the repository already defines pointed at it. What that bought:
+
+| surface | command | server | result |
+| --- | --- | --- | --- |
+| migration chain + `ddl-auto=validate` | boot of the jar | 17.11 | `Database: jdbc:postgresql://127.0.0.1:5434/gms_pg17b (PostgreSQL 17.11)`, `Successfully applied 9 migrations`, `flyway_schema_history` rows 1–9 all `success = t`, up in **9 s** |
+| the live-tenancy gate | `scripts/ci-live-tenancy.sh` | 17.11 | **exit 0 — 626 assertions, 0 failed, 17 skipped at c4's ceiling of 17**, 39 s wall |
+| the whole backend build | `mvn -B clean verify` | 17.11 | **BUILD SUCCESS — Tests run: 126, Failures: 0, Errors: 0, Skipped: 0** in 22.6 s, of which `SqlStatementCountPerRequestTest` is 9 cases that create and own `gms_n_plus_1` on that server |
+
+Those three counts — 626 / 0 / 17 — are the same on 17.11 as on 15.8 on the laptop and on `postgres:15` on
+the GitHub runner. The statement budgets the N+1 work pinned (4/4/3/9/6/3/4/7/3 prepared statements per
+route) are asserted, not eyeballed, so "the planner changed nothing that this project relies on" is a
+measured claim rather than an inference from a passing test.
+
+**The one 17-specific signal is a warning, and it refuses nothing.** Verbatim, at boot:
+
+```
+o.f.c.internal.database.base.Database : Flyway upgrade recommended: PostgreSQL 17.11 is newer than this
+version of Flyway and support has not been tested. The latest supported version of PostgreSQL is 16.
+```
+
+The bundled Flyway's supported matrix ends one major below the server, and it applied all nine migrations
+and let the boot finish anyway. Recorded as a fact about a support statement, not closed: the response is a
+Flyway version bump, which is a dependency decision, and the mandate here says not to move a dependency
+because a warning appeared. It is also the reason `DoD-2`'s Testcontainers leg matters — that leg is where a
+Flyway that has never been tested against 17 either agrees with the Docker numbers or does not.
+
+**What the 17 run found was a defect in the harness, not in 17.** The first run was red:
+
+| run | verdict | the line it turned on |
+| --- | --- | --- |
+| 1, against `gms-pg17`, before the fix | `verify-security` **FAIL**, harness exit 1 | `FAIL ten failures set account_locked — expected true, got ` (empty), preceded by three `psql: error: … FATAL: database "gms_pg17" does not exist` |
+| 2, against `gms-pg17b`, after | `verify-security ok`, harness **exit 0** | `checks=18 failures=0` |
+| 3, against `gms-postgres` (15), regression | harness **exit 0** in 42 s | `626 / 0 failed / 17 at ceiling` — identical to run 2 |
+
+The cause: `verify-security.sh` reaches the database through `GMS_DB_CONTAINER`, while the other nine
+suites reach it through `GMS_PG_CONTAINER` — the flag `scripts/ci-live-tenancy.sh` documents and exports.
+The harness set one and not the other, so the security suite fell back to its own default name and
+`docker exec`'d into whatever container happened to answer that name. On this laptop that was the
+`postgres:15` server, which had no `gms_pg17`; the three probes printed their error to stderr, returned
+empty stdout, and the throttling assertion compared `true` against nothing. CI cannot see this: its job
+names the service container `gms-postgres` *and* sets `GMS_PG_CONTAINER: gms-postgres`, so the flag and the
+fallback default are the same string by coincidence. The fix is one export beside the four the harness
+already makes authoritative — a second server is now a flag, not a rename.
+
+**What did not run on 17, stated as plainly as what did.** The `verify-perf-50k.sh` latency ladder: its
+guard refuses a half-loaded table, and the 1,840,468-row seed lives on the laptop's Homebrew 15.8 instance,
+so measuring on 17 means pouring that volume into a 17 server first — the next perf re-measurement
+(NFR-02's dashboard and `search` breaches) is where that load gets built, and its environment line will
+name the major it ran on. `verify-schema.sh`: creates and drops probe databases, destructive by design, and
+the chain it validates is the one that applied cleanly above. The Testcontainers leg: no such dependency
+exists yet. So `DoD-2`'s environment clause — "on PostgreSQL 17 (local Docker *and* Testcontainers, which
+must agree)" — is **still not met**, and its row at the top of this document says so. What is now true is
+narrower and specific: nothing about PostgreSQL 17 broke this project, and the two things that would let a
+future change break it silently are named above.
+
 ### Stage 6 — Deployment preparation (Oracle enters)
 
 **Goal:** a deploy and a rollback each executed once, on owner-controlled infrastructure.
@@ -1831,7 +1897,7 @@ system, the remaining `DOC-*`).
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Merged** — `ef00eb9` / PR #25. Criteria 2, 3, 6, 7, 8 met; 1 open; 4, 5 moved to Stage 5. `master` now carries V1…V7 and `ddl-auto=validate` | $0 | No |
 | 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**: V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
-| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated three times** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see; PR #31: one inverted expectation in a **live tenancy suite** → `Live tenancy suites` red at 2m51s → `Gate coverage` red at 4m54s → `gh pr merge --admin` refused on *both* the failing check and `require_last_push_approval` — the first platform proof at the behaviour-over-HTTP layer); **5 met on minutes, partly on the job split** — measured on the first push where the live gate ran: **444 runner-seconds over eight jobs = 7.4 runner-minutes, $0** on a public repository (live-tenancy 82 s, backend 78 s, the watcher 175 s), superseding the 302 s / seven-job figure this row carried. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (nothing here ran on 17; the 16.15 attribution is withdrawn), the live-tenancy CI job — a stub on the day this row was written and a **gate** the same day, wired through
+| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated three times** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see; PR #31: one inverted expectation in a **live tenancy suite** → `Live tenancy suites` red at 2m51s → `Gate coverage` red at 4m54s → `gh pr merge --admin` refused on *both* the failing check and `require_last_push_approval` — the first platform proof at the behaviour-over-HTTP layer); **5 met on minutes, partly on the job split** — measured on the first push where the live gate ran: **444 runner-seconds over eight jobs = 7.4 runner-minutes, $0** on a public repository (live-tenancy 82 s, backend 78 s, the watcher 175 s), superseding the 302 s / seven-job figure this row carried. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (the chain, the nine live suites and 126 Maven tests now **have** run green on 17.11 — 626/0/17 and 0 failures, see *PostgreSQL 17, measured* — but no latency number has, and no Testcontainers dependency exists; the 16.15 attribution is withdrawn), the live-tenancy CI job — a stub on the day this row was written and a **gate** the same day, wired through
 `scripts/ci-live-tenancy.sh`, measured at **626 assertions / 17 skips at ceiling / exit 0** on both the laptop and
 the runner (run `41485021174` red on two host-portability defects, run `41488389433` green with the job at 82 s),
 seen red by five local controls and once by the real platform, still awaiting the owner's review, and the
