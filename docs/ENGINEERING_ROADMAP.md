@@ -522,11 +522,14 @@ is reached before the tenant rule — `GlobalExceptionHandler` now recognises a 
 403 `That record belongs to another school.`, with a test that the constraint name and the table name do not reach the
 response body.
 
-**What `C-7` does not close.** (1) Inherited reads: `findById` is called from 155 sites across services and
-controllers and `getById` from 6, and `RepositoryTenantScopeArchTest` cannot see any of them because it scans
-*declarations* — an inherited method is not a declaration. A wrong-tenant id is still loaded before it is checked;
-level 3 constrains what may be written about the row once loaded, which is a different failure from a caller reading
-school B's record. That is `C-4`. (2) Deny-by-default on the endpoints is `C-5`. (3)
+**What `C-7` left to the cards below.** (1) *Inherited reads — closed by `C-4`.* `findById` is called from 155 sites
+across services and controllers, and `RepositoryTenantScopeArchTest` could not see any of them because it scans
+*declarations* — an inherited method is not a declaration. A wrong-tenant id was therefore loaded before it was
+checked, and level 3 constrains only what may be written about a row once loaded, which is a different failure from a
+caller reading school B's record. `C-4` moves the predicate into the load itself. The six `getById` sites the first
+version of this paragraph counted are `Service.getById`, not `JpaRepository.getById` — the arch rule forbids the
+repository form, and the service form delegates to a load that is now scoped. (2) *Deny-by-default on the endpoints —
+closed by `C-5`.* (3)
 `invoices` and `receipts` map and write `school_id` but never assign `student` (`InvoiceServiceImpl`,
 `ReceiptServiceImpl`), so their V5 same-school keys are vacuous for a reason that has nothing to do with tenancy —
 that is FIN-04's missing linkage, and it belongs to the financial package. (4) The bulk attendance path now enforces
@@ -609,7 +612,13 @@ not make the *write* path tenant-safe on its own: an insert or update that takes
 than the claim is outside this mechanism, which is why the 96 lines this card sorted matter. (3) `getById` and
 `getReferenceById` are refused by the arch test rather than scoped by the base — a service that reaches for them on a
 tenant-owned entity fails the build, and that is the right answer, because both hand back a proxy without looking at
-the tenant. (4) The platform-owner branch is deliberately broad: `SUPERADMIN` reads any school's row by design, so the
+the tenant. The refusal keys on the receiver's *name* (`TenantScopedReadArchTest.java:55` matches
+`*Repository.getById(` / `*Repository.getReferenceById(`), and of the 5 `getReferenceById` sites in production the four
+`schoolRepository.…` ones are seen and allowed because `School` is the tenant table; the fifth,
+`users.getReferenceById(userId)` at `config/TenantContextAuditorAware.java:98`, is on a tenant-owned repository and is
+invisible to the rule because the receiver is called `users`. It is safe by argument — the id is the caller's own `uid`
+claim and the proxy only ever becomes `created_by` — and §18.1 of the baseline records the boundary rather than
+claiming the test covers it. (4) The platform-owner branch is deliberately broad: `SUPERADMIN` reads any school's row by design, so the
 guard on `SchoolController`'s writes, not this file, is what keeps that role from being a hole in the other direction.
 
 

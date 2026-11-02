@@ -1149,7 +1149,20 @@ it.
 `getById` and `getReferenceById` are **refused, not scoped**, and `repository/TenantScopedReadArchTest` is the
 instrument that refuses them. Scoping them would be a lie: both hand back a proxy without looking at the tenant, so the
 row's identity is never established against the caller — the tenant check would run against a value nobody had resolved
-yet. A method that cannot be made honest is taken away rather than wrapped.
+yet. A method that cannot be made honest is forbidden at its call sites rather than wrapped.
+
+**How far that instrument reaches, measured.** The call-site rule is a source-text match on
+`\b([a-z][A-Za-z0-9]*Repository)\.(getById|getReferenceById)\(` (`TenantScopedReadArchTest.java:55`), so it keys on the
+*receiver's name*. There are 5 `getReferenceById` call sites under `gms_backend/src/main/java`: four are
+`schoolRepository.…` (`TeacherAssignmentServiceImpl.java:72`, `AttendanceServiceImpl.java:85` and `:115`,
+`TimetableServiceImpl.java:53`) — the rule sees those and the test allows them, because `School` is the tenant table
+rather than a row inside one — and one is `users.getReferenceById(userId)` (`config/TenantContextAuditorAware.java:98`)
+on `UserRepository`, which *is* tenant-owned (`UserRepository.java:15`, `User.java:19`) and is therefore outside the
+rule purely because the receiver is named `users` instead of `userRepository`. The auditor is safe by argument, not by
+test: the identifier comes from the `uid` claim of the token that already authenticated, so it can name only the
+caller's own account, and the reference it returns is stamped into `created_by` and never handed to a caller. The third
+limit in the test's own javadoc — "a reference obtained through a variable whose name does not end in `Repository` …
+is outside its reach" — is where that lives, and it is the reason `C-8`'s fix is written the way it is.
 
 `EntityLazyAccessorArchTest` polices the other half of the same bug, and it prints the number this card started with:
 
