@@ -746,7 +746,14 @@ code=$(call PATCH "/students/toggle?id=$STUDENT_A2&isActive=false" "$TOKEN_A")
 check "F7 the archive toggle retires a pupil (PATCH /students/toggle)" "200" "$code"
 check "F7 and the row is marked status 0" "0" "$(field '.status')"
 code=$(call GET "/students/$STUDENT_A2" "$TOKEN_A")
-check "F7 an archived pupil is not readable by id (StudentServiceImpl:240, 403 not 404)" "403" "$code"
+# 404, and this line used to assert 403. `verify-c1-tenancy.sh` asked the same question of a retired
+# subject and expected 404 ("deleted subject is gone"); the by-id write already answered 404 for an
+# archived classroom (`ClassroomServiceImpl#update` refuses status '0' with NOT_FOUND); and C-4 made a
+# foreign row read as 404, so a retired row of your own school answering 403 both contradicted the write
+# and told the caller something the list already hides — that the id exists and is archived. The first
+# CI run of the live suites found the contradiction by failing c1 on it. See
+# `RetiredRowReadContractTest` for the same rule at the service layer.
+check "F7 an archived pupil is not readable by id (404, the same answer a foreign row gives)" "404" "$code"
 code=$(call GET "/students" "$TOKEN_A")
 check "F7 and it is gone from the school's list" "0" \
   "$(jq --arg id "$STUDENT_A2" '[.[] | select((.id|tostring) == $id)] | length' "$body")"

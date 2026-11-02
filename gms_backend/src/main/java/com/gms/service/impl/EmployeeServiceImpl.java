@@ -91,7 +91,10 @@ public class EmployeeServiceImpl implements EmployeeService {
         Employee e = employeeRepository.findById(id).orElseThrow(() -> new EntityNotFoundException("Employee not found"));
         // The load is scoped to the caller's school, so only the archive rule is left to check here.
         if ("0".equals(e.getEmployeeStatus())) {
-            throw new TenantAccessDeniedException("Employee is inactive");
+            // A retired row is outside the caller's visible set, which is what 404 means here: the
+            // school's own list already filters it out, and a foreign row reads the same way. 403
+            // would claim the caller lacks a permission it holds on this route.
+            throw new EntityNotFoundException("Employee is inactive");
         }
         return e;
     }

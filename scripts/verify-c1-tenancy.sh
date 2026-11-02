@@ -167,11 +167,33 @@ code=$(call GET "/subjects/$SUBJECT_A" "$TOKEN_A")
 check "deleted subject is gone" "404" "$code"
 
 echo
-echo "=== 8. A referenced row is a conflict, not a server fault ==="
+echo "=== 8. Retiring a classroom the pupils still name ==="
+# This section asserted 409 when a delete refused to orphan rows. The contract that merged in PR #26
+# is different and deliberate: a delete archives, because the row carries the authorship the audit
+# trail reads and students.classroom_id's foreign key would refuse a hard delete anyway. So the
+# question this card actually asks is no longer "is it refused" but "is the retired row invisible and
+# is everything that still names it readable". The 500 this check was written to catch is still the
+# thing being caught — it just arrives one request later now, on the read of a pupil whose classroom
+# is no longer in the visible set.
 code=$(call DELETE "/classrooms/$CLASS_ID" "$TOKEN_B")
 check "admin B refused another school's classroom delete" "404" "$code"
 code=$(call DELETE "/classrooms/$CLASS_ID" "$TOKEN_A")
-check "classroom with students is a conflict, not a 500" "409" "$code"
+check "admin A retired its own classroom, with a body-free 204 and no server fault" "204" "$code"
+code=$(call GET "/classrooms/$CLASS_ID" "$TOKEN_A")
+check "the retired classroom is invisible to its own school" "404" "$code"
+code=$(call GET "/classrooms" "$TOKEN_A")
+check "and it is absent from the school's own list" "0" \
+  "$(jq --argjson id "$CLASS_ID" '[.[] | select(.id == $id)] | length' "$body")"
+code=$(call GET "/students/$STUDENT_A" "$TOKEN_A")
+check "a pupil still pointing at the retired classroom reads without a server fault" "200" "$code"
+code=$(call GET "/students" "$TOKEN_A")
+check "and the pupil list reads too" "200" "$code"
+# Measured, not asserted: the pupil row keeps its classId after the classroom is retired, which the
+# pupil's own response says out loud. Whether a school may retire a classroom that still has pupils in
+# it is the owner's call, not a test's — this line records the consequence of the accepted contract so
+# the decision is made with the observation in front of it.
+printf '      NOTE pupil %s still names classroom %s (classId=%s), which now reads 404\n' \
+  "$STUDENT_A" "$CLASS_ID" "$(jq -r '.classId' "$body")"
 code=$(call POST /classrooms/create "$TOKEN_A" '{"name":"Grade 6-B","grade":"6","section":"B"}')
 check "second classroom created in school A" "200" "$code"
 EMPTY_CLASS=$(jq -r '.id' "$body")
