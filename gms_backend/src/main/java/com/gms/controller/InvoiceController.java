@@ -32,20 +32,20 @@ public class InvoiceController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<InvoiceResponse> createInvoice(@Valid @RequestBody InvoiceRequest request) {
         return invoiceService.createInvoice(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<InvoiceResponse> updateInvoice(@PathVariable Integer id,
                                                        @Valid @RequestBody InvoiceRequest request) {
         return invoiceService.updateInvoice(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteInvoice(@PathVariable Integer id) {
         return invoiceService.deleteInvoice(id);
     }

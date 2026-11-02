@@ -24,20 +24,20 @@ public class ExamController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ExamResponse> createExam(@Valid @RequestBody ExamRequest examRequest) {
         return examService.createExam(examRequest);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ExamResponse> updateExam(@PathVariable Integer id,
                                                  @Valid @RequestBody ExamRequest examRequest) {
         return examService.updateExam(id, examRequest);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteExam(@PathVariable Integer id) {
         return examService.deleteExam(id);
     }

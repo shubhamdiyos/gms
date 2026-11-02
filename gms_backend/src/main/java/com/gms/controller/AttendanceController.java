@@ -63,7 +63,7 @@ public class AttendanceController {
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteAttendance(@PathVariable Integer id) {
         Integer empId = TenantContext.employeeId();
         Integer schoolId = TenantContext.schoolId();

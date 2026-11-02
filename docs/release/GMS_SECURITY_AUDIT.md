@@ -24,11 +24,11 @@ The three-layer tenant isolation architecture -- URL perimeter (SecurityConfig),
 | AT_RISK (finding attached) | 25 (25.5%) |
 | VIOLATION (confirmed exploit) | 0 |
 | Findings raised | 5 |
-| Findings fixed (this audit) | 3 (F-1, F-2, F-3) |
-| Findings open | 1 (F-4) |
+| Findings fixed (this audit) | 4 (F-1, F-2, F-3, F-4) |
+| Findings open | 0 |
 | Findings deferred | 1 (F-5) |
 
-**Risk level: LOW.** No confirmed violations exist. Three findings (F-1 MEDIUM, F-2 LOW-MEDIUM, F-3 HIGH) were remediated during this audit. The remaining open finding (F-4) is LOW severity. The tenant isolation architecture continues to bound the blast radius of any residual gap.
+**Risk level: LOW.** No confirmed violations exist. Four findings (F-1 MEDIUM, F-2 LOW-MEDIUM, F-3 HIGH, F-4 LOW) were remediated during this audit. The only remaining finding (F-5) is deferred as it applies to stub code with no current risk. The tenant isolation architecture continues to bound the blast radius of any residual gap.
 
 ---
 
@@ -193,21 +193,17 @@ The guard fires only when `TenantContext.roles().contains("PARENT")` -- ADMIN an
 
 ---
 
-### F-4: SUPERADMIN Write Access Gaps
+### F-4: SUPERADMIN Write Access Gaps [FIXED]
 
 **Severity:** LOW  
-**Status:** OPEN (structural)  
+**Status:** FIXED  
 **OWASP:** A01:2021 -- Broken Access Control  
 
-**Affected endpoints:** 10 controllers exclude SUPERADMIN from write operations (POST, PUT, DELETE) while admitting ADMIN.
+**Affected endpoints:** 19 controllers excluded SUPERADMIN from write operations (POST, PUT, DELETE) while admitting ADMIN.
 
-**Root cause:** The `@PreAuthorize` annotations on write handlers in 10 controllers specify `hasAuthority('ADMIN')` without including `'SUPERADMIN'`. SUPERADMIN is the platform owner and is designed to administer across tenants, but these method-level guards exclude it. The URL perimeter in `SecurityConfig.java:147-156` admits SUPERADMIN to the route group, but `@EnableMethodSecurity` enforces the method guard after the URL match, so SUPERADMIN receives 403 on these 10 controllers' write operations.
+**Fix applied:** All 42 write operations across 19 controllers updated from `@PreAuthorize("hasAuthority('ADMIN')")` to `@PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")`. Controllers updated: AcademicYearController, AttendanceController (DELETE only), ExamController, FeeController, FeePaymentController, FeeStructureController, FinancialReportController, FinancialTransactionController, GradingSchemeController, InvoiceController, ParentStudentController, PaymentGatewayController, ReceiptController, ResultController, SchoolCalendarController, SectionController, StudentAdmissionController, StudentExamController, StudentFeeController.
 
-**Impact:** The platform owner cannot perform write operations on 10 controllers. This is a functional gap rather than a security vulnerability -- it does not grant unauthorized access to any caller. However, it means the SUPERADMIN role cannot fulfill its design purpose on these routes.
-
-**Recommended fix:** Widen the `@PreAuthorize` annotations on the affected write handlers to `hasAnyAuthority('ADMIN', 'SUPERADMIN')`. This is a configuration change, not a code change, and carries low risk.
-
-**Note:** This finding is classified as LOW because the fail-closed design means no unauthorized access is granted. The SUPERADMIN is locked out, not let through.
+**Impact:** The platform owner (SUPERADMIN) can now perform write operations on all controllers. This is a configuration change with low risk -- it widens access for the platform owner role, not for any external caller.
 
 ---
 

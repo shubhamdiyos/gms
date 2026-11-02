@@ -355,7 +355,6 @@ location /api/ {
 
 1. **NFR-02** (P1) — Fix 3 concurrent-load breaches or document owner-accepted exceptions with rationale
 2. **E2E** (P2) — Add teacher, student, parent journeys to Playwright suite
-3. **F-4** (Low) — Add SUPERADMIN to write operations on 10 controllers (remaining security finding from audit)
 
 ---
 

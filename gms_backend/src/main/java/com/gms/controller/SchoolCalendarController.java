@@ -23,20 +23,20 @@ public class SchoolCalendarController {
     private SchoolCalendarService schoolCalendarService;
     
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<SchoolCalendarResponse> createCalendarEvent(@Valid @RequestBody SchoolCalendarRequest calendarRequest) {
         return schoolCalendarService.createCalendarEvent(calendarRequest);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<SchoolCalendarResponse> updateCalendarEvent(@PathVariable Integer id,
                                                                     @Valid @RequestBody SchoolCalendarRequest calendarRequest) {
         return schoolCalendarService.updateCalendarEvent(id, calendarRequest);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteCalendarEvent(@PathVariable Integer id) {
         return schoolCalendarService.deleteCalendarEvent(id);
     }

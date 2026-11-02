@@ -24,13 +24,13 @@ public class StudentExamController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<StudentExamResponse> registerStudentForExam(@Valid @RequestBody StudentExamRequest request) {
         return studentExamService.registerStudentForExam(request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deregisterStudentFromExam(@PathVariable Integer id) {
         return studentExamService.deregisterStudentFromExam(id);
     }

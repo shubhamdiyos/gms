@@ -17,19 +17,19 @@ public class StudentAdmissionController {
     private StudentAdmissionService studentAdmissionService;
     
     @PostMapping("/apply")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> applyForAdmission(@RequestBody StudentAdmissionRequest studentAdmissionRequest) {
         return studentAdmissionService.applyForAdmission(studentAdmissionRequest);
     }
 
     @PutMapping("/{admissionId}/approve")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> approveAdmission(@PathVariable Integer admissionId) {
         return studentAdmissionService.approveAdmission(admissionId);
     }
 
     @PutMapping("/{admissionId}/reject")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> rejectAdmission(@PathVariable Integer admissionId) {
         return studentAdmissionService.rejectAdmission(admissionId);
     }

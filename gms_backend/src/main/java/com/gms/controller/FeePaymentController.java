@@ -33,20 +33,20 @@ public class FeePaymentController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FeePaymentResponse> createFeePayment(@Valid @RequestBody FeePaymentRequest request) {
         return feePaymentService.createFeePayment(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FeePaymentResponse> updateFeePayment(@PathVariable Integer id,
                                                                @Valid @RequestBody FeePaymentRequest request) {
         return feePaymentService.updateFeePayment(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteFeePayment(@PathVariable Integer id) {
         return feePaymentService.deleteFeePayment(id);
     }

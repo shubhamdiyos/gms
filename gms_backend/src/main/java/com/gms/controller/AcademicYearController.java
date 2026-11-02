@@ -20,31 +20,31 @@ public class AcademicYearController {
     private AcademicYearService academicYearService;
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> createAcademicYear(@RequestBody AcademicYearRequest academicYearRequest) {
         return academicYearService.createAcademicYear(academicYearRequest);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> updateAcademicYear(@PathVariable Integer id, @RequestBody AcademicYearRequest academicYearRequest) {
         return academicYearService.updateAcademicYear(id, academicYearRequest);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteAcademicYear(@PathVariable Integer id) {
         return academicYearService.deleteAcademicYear(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<AcademicYear>> getAllAcademicYears() {
         return academicYearService.getAllAcademicYears();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<AcademicYear> getAcademicYearById(@PathVariable Integer id) {
         return academicYearService.getAcademicYearById(id);
     }

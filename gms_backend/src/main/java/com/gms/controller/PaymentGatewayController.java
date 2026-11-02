@@ -24,20 +24,20 @@ public class PaymentGatewayController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<PaymentGatewayResponse> createPaymentGateway(@Valid @RequestBody PaymentGatewayRequest request) {
         return paymentGatewayService.createPaymentGateway(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<PaymentGatewayResponse> updatePaymentGateway(@PathVariable Integer id,
                                                                      @Valid @RequestBody PaymentGatewayRequest request) {
         return paymentGatewayService.updatePaymentGateway(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deletePaymentGateway(@PathVariable Integer id) {
         return paymentGatewayService.deletePaymentGateway(id);
     }

@@ -32,20 +32,20 @@ public class ResultController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ResultResponse> recordResult(@Valid @RequestBody ResultRequest request) {
         return resultService.recordResult(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ResultResponse> updateResult(@PathVariable Integer id,
                                                      @Valid @RequestBody ResultRequest request) {
         return resultService.updateResult(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteResult(@PathVariable Integer id) {
         return resultService.deleteResult(id);
     }

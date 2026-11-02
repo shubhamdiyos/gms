@@ -22,20 +22,20 @@ public class SectionController {
     private SectionService sectionService;
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<SectionResponse> createSection(@Valid @RequestBody SectionRequest sectionRequest) {
         return sectionService.createSection(sectionRequest);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<SectionResponse> updateSection(@PathVariable Integer id, 
                                                         @Valid @RequestBody SectionRequest sectionRequest) {
         return sectionService.updateSection(id, sectionRequest);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteSection(@PathVariable Integer id) {
         return sectionService.deleteSection(id);
     }

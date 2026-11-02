@@ -22,13 +22,13 @@ public class ParentStudentController {
     private ParentStudentService parentStudentService;
     
     @PostMapping("/assign")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> assignStudentsToParent(@Valid @RequestBody ParentStudentRequest request) {
         return parentStudentService.assignStudentsToParent(request);
     }
 
     @DeleteMapping("/remove")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> removeStudentFromParent(@RequestParam Integer parentId, @RequestParam Integer studentId) {
         return parentStudentService.removeStudentFromParent(parentId, studentId);
     }

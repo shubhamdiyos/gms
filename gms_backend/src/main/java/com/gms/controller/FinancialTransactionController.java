@@ -27,20 +27,20 @@ public class FinancialTransactionController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FinancialTransactionResponse> createFinancialTransaction(@Valid @RequestBody FinancialTransactionRequest request) {
         return financialTransactionService.createFinancialTransaction(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FinancialTransactionResponse> updateFinancialTransaction(@PathVariable Integer id,
                                                                                  @Valid @RequestBody FinancialTransactionRequest request) {
         return financialTransactionService.updateFinancialTransaction(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteFinancialTransaction(@PathVariable Integer id) {
         return financialTransactionService.deleteFinancialTransaction(id);
     }
