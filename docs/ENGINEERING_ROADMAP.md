@@ -255,10 +255,20 @@ silently produced a PG14 schema for PG16 entities. Postgres is now published
 `127.0.0.1:${DB_PORT:-5433}:5432`, loopback-only, and `.env.example`, the dev default in
 `application-dev.properties` and the container agree on the number. `frontend` gained a healthcheck
 and `depends_on: backend: condition: service_healthy`; the backend runtime stage is now non-root and
-sizes its heap with `-XX:MaxRAMPercentage`. **Remaining B-1 items, deliberately not done here:** a
-Makefile, the second `internal: true` network and separate compose overlays. Each is convenience or
+sizes its heap with `-XX:MaxRAMPercentage`. **Remaining B-1 items, deliberately not done here:** the
+second `internal: true` network and separate compose overlays. Each is convenience or
 hardening, none is on the path to a working MVP slice, and *"Do not let Stage 2 … expand
 indefinitely"* is the instruction that moves them to Stage 5, where the CI job needs them anyway.
+
+The Makefile that sentence also named has since been repaired, because it did not run at all: all 16
+recipes called the EOL `docker-compose` v1 binary, which is absent here, so `make build` died with
+`make: docker-compose: No such file or directory` (that is INF-12's own measurement, not an
+inference). They call `docker compose` now, and the proof is an executed `make ps` printing the live
+`gms-postgres`, not a `grep`. `make clean` — `docker compose down -v`, the one destructive recipe in
+the file — used to print its warning after deleting the volume; it now refuses without `CONFIRM=yes`,
+tested against the refusal path so the volume survived. **What B-1 still owes is the two overlays this
+paragraph already deferred**, because `compose.yaml`/`compose.dev.yaml` do not exist and
+`Makefile:110` still hardcodes `psql -U gms_user -d gms` while both are templated in Compose.
 
 **Not in this stage:** tenant enforcement in Java (Stage 3), because a guard written against a schema that can still
 be silently edited by Hibernate proves nothing.

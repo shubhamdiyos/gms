@@ -474,7 +474,8 @@ this was verified by execution rather than by `grep`: `make ps` runs and prints 
 `make -n up` expands to `docker compose up -d`. `make clean` now refuses without `CONFIRM=yes`, so the
 warning-before-destruction ordering this finding also names is fixed; `.PHONY` lists all seventeen targets.
 What remains is the rest of the Remediation below: the compose overlays (`compose.yaml` / `compose.dev.yaml`
-do not exist), the four operational targets, and `:102`'s hardcoded `psql -U gms_user -d gms`.
+do not exist), the four operational targets, and the hardcoded `psql -U gms_user -d gms` — `Makefile:102`
+when this finding was written, `Makefile:110` today, because the two repairs above lengthened the file.
 
 **Remediation.** Replace all sixteen with `docker compose`, add `-f compose.yaml -f compose.dev.yaml`, guard
 `clean` behind an explicit confirmation variable, and add `test`, `migrate`, `db-backup`, `db-restore` and
