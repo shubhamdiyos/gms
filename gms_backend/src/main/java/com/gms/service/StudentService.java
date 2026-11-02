@@ -9,7 +9,12 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 public interface StudentService {
-    List<Student> findBySchool();
+    /**
+     * The tenant's newest pupils, at most {@code size} of them, capped server-side at the same ceiling
+     * {@code search} uses. A caller that wants more asks for pages; this method does not hand back 50,000
+     * entities because a screen rendered five of them.
+     */
+    List<Student> findBySchool(int size);
 
     /**
      * Paged student search for MVP feature #9. The caller's tenant is resolved from the request

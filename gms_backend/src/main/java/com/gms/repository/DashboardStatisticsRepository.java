@@ -32,7 +32,7 @@ import org.springframework.stereotype.Repository;
  * <p><b>The status predicate is copied from the list endpoint, not invented here.</b> A dashboard card
  * and the page behind it must agree, so each count mirrors the read its screen is built on:
  * {@code Student}/{@code Employee}/{@code Classroom}/{@code User}/{@code School} count everything not
- * archived ({@code status <> '0'}, the same predicate {@code findAllBySchool_IdAndStatusNot(id, "0")}
+ * archived ({@code status <> '0'}, the same predicate {@code …AndStatusNotOrderByIdDesc(id, "0", page)}
  * applies), while {@code Section} and {@code Exam} count only what is active
  * ({@code status = '1'}, the same predicate {@code findBySchool_IdAndStatus(id, "1")} applies). The
  * split is the codebase's, not this file's; the javadoc on each method names the read it mirrors.</p>
@@ -43,8 +43,12 @@ public interface DashboardStatisticsRepository extends JpaRepository<School, Int
     /**
      * This school's students, every one the students page lists.
      *
-     * <p>Mirrors {@code StudentRepository.findAllBySchool_IdAndStatusNot(schoolId, "0")}, which is
-     * what {@code StudentServiceImpl.findBySchool()} returns. Indexed by
+     * <p>Mirrors the predicate of {@code StudentRepository.findAllBySchool_IdAndStatusNotOrderByIdDesc},
+     * which backs {@code StudentServiceImpl.findBySchool(size)}. That list is a capped newest page —
+     * 100 rows at most — while this count is the whole roll, and the two are meant to differ: the card
+     * answers "how many pupils does this school have", the list answers "show me the newest ones". The
+     * uncapped row count is what {@code GET /students/search}'s {@code totalElements} also reports, so
+     * the card and the paginated page agree exactly. Indexed by
      * {@code idx_students_school_status (school_id, status)}.</p>
      */
     @Query("SELECT COUNT(s) FROM Student s WHERE s.school.id = :schoolId AND s.status <> '0'")

@@ -72,7 +72,7 @@ const AdminDashboard = () => {
     isLoading: aggregateLoading,
     error: aggregateError,
   } = useGetSchoolDashboardQuery();
-  const { data: students = [], isLoading: studentsLoading, error: studentsError } = useGetStudentsQuery();
+  const { data: students = [], isLoading: studentsLoading, error: studentsError } = useGetStudentsQuery({ size: 5 });
   const { data: employees = [], isLoading: employeesLoading, error: employeesError } = useGetEmployeesQuery();
   // The classroom list is only a lookup for the labels below; every headline number is the aggregate's.
   const { data: classrooms = [] } = useGetClassroomsQuery();

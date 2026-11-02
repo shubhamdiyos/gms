@@ -158,8 +158,12 @@ public class StudentServiceImpl implements StudentService {
 
     @Override
     @Transactional(readOnly = true)
-    public List<Student> findBySchool() {
-        return studentRepository.findAllBySchool_IdAndStatusNot(TenantContext.schoolId(), "0");
+    public List<Student> findBySchool(int size) {
+        // The clamp buildPageable already applies to a paged search, on the read that had no ceiling:
+        // a volume tenant holds 50,000 pupils and one dashboard card renders five of them.
+        int safeSize = size <= 0 ? DEFAULT_SEARCH_SIZE : Math.min(size, MAX_SEARCH_SIZE);
+        return studentRepository.findAllBySchool_IdAndStatusNotOrderByIdDesc(
+                TenantContext.schoolId(), "0", PageRequest.of(0, safeSize));
     }
 
     /**

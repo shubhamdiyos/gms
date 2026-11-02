@@ -62,14 +62,26 @@ public class StudentController {
         return studentService.update(request);
     }
 
+    /**
+     * The tenant's pupils, newest first, bounded by {@code size}.
+     *
+     * <p>Before the ceiling, this returned every pupil of the school: at NFR-01's volume a tenant holds
+     * 50,000 of them, and the read measured p95 378 ms against NFR-02's 300 ms budget while serving a
+     * dashboard that renders five rows. {@code ORDER BY id DESC} is what makes the cap honest — a
+     * truncated read still returns the newest pupils rather than an arbitrary prefix. The whole roll
+     * remains available, paged, at {@code GET /students/search}.</p>
+     *
+     * @param size rows to return; defaults to 20 and is capped server-side at the search ceiling
+     */
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
-    public ResponseEntity<List<Student>> getAll() {
+    public ResponseEntity<List<Student>> getAll(
+            @RequestParam(name = "size", defaultValue = "20") int size) {
         Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Student> students = studentService.findBySchool();
+        List<Student> students = studentService.findBySchool(size);
         return ResponseEntity.ok(students);
     }
 

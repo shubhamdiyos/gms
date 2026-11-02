@@ -128,8 +128,23 @@ export const apiSlice = createApi({
     }),
 
     // Student endpoints
+    /**
+     * `GET /students` — the tenant's newest pupils, raw `List<Student>` entities (snake_case derived
+     * keys: `full_name`, `class_id`). Server-side it is bounded: `size` defaults to 20 and is capped at
+     * the search ceiling, because before the ceiling this call returned all 50,000 pupils of a volume
+     * tenant. Ask for the number of rows you will render. For anything that browses the roll, use
+     * `getStudentSearch` instead.
+     */
     getStudents: builder.query({
-      query: () => '/students',
+      query: (args = {}) => {
+        const { size } = args ?? {};
+        const params = new URLSearchParams();
+        if (size != null && Number.isFinite(Number(size))) {
+          params.set('size', String(Number(size)));
+        }
+        const search = params.toString();
+        return { url: `/students${search ? `?${search}` : ''}`, method: 'GET' };
+      },
       providesTags: ['Student'],
     }),
 
@@ -139,8 +154,8 @@ export const apiSlice = createApi({
      * The route is `GET /students/search?query=&classId=&page=&size=&sort=` and it answers a Spring
      * Data `Page` of `StudentResponse` (`content[]` + `totalElements`/`totalPages`/`number`/`size`/`sort`),
      * which is a different shape from `GET /students` (a raw `List<Student>` entity dump whose derived
-     * keys are snake_case: `full_name`, `class_id`). `getStudents` is left untouched because
-     * AdminDashboard and ResultsPage still read it.
+     * keys are snake_case: `full_name`, `class_id`). This is the endpoint for anything that browses the
+     * roll; `getStudents` is for a screen that renders a fixed handful of rows.
      *
      * Only parameters that are actually set go into the URL: the backend declares every one of
      * `query`/`classId`/`sort` optional and `page`/`size` defaulted, so sending `query=undefined` or an

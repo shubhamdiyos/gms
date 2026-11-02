@@ -8,13 +8,14 @@ import {
   DialogContent,
   DialogActions,
   TextField,
-  MenuItem,
   Grid,
   Chip,
   IconButton,
   Tooltip,
   Button,
   Alert,
+  Autocomplete,
+  CircularProgress,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { Add, Edit, Delete } from '@mui/icons-material';
@@ -22,7 +23,7 @@ import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import {
-  useGetStudentsQuery,
+  useGetStudentSearchQuery,
   useGetResultsForStudentQuery,
   useRecordResultMutation,
   useUpdateResultMutation,
@@ -48,14 +49,19 @@ const schema = yup.object({
 
 const ResultsPage = () => {
   const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [pickedStudent, setPickedStudent] = useState(null);
+  const [studentTerm, setStudentTerm] = useState('');
   const [open, setOpen] = useState(false);
   const [editingResult, setEditingResult] = useState(null);
 
+  // Server-side, because a school at NFR-01 volume has 50,000 pupils and a picker over all of
+  // them is not a picker. The term goes to /students/search as `query`; an empty term asks for
+  // the first page, which is what the selector shows before anyone types.
   const {
-    data: students = [],
-    isLoading: studentsLoading,
+    data: studentPage,
+    isFetching: studentsLoading,
     error: studentsError,
-  } = useGetStudentsQuery();
+  } = useGetStudentSearchQuery({ query: studentTerm, size: 25 });
 
   const {
     data: results = [],
@@ -81,13 +87,14 @@ const ResultsPage = () => {
 
   const studentOptions = useMemo(
     () =>
-      (Array.isArray(students) ? students : [])
+      (Array.isArray(studentPage?.content) ? studentPage.content : [])
         .filter((s) => s && s.id != null)
         .map((s) => ({
           id: s.id,
-          label: s.full_name || `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() || `Student #${s.id}`,
+          label: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() || `Student #${s.id}`,
+          admission: s.studentId ?? '',
         })),
-    [students],
+    [studentPage],
   );
 
   const handleOpen = (result = null) => {
@@ -237,22 +244,51 @@ const ResultsPage = () => {
       <Paper sx={{ p: 2, mb: 3 }}>
         <Grid container spacing={2} alignItems="center">
           <Grid item xs={12} md={4}>
-            <TextField
-              select
-              fullWidth
-              label="Student"
-              value={selectedStudentId}
-              onChange={(e) => setSelectedStudentId(e.target.value)}
-              SelectProps={{ native: true }}
-              disabled={studentsLoading || studentOptions.length === 0}
-            >
-              <option value="">Select a student</option>
-              {studentOptions.map((option) => (
-                <option key={option.id} value={option.id}>
+            <Autocomplete
+              options={studentOptions}
+              value={pickedStudent}
+              getOptionKey={(option) => option.id}
+              isOptionEqualToValue={(option, value) => option.id === value?.id}
+              onChange={(_, option) => {
+                setPickedStudent(option);
+                setSelectedStudentId(option?.id ?? '');
+              }}
+              onInputChange={(_, value, reason) => {
+                if (reason === 'input') setStudentTerm(value);
+              }}
+              loading={studentsLoading}
+              loadingText="Searching this school's pupils…"
+              noOptionsText={
+                studentTerm
+                  ? 'No pupil in this school matches that search.'
+                  : 'No students found for the current school. Add students first.'
+              }
+              blurOnSelect
+              selectOnFocus
+              handleHomeEndKeys
+              renderOption={(props, option) => (
+                <li {...props} key={option.id}>
                   {option.label}
-                </option>
-              ))}
-            </TextField>
+                  {option.admission ? ` · ${option.admission}` : ''}
+                </li>
+              )}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Student"
+                  placeholder="Type a name or admission number"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {studentsLoading ? <CircularProgress color="inherit" size={18} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+            />
           </Grid>
           <Grid item xs={12} md={8}>
             {studentsError && (
