@@ -11,12 +11,17 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "student_exams")
-public class StudentExam extends BaseAuditEntity {
+public class StudentExam extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
     private Integer id;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "school_id", nullable = false)
+    private School school;
 
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY, optional = false)

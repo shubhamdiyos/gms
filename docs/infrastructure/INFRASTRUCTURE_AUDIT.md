@@ -147,6 +147,14 @@ Keep the developer-facing binding in `compose.dev.yaml` where loopback-only is s
 
 **Cost.** $0.
 
+**Status now — closed on the host, open in the file.** Re-measured 2026-11-02: `docker ps` reports
+`gms-postgres | postgres:16-alpine | 127.0.0.1:5433->5432/tcp`. No non-loopback binding for the database
+exists on this machine, which is the half of the finding the `docker ps` line of the Verification above asks
+for. The other half is not met: `docker-compose.yml:47` and `:67` still publish backend `8080:8080` and
+frontend `3000:80` on every interface, and no external host ran `nc` against an EC2 address because nothing
+is deployed. So this closes for the developer laptop and stays open for `Infra-M4`, where the proxy becomes
+the only published service.
+
 **Verification.** From an external host, `nc -zv <ec2> 5432` and `nc -zv <ec2> 8080` both fail;
 `docker ps` shows no non-loopback binding for 5432; the application still functions through the proxy; the
 existing `scripts/verify-security.sh` still passes against the proxied URL.
@@ -425,6 +433,13 @@ protection rules.
 (OPS-07), no TLS and no gate. `ddl-auto=validate` against a Hibernate-`update`-created schema is likely to fail
 at boot, which converts "deploy" into "outage" until the baseline exists.
 
+**Re-measured, Stage 2 (branch `feat/stage2-flyway-baseline`, unmerged).** The "until the baseline exists" clause is
+half satisfied: the baseline now exists *as files* (`V1`–`V5`) and `OPS-07` is closed on that branch, so a `prod` boot
+against a Flyway-migrated database has something to validate against. What has **not** changed is this finding's actual
+subject — `prod` has still never booted, and `application-prod.properties:15` now makes that worse in one specific
+way: it runs Flyway *on boot*, so the first production start is simultaneously a schema migration and a service start.
+The staging stack below is still the only way to find out which of those two fails first.
+
 **Remediation.** Create a compose-based staging stack on the existing host (or a second container set with its
 own volume) fed by a **masked sample dataset** (first mandate §25 item 16 forbids fabricated data in production dashboards;
 a staging-only fixture is not a dashboard); boot `prod` there; require a green staging boot before the deploy
@@ -453,6 +468,14 @@ with the warning printed *after* the destructive call, and `.PHONY` (`:1`) omits
 improvise — which is how data-destroying commands get run in desperation. `make clean` silently deletes
 `postgres_data`; there is no backup to restore from (INF-13), so `make clean` is currently equivalent to
 "destroy the database".
+
+**Status now — the binary half is closed.** All sixteen recipes call `docker compose` as of 2026-11-02, and
+this was verified by execution rather than by `grep`: `make ps` runs and prints the live container, and
+`make -n up` expands to `docker compose up -d`. `make clean` now refuses without `CONFIRM=yes`, so the
+warning-before-destruction ordering this finding also names is fixed; `.PHONY` lists all seventeen targets.
+What remains is the rest of the Remediation below: the compose overlays (`compose.yaml` / `compose.dev.yaml`
+do not exist), the four operational targets, and the hardcoded `psql -U gms_user -d gms` — `Makefile:102`
+when this finding was written, `Makefile:110` today, because the two repairs above lengthened the file.
 
 **Remediation.** Replace all sixteen with `docker compose`, add `-f compose.yaml -f compose.dev.yaml`, guard
 `clean` behind an explicit confirmation variable, and add `test`, `migrate`, `db-backup`, `db-restore` and
@@ -773,9 +796,9 @@ The first audit already owns these; this table records only what Infra-M0 change
 | OPS-04 hostname echoed in logs | **Largely not real** | the failing run's log shows `EC2_HOST: ***` and `***@***`; GitHub masks secret *values*. `:67` still prints the first 10 characters deliberately. Downgraded; the committed DNS name in `vercel.json:5` is the actual exposure (INF-01) |
 | OPS-05 `cancel-in-progress: true` on deploy | Still open | `:27` confirmed; belongs with Infra-M3's deploy rewrite |
 | OPS-06 no rollback | Still open | root cause named: INF-03 (no artefact lineage) + INF-09 (no immutable tags) |
-| OPS-07 no migrations | Still open, re-verified | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` key is inert; dev defaults to `ddl-auto=${JPA_DDL_AUTO:update}` (`application-dev.properties:20`) |
+| OPS-07 no migrations | **Closed on branch, still open on `master`** | `feat/stage2-flyway-baseline`: `flyway-core` + `flyway-database-postgresql` in `pom.xml`, `V1`–`V5` in `db/migration`, `scripts/verify-schema.sh` green in six sections, and the three profiles literal `validate`. On `master`, `grep -i flyway gms_backend/pom.xml` → absent and `ddl-auto=${JPA_DDL_AUTO:update}` (`application-dev.properties:20`) — re-run either command to see which side of the merge you are standing on |
 | OPS-08 compose cannot boot from a fresh clone | **Partially closed** | INF-22: config validates; the `env_file: .env` requirement on both services remains, and ports/networks remain — INF-19 |
-| OPS-09 EOL `docker-compose` in Makefile | Still open, escalated | measured as **16 of the 17 recipes** (`help` is the only exception); proved broken on this machine (`make build` → `Error 1`, `make up` → exit 2) — INF-12 |
+| OPS-09 EOL `docker-compose` in Makefile | **Closed for the binary; overlays still owed** | the measurement below is the original one, and it was true when taken: **16 of the 17 recipes** invoked `docker-compose` and `make build` → `Error 1` on this machine. Re-measured 2026-11-02: `grep -c 'docker-compose ' Makefile` → `0`, `make ps` runs against the real compose file and prints `gms-postgres`, `make clean` refuses without `CONFIRM=yes` — INF-12 |
 | OPS-10 frontend image cannot reach an API | Still open | `nginx.conf` re-read: no `/api` block; combined with INF-14 the container path has no health gate either |
 | OPS-11 debug logging by default | **Closed in code** | `application.properties:95-96` now defaults `INFO`; rotation/size still unbounded — INF-06 |
 | OPS-12 JaCoCo decorative | Improved | `mvn -B verify` runs in CI and a coverage artefact is produced (`jacoco-coverage`, 679 KB) — the artefact-sizing problem is INF-16 |
@@ -870,8 +893,8 @@ outright wrong.
 |---|---|
 | `docker compose config --quiet` | **PASS** (exit 0) |
 | Live container security posture | **measured** — root, `restart=no`, no caps dropped, no limits, unbounded json-file logs (INF-05/06/07/08) |
-| Live port bindings | **measured** — `0.0.0.0:5432` and `[::]:5432` published (INF-02) |
-| `make build` / `make up` | **FAIL by design of the file** — v1 binary absent (INF-12) |
+| Live port bindings | **measured twice** — `0.0.0.0:5432` and `[::]:5432` at the audit pass; `127.0.0.1:5433->5432/tcp` and nothing else on 2026-11-02 (INF-02, closed on the host) |
+| `make build` / `make up` | **FAILED at the audit pass** — v1 binary absent (INF-12); re-run 2026-11-02 after the v2 switch: `make ps` → exit 0 |
 | `docker compose build backend frontend` | executed for §13; reported in §7.1 |
 | Frontend lint | **47 errors / 22 files** — unchanged, advisory. The flag is `continue-on-error: true` at `ci.yml:94` (measured: `- name: Lint` is `ci.yml:86`, and the step's own comment block carries the flag to 94). It stays advisory until the frontend contract package fixes the errors, per INF-17 — making it blocking now would gate on noise |
 | Backend unit tests (`mvn -B verify` in CI) | **PASS** in CI runs 41245769121 / 41245531864 / 41245233160 |
@@ -989,16 +1012,16 @@ re-checked against the working tree or a live measurement on 2026-11-01, in the 
 | Mandate §3 item | Classification | Evidence from this pass |
 |---|---|---|
 | Employee-ID vs user-ID mismatch (BKL-08) | **OPEN** | untouched by any merged branch; still tracked in [REPOSITORY_AUDIT.md §16](../audit/REPOSITORY_AUDIT.md) as *Open — new* |
-| PostgreSQL exposed on `0.0.0.0:5432` | **OPEN** | measured, not inferred: `docker ps` showed `0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp` on this machine (INF-02) |
+| PostgreSQL exposed on `0.0.0.0:5432` | **CLOSED ON THIS HOST, 2026-11-02** | the original measurement was `0.0.0.0:5432->5432/tcp, [::]:5432->5432/tcp`; today `docker ps` reports `127.0.0.1:5433->5432/tcp` and `docker-compose.yml:18` templates the binding as loopback-only. 8080 and 3000 remain published (`:47`, `:67`) — INF-02 |
 | Backend image runs as root | **OPEN** | `docker exec … id -u` → `0`; `Config.User` empty in both built images (INF-08) |
 | Frontend uses `npm install` | **OPEN** | `gms_frontend/Dockerfile` build stage; belongs with Infra-M1 (INF-09) |
 | Dockerfiles skip/blur test vs production stages | **OPEN** | `gms_backend/Dockerfile:11` runs `mvn -DskipTests package`, so the shipped jar is never built from a tested compile (INF-09) |
-| Makefile uses obsolete `docker-compose` | **OPEN** | 16 of 17 recipes; `make build` → `Error 1`, `make up` → exit 2 on this host (INF-12) |
+| Makefile uses obsolete `docker-compose` | **CLOSED, 2026-11-02** | was 16 of 17 recipes with `make build` → `Error 1`; now `docker compose` in all sixteen, verified by running `make ps` (INF-12) |
 | Vercel routed API calls to the retired EC2 host over HTTP | **RETIRED (by deletion)** | `gms_frontend/vercel.json` deleted on this branch. Before deleting it, the target was probed: DNS still resolves to `65.0.109.47`, TCP connect to `:8080` times out after 8 s — the rewrite could not carry traffic, so removing it breaks no working path |
 | Old EC2 SSH deployment workflow | **RETIRED (by deletion)** | `.github/workflows/deploy-backend.yml` deleted; `gh run list` confirms its last attempt (41245769175) never reached the host |
 | CI does not validate its own workflow files | **FIXED (capability) — enforcement still INF-10** | the defect was measured, not inferred: `6198d86` edited `ci.yml` and started no run anywhere. `validate-workflows.yml` is on `master` as `13bc2ed` and validated that very commit on push (41283981839, both jobs green); its acceptance test was executed on the PR, red on a deliberately broken trigger (41283176919) and green on the revert (41283277168) |
 | Lint and test checks advisory rather than enforced | **OPEN** | `required_status_checks.contexts=[]`, `enforce_admins=false`, lint step `continue-on-error: true` (INF-10) |
-| No Flyway migration foundation | **OPEN** | `grep -i flyway gms_backend/pom.xml` → absent, so every `spring.flyway.*` property is inert (OPS-07) |
+| No Flyway migration foundation | **FIXED ON BRANCH** | `feat/stage2-flyway-baseline` carries both Flyway 10 artifacts and `V1`–`V5`; `scripts/verify-schema.sh` is the re-runnable proof. On `master` the row reads **OPEN** unchanged — the dependency is absent there, so every `spring.flyway.*` property is still inert (OPS-07) |
 | No independently verified off-host backup/restore | **OPEN** | zero dumps and zero restores exist anywhere; now re-targeted at managed Neon (ADR-009) |
 | No verified production health check | **SUPERSEDED** | there is no production to check — the only target that ever had one is closed. Re-states itself as a Phase 6 gate: external HTTPS + health verification against the OCI origin |
 | No verified production deployment | **SUPERSEDED** | same cause. The rollback/deploy acceptance tests from Infra-M3 carry forward unchanged and now apply to OCI |

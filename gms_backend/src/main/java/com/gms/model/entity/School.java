@@ -1,7 +1,6 @@
 package com.gms.model.entity;
 
 import com.fasterxml.jackson.annotation.JsonIgnore;
-import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
@@ -14,7 +13,7 @@ import java.time.Instant;
 @Setter
 @Entity
 @Table(name = "schools")
-public class School {
+public class School extends AuthorshipEntity {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -54,16 +53,6 @@ public class School {
     @Column(name = "enabled", nullable = false)
     private boolean enabled = true;
 
-    @JsonIgnore
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "created_by")
-    private User createdBy;
-
-    @JsonIgnore
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "updated_by")
-    private User updatedBy;
-
     @Version
     @Column(name = "version")
     private Integer version;
@@ -75,25 +64,4 @@ public class School {
     @UpdateTimestamp
     @Column(name = "updated_at")
     private Instant updatedAt;
-
-    // JsonProperty methods for API responses following reference pattern
-    @JsonProperty("created_by_id")
-    public Integer getCreatedById() {
-        return createdBy != null ? createdBy.getId() : null;
-    }
-    
-    @JsonProperty("created_by_name")
-    public String getCreatedByName() {
-        return createdBy != null ? createdBy.getFullName() : null;
-    }
-    
-    @JsonProperty("updated_by_id")
-    public Integer getUpdatedById() {
-        return updatedBy != null ? updatedBy.getId() : null;
-    }
-    
-    @JsonProperty("updated_by_name")
-    public String getUpdatedByName() {
-        return updatedBy != null ? updatedBy.getFullName() : null;
-    }
 }

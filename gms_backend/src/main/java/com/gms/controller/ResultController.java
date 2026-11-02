@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.Result;
 import com.gms.model.request.ResultRequest;
 import com.gms.model.response.ResultResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.ResultService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -28,40 +28,32 @@ public class ResultController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<ResultResponse> recordResult(@Valid @RequestBody ResultRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return resultService.recordResult(request, schoolId, empId);
+        return resultService.recordResult(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<ResultResponse> updateResult(@PathVariable Integer id,
                                                      @Valid @RequestBody ResultRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return resultService.updateResult(id, request, schoolId, empId);
+        return resultService.updateResult(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteResult(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return resultService.deleteResult(id, schoolId, empId);
+        return resultService.deleteResult(id);
     }
 
     @GetMapping("/student-exam/{studentExamId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<Result>> getResultsForStudentExam(@PathVariable Integer studentExamId) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return resultService.getResultsForStudentExam(studentExamId, schoolId);
+        return resultService.getResultsForStudentExam(studentExamId);
     }
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<ResultResponse>> getResultsForStudent(@PathVariable Integer studentId) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        ResponseEntity<List<Result>> result = resultService.getResultsForStudent(studentId, schoolId);
+        ResponseEntity<List<Result>> result = resultService.getResultsForStudent(studentId);
         if (result.getBody() != null) {
             List<ResultResponse> responses = result.getBody().stream()
                     .map(this::mapToResponse)

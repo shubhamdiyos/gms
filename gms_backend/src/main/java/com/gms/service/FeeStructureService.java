@@ -9,15 +9,15 @@ import java.util.List;
 
 public interface FeeStructureService {
 
-    ResponseEntity<FeeStructureResponse> createFeeStructure(FeeStructureRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FeeStructureResponse> createFeeStructure(FeeStructureRequest request);
 
-    ResponseEntity<FeeStructureResponse> updateFeeStructure(Integer id, FeeStructureRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FeeStructureResponse> updateFeeStructure(Integer id, FeeStructureRequest request);
 
-    ResponseEntity<?> deleteFeeStructure(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteFeeStructure(Integer id);
 
-    ResponseEntity<List<FeeStructure>> getAllFeeStructures(Integer schoolId);
+    ResponseEntity<List<FeeStructure>> getAllFeeStructures();
 
-    ResponseEntity<FeeStructure> getFeeStructureById(Integer id, Integer schoolId);
+    ResponseEntity<FeeStructure> getFeeStructureById(Integer id);
 
-    ResponseEntity<List<FeeStructure>> getFeeStructuresByAcademicYear(Integer schoolId, String academicYear);
+    ResponseEntity<List<FeeStructure>> getFeeStructuresByAcademicYear(String academicYear);
 }

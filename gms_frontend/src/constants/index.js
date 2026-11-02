@@ -19,19 +19,30 @@ export const STORAGE_KEYS = {
   THEME: 'gms_theme',
 };
 
-// User Roles
+// User Roles - mirrors gms_backend com.gms.enums.RoleEnum; a role missing here cannot log in.
 export const ROLES = {
   SUPERADMIN: 'SUPERADMIN',
   ADMIN: 'ADMIN',
   TEACHER: 'TEACHER',
+  ACCOUNTANT: 'ACCOUNTANT',
   STUDENT: 'STUDENT',
   PARENT: 'PARENT',
+};
+
+// Human labels for ROLES - mirrors the RoleEnum display names.
+export const ROLE_LABELS = {
+  [ROLES.SUPERADMIN]: 'Super Administrator',
+  [ROLES.ADMIN]: 'School Administrator',
+  [ROLES.TEACHER]: 'Teacher',
+  [ROLES.ACCOUNTANT]: 'Accountant',
+  [ROLES.STUDENT]: 'Student',
+  [ROLES.PARENT]: 'Parent',
 };
 
 // Route Paths
 export const ROUTES = {
   LOGIN: '/login',
-  DASHBOARD: '/dashboard',
+  UNAUTHORIZED: '/unauthorized',
   SUPERADMIN: {
     DASHBOARD: '/superadmin/dashboard',
     SCHOOLS: '/superadmin/schools',
@@ -45,9 +56,9 @@ export const ROUTES = {
     CLASSROOMS: '/admin/classrooms',
     SUBJECTS: '/admin/subjects',
     ACADEMIC_YEARS: '/admin/academic-years',
+    // Guarded [ADMIN, ACCOUNTANT]: GET /fees admits ACCOUNTANT, its writes stay ADMIN-only.
     FEES: '/admin/fees',
     EXAMS: '/admin/exams',
-    REPORTS: '/admin/reports',
     ANNOUNCEMENTS: '/admin/announcements',
   },
   TEACHER: {
@@ -56,6 +67,7 @@ export const ROUTES = {
     ATTENDANCE: '/teacher/attendance',
     GRADES: '/teacher/grades',
     STUDENTS: '/teacher/students',
+    SCHEDULE: '/teacher/schedule',
   },
   STUDENT: {
     DASHBOARD: '/student/dashboard',
@@ -65,12 +77,10 @@ export const ROUTES = {
     FEES: '/student/fees',
     TIMETABLE: '/student/timetable',
   },
+  // A child's attendance/results/fees are tabs of ParentChildrenPage, not separate routes.
   PARENT: {
     DASHBOARD: '/parent/dashboard',
     CHILDREN: '/parent/children',
-    ATTENDANCE: '/parent/attendance',
-    RESULTS: '/parent/results',
-    FEES: '/parent/fees',
   },
 };
 

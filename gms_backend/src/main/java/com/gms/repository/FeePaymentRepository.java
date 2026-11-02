@@ -12,13 +12,13 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface FeePaymentRepository extends JpaRepository<FeePayment, Integer> {
+public interface FeePaymentRepository extends TenantScopedRepository<FeePayment> {
 
     List<FeePayment> findByStudentFee_Student_School_IdAndPaymentDateBetween(Integer schoolId, LocalDate startDate, LocalDate endDate);
 
-    List<FeePayment> findByStudentFee_Student_Id(Integer studentId);
+    List<FeePayment> findByStudentFee_Student_School_IdAndStudentFee_Student_Id(Integer schoolId, Integer studentId);
 
-    List<FeePayment> findByStudentFee_Id(Integer studentFeeId);
+    List<FeePayment> findByStudentFee_Student_School_IdAndStudentFee_Id(Integer schoolId, Integer studentFeeId);
 
     @Query("SELECT SUM(fp.amount) FROM FeePayment fp WHERE fp.studentFee.student.school.id = :schoolId AND fp.paymentDate BETWEEN :startDate AND :endDate AND fp.status = 'SUCCESS'")
     BigDecimal getTotalPaymentsBySchoolIdAndDateRange(@Param("schoolId") Integer schoolId, 

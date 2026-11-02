@@ -16,15 +16,15 @@ public interface AttendanceService {
 
     List<AttendanceResponse> getAttendanceForClassroom(Integer classroomId, LocalDate date);
     
-    ResponseEntity<AttendanceResponse> recordAttendance(AttendanceRequest request, Integer empId, Integer schoolId);
+    ResponseEntity<AttendanceResponse> recordAttendance(AttendanceRequest request);
     
-    ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request, Integer empId, Integer schoolId);
+    ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request);
     
-    ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request, Integer empId, Integer schoolId);
+    ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request);
     
-    ResponseEntity<?> deleteAttendance(Integer attendanceId, Integer empId, Integer schoolId);
+    ResponseEntity<?> deleteAttendance(Integer attendanceId);
     
-    List<AttendanceResponse> getAttendanceByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    List<AttendanceResponse> getAttendanceByDateRange(LocalDate startDate, LocalDate endDate);
     
     List<AttendanceResponse> getAttendanceByStudentAndDateRange(Integer studentId, LocalDate startDate, LocalDate endDate);
 }

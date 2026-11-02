@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.StudentFee;
 import com.gms.model.entity.Student;
 import com.gms.model.entity.Fee;
@@ -12,7 +13,7 @@ import com.gms.repository.StudentRepository;
 import com.gms.repository.FeeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.StudentFeeService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -22,7 +23,7 @@ import java.math.BigDecimal;
 import java.util.List;
 
 @Service
-public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integer> implements StudentFeeService {
+public class StudentFeeServiceImpl implements StudentFeeService {
 
     private final StudentFeeRepository studentFeeRepository;
     private final StudentRepository studentRepository;
@@ -35,7 +36,6 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
                                 FeeRepository feeRepository,
                                 SchoolRepository schoolRepository,
                                 UserRepository userRepository) {
-        super(studentFeeRepository);
         this.studentFeeRepository = studentFeeRepository;
         this.studentRepository = studentRepository;
         this.feeRepository = feeRepository;
@@ -44,31 +44,32 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
     }
 
     @Override
-    public ResponseEntity<StudentFeeResponse> createStudentFee(StudentFeeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<StudentFeeResponse> createStudentFee(StudentFeeRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
-        // Validate student exists and belongs to school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId)) {
-            throw new IllegalArgumentException("Student does not belong to the specified school");
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Student does not belong to the specified school");
         }
 
         // Validate fee exists and belongs to school
         Fee fee = feeRepository.findById(request.getFeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Fee not found"));
-        if (!fee.getSchool().getId().equals(schoolId)) {
-            throw new IllegalArgumentException("Fee does not belong to the specified school");
+        if (!fee.getSchool().getId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Fee does not belong to the specified school");
         }
 
         // Create student fee
         StudentFee studentFee = new StudentFee();
+        studentFee.setSchool(school);
         studentFee.setStudent(student);
         studentFee.setFee(fee);
         studentFee.setTotalAmount(fee.getAmount());
@@ -87,18 +88,13 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
     }
 
     @Override
-    public ResponseEntity<StudentFeeResponse> updateStudentFee(Integer id, StudentFeeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<StudentFeeResponse> updateStudentFee(Integer id, StudentFeeRequest request) {
         // Validate student fee exists
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
 
-        // Validate school
-        if (!studentFee.getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update student fee
@@ -116,18 +112,13 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
     }
 
     @Override
-    public ResponseEntity<?> deleteStudentFee(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteStudentFee(Integer id) {
         // Validate student fee exists
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
 
-        // Validate school
-        if (!studentFee.getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to ARCHIVED
@@ -139,61 +130,54 @@ public class StudentFeeServiceImpl extends AbstractCRUDService<StudentFee, Integ
     }
 
     @Override
-    public ResponseEntity<List<StudentFee>> getAllStudentFees(Integer schoolId) {
-        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStatus(schoolId, "ACTIVE");
+    public ResponseEntity<List<StudentFee>> getAllStudentFees() {
+        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStatus(TenantContext.schoolId(), "ACTIVE");
         return ResponseEntity.ok(studentFees);
     }
 
     @Override
-    public ResponseEntity<StudentFee> getStudentFeeById(Integer id, Integer schoolId) {
+    public ResponseEntity<StudentFee> getStudentFeeById(Integer id) {
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
-
-        if (!studentFee.getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(studentFee);
     }
 
     @Override
-    public ResponseEntity<List<StudentFee>> getStudentFeesByStudent(Integer studentId, Integer schoolId) {
-        // Validate student exists and belongs to school
+    public ResponseEntity<List<StudentFee>> getStudentFeesByStudent(Integer studentId) {
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
-        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStudent_IdAndStatus(schoolId, studentId, "ACTIVE");
+        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStudent_IdAndStatus(TenantContext.schoolId(), studentId, "ACTIVE");
         return ResponseEntity.ok(studentFees);
     }
 
     @Override
-    public ResponseEntity<List<StudentFee>> getStudentFeesByAcademicYear(Integer schoolId, String academicYear) {
-        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndFee_AcademicYearAndStatus(schoolId, academicYear, "ACTIVE");
+    public ResponseEntity<List<StudentFee>> getStudentFeesByAcademicYear(String academicYear) {
+        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndFee_AcademicYearAndStatus(TenantContext.schoolId(), academicYear, "ACTIVE");
         return ResponseEntity.ok(studentFees);
     }
 
     @Override
-    public BigDecimal getTotalCollectedFeesBySchoolId(Integer schoolId) {
-        return studentFeeRepository.getTotalCollectedFeesBySchoolId(schoolId);
+    public BigDecimal getTotalCollectedFeesBySchoolId() {
+        return studentFeeRepository.getTotalCollectedFeesBySchoolId(TenantContext.schoolId());
     }
 
     @Override
-    public BigDecimal getTotalOutstandingFeesBySchoolId(Integer schoolId) {
-        return studentFeeRepository.getTotalOutstandingFeesBySchoolId(schoolId);
+    public BigDecimal getTotalOutstandingFeesBySchoolId() {
+        return studentFeeRepository.getTotalOutstandingFeesBySchoolId(TenantContext.schoolId());
     }
     
     // Additional methods for service-to-service communication with multi-tenant support
     @Override
-    public StudentFee findById(Integer id, Integer schoolId) {
+    public StudentFee findById(Integer id) {
         StudentFee studentFee = studentFeeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
         
         // Validate tenant isolation
-        if (!studentFee.getStudent().getSchoolId().equals(schoolId)) {
-            throw new IllegalArgumentException("Student fee does not belong to the specified school");
+        if (!studentFee.getStudent().getSchoolId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Student fee does not belong to the specified school");
         }
         
         return studentFee;

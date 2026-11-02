@@ -5,5 +5,5 @@ import org.springframework.http.ResponseEntity;
 
 public interface CommunicationDashboardService {
 
-    ResponseEntity<CommunicationDashboardResponse> getCommunicationDashboardData(Integer schoolId);
+    ResponseEntity<CommunicationDashboardResponse> getCommunicationDashboardData();
 }

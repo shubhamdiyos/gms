@@ -34,196 +34,191 @@ import {
   AttachMoney,
   EventNote,
 } from '@mui/icons-material';
-import { useAuth } from '../../hooks/useAuth';
-import { ROLES, ROUTES } from '../../constants';
+import { useAuth, ROLE_PRECEDENCE } from '../../hooks/useAuth';
+import { ROLES, ROUTES, ROLE_LABELS } from '../../constants';
+
+// One section per portal role; every path here is a route App.jsx declares and the backend admits.
+const NAV_SECTIONS = {
+  [ROLES.SUPERADMIN]: [
+    {
+      text: 'Dashboard',
+      icon: <Dashboard />,
+      path: ROUTES.SUPERADMIN.DASHBOARD,
+    },
+    {
+      text: 'Schools',
+      icon: <School />,
+      path: ROUTES.SUPERADMIN.SCHOOLS,
+    },
+    {
+      text: 'System Reports',
+      icon: <BarChart />,
+      path: ROUTES.SUPERADMIN.REPORTS,
+    },
+    {
+      text: 'Settings',
+      icon: <Settings />,
+      path: ROUTES.SUPERADMIN.SETTINGS,
+    },
+  ],
+
+  [ROLES.ADMIN]: [
+    {
+      text: 'Dashboard',
+      icon: <Dashboard />,
+      path: ROUTES.ADMIN.DASHBOARD,
+    },
+    {
+      text: 'Students',
+      icon: <People />,
+      path: ROUTES.ADMIN.STUDENTS,
+    },
+    {
+      text: 'Employees',
+      icon: <PersonAdd />,
+      path: ROUTES.ADMIN.EMPLOYEES,
+    },
+    {
+      text: 'Classrooms',
+      icon: <Class />,
+      path: ROUTES.ADMIN.CLASSROOMS,
+    },
+    {
+      text: 'Subjects',
+      icon: <Subject />,
+      path: ROUTES.ADMIN.SUBJECTS,
+    },
+    {
+      text: 'Academic Years',
+      icon: <CalendarToday />,
+      path: ROUTES.ADMIN.ACADEMIC_YEARS,
+    },
+    {
+      text: 'Fees',
+      icon: <Payment />,
+      path: ROUTES.ADMIN.FEES,
+    },
+    {
+      text: 'Exams',
+      icon: <Assignment />,
+      path: ROUTES.ADMIN.EXAMS,
+    },
+    {
+      text: 'Announcements',
+      icon: <Campaign />,
+      path: ROUTES.ADMIN.ANNOUNCEMENTS,
+    },
+  ],
+
+  [ROLES.ACCOUNTANT]: [
+    {
+      text: 'Fees',
+      icon: <Payment />,
+      path: ROUTES.ADMIN.FEES,
+    },
+  ],
+
+  [ROLES.TEACHER]: [
+    {
+      text: 'Dashboard',
+      icon: <Dashboard />,
+      path: ROUTES.TEACHER.DASHBOARD,
+    },
+    {
+      text: 'My Classes',
+      icon: <Groups />,
+      path: ROUTES.TEACHER.CLASSES,
+    },
+    {
+      text: 'Attendance',
+      icon: <EventNote />,
+      path: ROUTES.TEACHER.ATTENDANCE,
+    },
+    {
+      text: 'Grades',
+      icon: <Grade />,
+      path: ROUTES.TEACHER.GRADES,
+    },
+    {
+      text: 'Students',
+      icon: <People />,
+      path: ROUTES.TEACHER.STUDENTS,
+    },
+    {
+      text: 'Schedule',
+      icon: <Schedule />,
+      path: ROUTES.TEACHER.SCHEDULE,
+    },
+  ],
+
+  [ROLES.STUDENT]: [
+    {
+      text: 'Dashboard',
+      icon: <Dashboard />,
+      path: ROUTES.STUDENT.DASHBOARD,
+    },
+    {
+      text: 'Profile',
+      icon: <Person />,
+      path: ROUTES.STUDENT.PROFILE,
+    },
+    {
+      text: 'Attendance',
+      icon: <EventNote />,
+      path: ROUTES.STUDENT.ATTENDANCE,
+    },
+    {
+      text: 'Results',
+      icon: <Assessment />,
+      path: ROUTES.STUDENT.RESULTS,
+    },
+    {
+      text: 'Fees',
+      icon: <AttachMoney />,
+      path: ROUTES.STUDENT.FEES,
+    },
+    {
+      text: 'Timetable',
+      icon: <Schedule />,
+      path: ROUTES.STUDENT.TIMETABLE,
+    },
+  ],
+
+  // Attendance, results and fees for a child are tabs of ParentChildrenPage, not separate routes.
+  [ROLES.PARENT]: [
+    {
+      text: 'Dashboard',
+      icon: <Dashboard />,
+      path: ROUTES.PARENT.DASHBOARD,
+    },
+    {
+      text: 'Children',
+      icon: <Groups />,
+      path: ROUTES.PARENT.CHILDREN,
+    },
+  ],
+};
 
 const Sidebar = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user, getUserRole } = useAuth();
+  const { user, getUserRole, hasRole } = useAuth();
   const userRole = getUserRole();
 
   // Navigation items based on user role
   const getNavigationItems = () => {
-    switch (userRole) {
-      case ROLES.SUPERADMIN:
-        return [
-          {
-            text: 'Dashboard',
-            icon: <Dashboard />,
-            path: ROUTES.SUPERADMIN.DASHBOARD,
-          },
-          {
-            text: 'Schools',
-            icon: <School />,
-            path: ROUTES.SUPERADMIN.SCHOOLS,
-          },
-          {
-            text: 'System Reports',
-            icon: <BarChart />,
-            path: ROUTES.SUPERADMIN.REPORTS,
-          },
-          {
-            text: 'Settings',
-            icon: <Settings />,
-            path: ROUTES.SUPERADMIN.SETTINGS,
-          },
-        ];
+    const items = [...(NAV_SECTIONS[userRole] || [])];
 
-      case ROLES.ADMIN:
-        return [
-          {
-            text: 'Dashboard',
-            icon: <Dashboard />,
-            path: ROUTES.ADMIN.DASHBOARD,
-          },
-          {
-            text: 'Students',
-            icon: <People />,
-            path: ROUTES.ADMIN.STUDENTS,
-          },
-          {
-            text: 'Employees',
-            icon: <PersonAdd />,
-            path: ROUTES.ADMIN.EMPLOYEES,
-          },
-          {
-            text: 'Classrooms',
-            icon: <Class />,
-            path: ROUTES.ADMIN.CLASSROOMS,
-          },
-          {
-            text: 'Subjects',
-            icon: <Subject />,
-            path: ROUTES.ADMIN.SUBJECTS,
-          },
-          {
-            text: 'Academic Years',
-            icon: <CalendarToday />,
-            path: ROUTES.ADMIN.ACADEMIC_YEARS,
-          },
-          {
-            text: 'Fees',
-            icon: <Payment />,
-            path: ROUTES.ADMIN.FEES,
-          },
-          {
-            text: 'Exams',
-            icon: <Assignment />,
-            path: ROUTES.ADMIN.EXAMS,
-          },
-          {
-            text: 'Reports',
-            icon: <Assessment />,
-            path: ROUTES.ADMIN.REPORTS,
-          },
-          {
-            text: 'Announcements',
-            icon: <Campaign />,
-            path: ROUTES.ADMIN.ANNOUNCEMENTS,
-          },
-        ];
-
-      case ROLES.TEACHER:
-        return [
-          {
-            text: 'Dashboard',
-            icon: <Dashboard />,
-            path: ROUTES.TEACHER.DASHBOARD,
-          },
-          {
-            text: 'My Classes',
-            icon: <Groups />,
-            path: ROUTES.TEACHER.CLASSES,
-          },
-          {
-            text: 'Attendance',
-            icon: <EventNote />,
-            path: ROUTES.TEACHER.ATTENDANCE,
-          },
-          {
-            text: 'Grades',
-            icon: <Grade />,
-            path: ROUTES.TEACHER.GRADES,
-          },
-          {
-            text: 'Students',
-            icon: <People />,
-            path: ROUTES.TEACHER.STUDENTS,
-          },
-          {
-            text: 'Schedule',
-            icon: <Schedule />,
-            path: '/teacher/schedule',
-          },
-        ];
-
-      case ROLES.STUDENT:
-        return [
-          {
-            text: 'Dashboard',
-            icon: <Dashboard />,
-            path: ROUTES.STUDENT.DASHBOARD,
-          },
-          {
-            text: 'Profile',
-            icon: <Person />,
-            path: ROUTES.STUDENT.PROFILE,
-          },
-          {
-            text: 'Attendance',
-            icon: <EventNote />,
-            path: ROUTES.STUDENT.ATTENDANCE,
-          },
-          {
-            text: 'Results',
-            icon: <Assessment />,
-            path: ROUTES.STUDENT.RESULTS,
-          },
-          {
-            text: 'Fees',
-            icon: <AttachMoney />,
-            path: ROUTES.STUDENT.FEES,
-          },
-          {
-            text: 'Timetable',
-            icon: <Schedule />,
-            path: ROUTES.STUDENT.TIMETABLE,
-          },
-        ];
-
-      case ROLES.PARENT:
-        return [
-          {
-            text: 'Dashboard',
-            icon: <Dashboard />,
-            path: ROUTES.PARENT.DASHBOARD,
-          },
-          {
-            text: 'Children',
-            icon: <Groups />,
-            path: ROUTES.PARENT.CHILDREN,
-          },
-          {
-            text: 'Attendance',
-            icon: <EventNote />,
-            path: ROUTES.PARENT.ATTENDANCE,
-          },
-          {
-            text: 'Results',
-            icon: <Assessment />,
-            path: ROUTES.PARENT.RESULTS,
-          },
-          {
-            text: 'Fees',
-            icon: <AttachMoney />,
-            path: ROUTES.PARENT.FEES,
-          },
-        ];
-
-      default:
-        return [];
+    // ACCOUNTANT outranks the academic portals, so a dual-role account keeps the sections below it.
+    if (userRole === ROLES.ACCOUNTANT) {
+      ROLE_PRECEDENCE.slice(ROLE_PRECEDENCE.indexOf(ROLES.ACCOUNTANT) + 1)
+        .filter((role) => hasRole(role))
+        .forEach((role) => items.push(...(NAV_SECTIONS[role] || [])));
     }
+
+    return items.filter(
+      (item, index) => items.findIndex((other) => other.path === item.path) === index
+    );
   };
 
   const navigationItems = getNavigationItems();
@@ -240,6 +235,8 @@ const Sidebar = () => {
         return '#1976d2';
       case ROLES.TEACHER:
         return '#388e3c';
+      case ROLES.ACCOUNTANT:
+        return '#00796b';
       case ROLES.STUDENT:
         return '#f57c00';
       case ROLES.PARENT:
@@ -263,7 +260,7 @@ const Sidebar = () => {
             GMS Portal
           </Typography>
           <Chip
-            label={userRole}
+            label={ROLE_LABELS[userRole] || userRole}
             size="small"
             sx={{
               mt: 1,
@@ -296,7 +293,7 @@ const Sidebar = () => {
           const isActive = location.pathname === item.path;
           
           return (
-            <ListItem key={item.text} disablePadding>
+            <ListItem key={item.path} disablePadding>
               <ListItemButton
                 onClick={() => handleNavigation(item.path)}
                 sx={{

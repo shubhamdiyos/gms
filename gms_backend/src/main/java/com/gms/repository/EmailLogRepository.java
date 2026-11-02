@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
-public interface EmailLogRepository extends JpaRepository<EmailLog, Integer> {
+public interface EmailLogRepository extends TenantScopedRepository<EmailLog> {
 
     List<EmailLog> findBySchoolIdAndSentAtBetweenOrderBySentAtDesc(Integer schoolId, LocalDateTime startDate, LocalDateTime endDate);
 
@@ -19,8 +19,6 @@ public interface EmailLogRepository extends JpaRepository<EmailLog, Integer> {
     List<EmailLog> findBySchoolIdAndToEmailOrderBySentAtDesc(Integer schoolId, String toEmail);
 
     List<EmailLog> findBySchoolIdAndRelatedEntityTypeAndRelatedEntityIdOrderBySentAtDesc(Integer schoolId, String entityType, Integer entityId);
-
-    List<EmailLog> findByToEmailAndDeliveryStatusOrderBySentAtDesc(String toEmail, String deliveryStatus);
 
     @Query("SELECT e FROM EmailLog e WHERE e.school.id = :schoolId AND e.sentAt >= :startDate AND e.sentAt <= :endDate AND e.deliveryStatus = 'DELIVERED'")
     List<EmailLog> findDeliveredEmailsByDateRange(@Param("schoolId") Integer schoolId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);

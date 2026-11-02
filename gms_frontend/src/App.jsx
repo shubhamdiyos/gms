@@ -6,11 +6,12 @@ import { ToastContainer } from 'react-toastify';
 import 'react-toastify/dist/ReactToastify.css';
 
 import store from './store/store';
-import { useAuth } from './hooks/useAuth';
+import { useAuth, getDashboardRoute } from './hooks/useAuth';
 import { ROUTES, ROLES } from './constants';
 
 // Components
 import ProtectedRoute from './components/common/ProtectedRoute';
+import Unauthorized from './components/common/Unauthorized';
 import Login from './features/auth/Login';
 import DashboardLayout from './components/layout/DashboardLayout';
 
@@ -112,21 +113,8 @@ const AppRouter = () => {
   // Redirect authenticated users to their dashboard
   const getDefaultRoute = () => {
     if (!isAuthenticated || forceLogin) return ROUTES.LOGIN;
-    
-    switch (userRole) {
-      case ROLES.SUPERADMIN:
-        return ROUTES.SUPERADMIN.DASHBOARD;
-      case ROLES.ADMIN:
-        return ROUTES.ADMIN.DASHBOARD;
-      case ROLES.TEACHER:
-        return ROUTES.TEACHER.DASHBOARD;
-      case ROLES.STUDENT:
-        return ROUTES.STUDENT.DASHBOARD;
-      case ROLES.PARENT:
-        return ROUTES.PARENT.DASHBOARD;
-      default:
-        return ROUTES.LOGIN;
-    }
+
+    return getDashboardRoute(userRole) || ROUTES.LOGIN;
   };
 
   return (
@@ -238,7 +226,7 @@ const AppRouter = () => {
         <Route
           path="admin/fees"
           element={
-            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN, ROLES.ACCOUNTANT]}>
               <FeesPage />
             </ProtectedRoute>
           }
@@ -377,13 +365,14 @@ const AppRouter = () => {
             </ProtectedRoute>
           }
         />
+
+        {/* ProtectedRoute's deny path lands here; it is the layout's own fallback for an unknown path. */}
+        <Route path="unauthorized" element={<Unauthorized />} />
+        <Route path="*" element={<Navigate to={getDefaultRoute()} replace />} />
       </Route>
 
       {/* Default redirect */}
       <Route path="/" element={<Navigate to={getDefaultRoute()} replace />} />
-      
-      {/* 404 and other routes */}
-      <Route path="*" element={<Navigate to={getDefaultRoute()} replace />} />
     </Routes>
   );
 };

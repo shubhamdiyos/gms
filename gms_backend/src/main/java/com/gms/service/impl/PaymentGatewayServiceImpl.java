@@ -8,7 +8,7 @@ import com.gms.model.response.PaymentGatewayResponse;
 import com.gms.repository.PaymentGatewayRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.PaymentGatewayService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +17,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGateway, Integer> implements PaymentGatewayService {
+public class PaymentGatewayServiceImpl implements PaymentGatewayService {
 
     private final PaymentGatewayRepository paymentGatewayRepository;
     private final SchoolRepository schoolRepository;
@@ -26,20 +26,19 @@ public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGatewa
     public PaymentGatewayServiceImpl(PaymentGatewayRepository paymentGatewayRepository,
                                  SchoolRepository schoolRepository,
                                  UserRepository userRepository) {
-        super(paymentGatewayRepository);
         this.paymentGatewayRepository = paymentGatewayRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<PaymentGatewayResponse> createPaymentGateway(PaymentGatewayRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<PaymentGatewayResponse> createPaymentGateway(PaymentGatewayRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create payment gateway
@@ -62,18 +61,13 @@ public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGatewa
     }
 
     @Override
-    public ResponseEntity<PaymentGatewayResponse> updatePaymentGateway(Integer id, PaymentGatewayRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<PaymentGatewayResponse> updatePaymentGateway(Integer id, PaymentGatewayRequest request) {
         // Validate payment gateway exists
         PaymentGateway paymentGateway = paymentGatewayRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Payment gateway not found"));
 
-        // Validate school
-        if (!paymentGateway.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update payment gateway
@@ -93,18 +87,13 @@ public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGatewa
     }
 
     @Override
-    public ResponseEntity<?> deletePaymentGateway(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deletePaymentGateway(Integer id) {
         // Validate payment gateway exists
         PaymentGateway paymentGateway = paymentGatewayRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Payment gateway not found"));
 
-        // Validate school
-        if (!paymentGateway.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting active to false
@@ -116,19 +105,15 @@ public class PaymentGatewayServiceImpl extends AbstractCRUDService<PaymentGatewa
     }
 
     @Override
-    public ResponseEntity<List<PaymentGateway>> getAllPaymentGateways(Integer schoolId) {
-        List<PaymentGateway> paymentGateways = paymentGatewayRepository.findBySchoolIdAndIsActive(schoolId, true);
+    public ResponseEntity<List<PaymentGateway>> getAllPaymentGateways() {
+        List<PaymentGateway> paymentGateways = paymentGatewayRepository.findBySchoolIdAndIsActive(TenantContext.schoolId(), true);
         return ResponseEntity.ok(paymentGateways);
     }
 
     @Override
-    public ResponseEntity<PaymentGateway> getPaymentGatewayById(Integer id, Integer schoolId) {
+    public ResponseEntity<PaymentGateway> getPaymentGatewayById(Integer id) {
         PaymentGateway paymentGateway = paymentGatewayRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Payment gateway not found"));
-
-        if (!paymentGateway.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(paymentGateway);
     }

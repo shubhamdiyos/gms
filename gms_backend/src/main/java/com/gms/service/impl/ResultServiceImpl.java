@@ -10,11 +10,12 @@ import com.gms.repository.ResultRepository;
 import com.gms.repository.StudentExamRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.ResultService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -22,7 +23,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> implements ResultService {
+public class ResultServiceImpl implements ResultService {
 
     private final ResultRepository resultRepository;
     private final StudentExamRepository studentExamRepository;
@@ -33,17 +34,17 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
                            StudentExamRepository studentExamRepository,
                            SchoolRepository schoolRepository,
                            UserRepository userRepository) {
-        super(resultRepository);
         this.resultRepository = resultRepository;
         this.studentExamRepository = studentExamRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
+    @Transactional
     @Override
-    public ResponseEntity<ResultResponse> recordResult(ResultRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<ResultResponse> recordResult(ResultRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate student exam exists
@@ -51,11 +52,11 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Check if result already exists
-        if (resultRepository.findByStudentExamId(request.getStudentExamId()).isPresent()) {
+        if (resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Id(TenantContext.schoolId(), request.getStudentExamId()).isPresent()) {
             throw new IllegalArgumentException("Result already exists for this student exam");
         }
 
@@ -69,6 +70,7 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
 
         // Create result
         Result result = new Result();
+        result.setSchool(school);
         result.setStudentExam(studentExam);
         result.setObtainedMarks(request.getObtainedMarks());
         result.setGrade(request.getGrade());
@@ -84,18 +86,13 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
     }
 
     @Override
-    public ResponseEntity<ResultResponse> updateResult(Integer id, ResultRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<ResultResponse> updateResult(Integer id, ResultRequest request) {
         // Validate result exists
         Result result = resultRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Result not found"));
 
-        // Validate school
-        if (!result.getStudentExam().getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Calculate percentage
@@ -119,18 +116,13 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
     }
 
     @Override
-    public ResponseEntity<?> deleteResult(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteResult(Integer id) {
         // Validate result exists
         Result result = resultRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Result not found"));
 
-        // Validate school
-        if (!result.getStudentExam().getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete
@@ -142,29 +134,24 @@ public class ResultServiceImpl extends AbstractCRUDService<Result, Integer> impl
     }
 
     @Override
-    public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId, Integer schoolId) {
+    public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId) {
         // Validate student exam exists
         StudentExam studentExam = studentExamRepository.findById(studentExamId)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
 
-        // Validate school
-        if (!studentExam.getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // There should be at most one Result per StudentExam; repository returns Optional
-        Optional<Result> resultOpt = resultRepository.findByStudentExamId(studentExamId);
+        Optional<Result> resultOpt = resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Id(TenantContext.schoolId(), studentExamId);
         List<Result> results = resultOpt.map(List::of).orElseGet(List::of);
         return ResponseEntity.ok(results);
     }
 
     @Override
-    public ResponseEntity<List<Result>> getResultsForStudent(Integer studentId, Integer schoolId) {
+    public ResponseEntity<List<Result>> getResultsForStudent(Integer studentId) {
         // Validate student exists and belongs to school
         // In a complete implementation, we would validate student and school
 
         // Get all results for this student across all exams
-        List<Result> results = resultRepository.findByStudentExam_Student_Id(studentId);
+        List<Result> results = resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Student_Id(TenantContext.schoolId(), studentId);
         return ResponseEntity.ok(results);
     }
 

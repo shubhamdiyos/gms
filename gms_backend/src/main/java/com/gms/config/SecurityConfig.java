@@ -79,6 +79,17 @@ public class SecurityConfig {
         API + "/notifications/**", API + "/school-calendar/**", API + "/parent-students/**"
     };
 
+    /**
+     * Dashboard aggregates. The URL layer admits the union of what the handlers mention — an
+     * {@code ADMIN} and a {@code SUPERADMIN} may both ask about their own school, and the
+     * cross-tenant route narrows to {@code SUPERADMIN} on its own {@code @PreAuthorize}. With
+     * {@code anyRequest().denyAll()} below, a route group nobody names here is a route that answers
+     * 403 to everybody, however correct its method guard is.
+     */
+    private static final String[] DASHBOARD = {
+        API + "/dashboard/**"
+    };
+
     private static final String[] SELF_SERVICE = {
         API + "/auth/change-password",
         API + "/users/me", API + "/users/me/**"
@@ -120,6 +131,11 @@ public class SecurityConfig {
                 .requestMatchers(API + "/parents/profile", API + "/parents/notifications",
                         API + "/parents/children/**").hasAuthority("PARENT")
                 .requestMatchers(API + "/teachers/**").hasAuthority("TEACHER")
+                // The student's own timetable: ACADEMIC_OPERATIONS admits ADMIN/SUPERADMIN/TEACHER only,
+                // so with first-match-wins the /timetables/** rule would 403 a STUDENT whose handler
+                // explicitly grants it. It is declared here rather than widening that group, because
+                // /timetables/classroom/{id} takes a classroom id and belongs to an administrator.
+                .requestMatchers(API + "/timetables/student/me").hasAuthority("STUDENT")
 
                 // ── Administrative perimeter ──
                 .requestMatchers(PLATFORM_MANAGEMENT).hasAnyAuthority("ADMIN", "SUPERADMIN")
@@ -128,6 +144,7 @@ public class SecurityConfig {
                 .requestMatchers(FINANCIAL).hasAnyAuthority("ADMIN", "SUPERADMIN", "ACCOUNTANT", "PARENT")
                 .requestMatchers(SHARED_READS).hasAnyAuthority(
                         "ADMIN", "SUPERADMIN", "TEACHER", "STUDENT", "PARENT")
+                .requestMatchers(DASHBOARD).hasAnyAuthority("ADMIN", "SUPERADMIN")
 
                 // ── Provisioning endpoints that live under /auth but are not login ──
                 .requestMatchers(API + "/auth/self-register").hasAnyAuthority("ADMIN", "SUPERADMIN")

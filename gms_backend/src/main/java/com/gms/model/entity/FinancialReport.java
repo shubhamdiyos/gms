@@ -12,7 +12,7 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "financial_reports")
-public class FinancialReport extends BaseAuditEntity {
+public class FinancialReport extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

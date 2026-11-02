@@ -1,5 +1,7 @@
 package com.gms.service.impl;
 
+import com.gms.config.TenantContextAuditorAware;
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Designation;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
@@ -11,10 +13,9 @@ import com.gms.repository.DesignationRepository;
 import com.gms.repository.EmployeeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.EmailService;
 import com.gms.service.SchoolService;
-import com.gms.util.SecurityUtil;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.slf4j.Logger;
@@ -32,7 +33,7 @@ import java.util.Optional;
 import java.util.Collections;
 
 @Service
-public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> implements SchoolService {
+public class SchoolServiceImpl implements SchoolService {
     private static final Logger log = LoggerFactory.getLogger(SchoolServiceImpl.class);
 
     private final SchoolRepository schoolRepository;
@@ -48,7 +49,6 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
                              EmployeeRepository employeeRepository,
                              PasswordEncoder passwordEncoder,
                              EmailService emailService) {
-        super(schoolRepository);
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
         this.designationRepository = designationRepository;
@@ -59,8 +59,8 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
 
     @Override
     @Transactional
-    public ResponseEntity<SchoolResponse> create(SchoolRequest request, Integer empId, Integer schoolId) {
-        if (empId == null) {
+    public ResponseEntity<SchoolResponse> create(SchoolRequest request) {
+        if (TenantContext.employeeId() == null) {
             return ResponseEntity.badRequest().build();
         }
         
@@ -72,7 +72,17 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
             return ResponseEntity.badRequest().build();
         }
 
-        School school = createSchoolFromRequest(request, new School(), empId, schoolId);
+        School school = createSchoolFromRequest(request, new School());
+        // The auditor is the verified caller, never a value off the request: `schools`, `users` and
+        // `employees` each map their own createdBy/updatedBy instead of extending BaseAuditEntity
+        // (DB-05's second convention), so the entity listener cannot reach them and this is one of the
+        // two places their rows are stamped. Identity resolution itself is not duplicated: it is the
+        // same TenantContextAuditorAware the listener calls, behind the same one rule.
+        User auditor = TenantContextAuditorAware.currentAuditor(userRepository).orElse(null);
+        if (auditor != null) {
+            school.setCreatedBy(auditor);
+            school.setUpdatedBy(auditor);
+        }
         School saved = schoolRepository.save(school);
         
         // Seed Designations (minimal example)
@@ -97,10 +107,16 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
         admin.setRequirePasswordChange(true);
         // Use mutable set for JPA-managed @ElementCollection to avoid UnsupportedOperationException
         admin.setRoles(new HashSet<>(Set.of(RoleEnum.ADMIN.getCode())));
+        if (auditor != null) {
+            // The provisioned administrator did not create itself: the caller who ran the provisioning
+            // did, and that is the row the audit trail has to name.
+            admin.setCreatedBy(auditor);
+            admin.setUpdatedBy(auditor);
+        }
         userRepository.save(admin);
         log.info("[SetupSchool] admin user saved id={} username={}", admin.getId(), admin.getUsername());
 
-        // Create and link Employee for Admin so empId is available in JWT
+        // Create and link Employee for Admin so TenantContext.employeeId() is available in JWT
         log.info("[SetupSchool] creating admin employee");
         com.gms.model.entity.Employee emp = new com.gms.model.entity.Employee();
         emp.setSchool(saved);
@@ -112,6 +128,10 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
         emp.setDesignation("SCHOOL_ADMIN");
         emp.setTeaching(false);
         emp.setEnabled(true);
+        if (auditor != null) {
+            emp.setCreatedBy(auditor);
+            emp.setUpdatedBy(auditor);
+        }
         // Persist employee and link to admin user
         com.gms.model.entity.Employee savedEmp = employeeRepository.save(emp);
         admin.setEmployee(savedEmp);
@@ -134,8 +154,8 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
     }
 
     @Override
-    public School createSchoolFromRequest(SchoolRequest request, School school, Integer empId, Integer schoolId) {
-        if (empId == null) {
+    public School createSchoolFromRequest(SchoolRequest request, School school) {
+        if (TenantContext.employeeId() == null) {
             throw new IllegalArgumentException("Employee ID cannot be null");
         }
 
@@ -165,34 +185,41 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
 
     @Override
     @Transactional(readOnly = true)
-    public List<School> findBySchool(Integer schoolId) {
+    public List<School> findBySchool() {
         // Fix: Only return the school that belongs to the requesting user's school
         // Using repository method for better performance
-        return schoolRepository.findByIdAndStatusOne(schoolId)
+        return schoolRepository.findByIdAndStatusOne(TenantContext.schoolId())
                 .map(Collections::singletonList)
                 .orElse(Collections.emptyList());
     }
 
     @Override
     @Transactional(readOnly = true)
-    public School getById(Integer id, Integer schoolId) {
-        // Fix: Validate that the requested school ID matches the user's school ID
-        if (!id.equals(schoolId)) {
-            throw new IllegalArgumentException("Access denied: You can only access your own school");
+    public List<School> findAll() {
+        return schoolRepository.findAll();
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public School getById(Integer id) {
+        // A school administrator may read only its own school; the platform owner may read any,
+        // because the same caller can already list every school and update or toggle any of them.
+        if (!TenantContext.isPlatformOwner() && !id.equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Access denied: You can only access your own school");
         }
-        
+
         School school = schoolRepository.findByIdAndStatusOne(id)
                 .orElseThrow(() -> new EntityNotFoundException("School not found or not active"));
-        
+
         if (!school.isEnabled()) {
             throw new IllegalArgumentException("School is not enabled");
         }
-        
+
         return school;
     }
 
     @Override
-    public ResponseEntity<SchoolResponse> update(SchoolRequest request, Integer updaterEmpId, Integer schoolId) {
+    public ResponseEntity<SchoolResponse> update(SchoolRequest request) {
         // Validate required fields
         if (request.getId() == null) {
             return ResponseEntity.badRequest().build();
@@ -204,9 +231,8 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
         
         // Check if user has permission to update this school
         // SuperAdmin can update any school, others can only update their own
-        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
-        if (roles != null && !roles.contains("SUPERADMIN")) {
-            if (!school.getId().equals(schoolId)) {
+        if (!TenantContext.isPlatformOwner()) {
+            if (!school.getId().equals(TenantContext.schoolId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
         }
@@ -221,18 +247,21 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
         if (request.getEstablishedYear() != null) school.setEstablishedYear(request.getEstablishedYear());
         if (request.getBoardAffiliation() != null) school.setBoardAffiliation(request.getBoardAffiliation());
 
+        // Only the modifier is stamped here. createdBy is loaded with the row and left alone, which is
+        // what makes the creator of a school answerable years later rather than whoever renamed it last.
+        TenantContextAuditorAware.currentAuditor(userRepository).ifPresent(school::setUpdatedBy);
+
         School saved = schoolRepository.save(school);
         SchoolResponse response = new SchoolResponse(saved.getId(), saved.getSchoolId(), saved.getSchoolName(), saved.getSchoolCode(), saved.getStatus(), saved.isEnabled());
         return ResponseEntity.ok(response);
     }
 
     @Override
-    public ResponseEntity<?> toggleSchool(Integer id, Boolean isActive, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> toggleSchool(Integer id, Boolean isActive) {
         // Check if user has permission to toggle this school
         // SuperAdmin can toggle any school, others can only toggle their own
-        java.util.Set<String> roles = SecurityUtil.getRolesFromToken();
-        if (roles != null && !roles.contains("SUPERADMIN")) {
-            if (!id.equals(schoolId)) {
+        if (!TenantContext.isPlatformOwner()) {
+            if (!id.equals(TenantContext.schoolId())) {
                 return ResponseEntity.status(HttpStatus.FORBIDDEN).build();
             }
         }
@@ -243,6 +272,7 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
 
         school.setEnabled(isActive);
         school.setStatus(isActive ? "1" : "0");
+        TenantContextAuditorAware.currentAuditor(userRepository).ifPresent(school::setUpdatedBy);
 
         School saved = schoolRepository.save(school);
         SchoolResponse response = new SchoolResponse(saved.getId(), saved.getSchoolId(), saved.getSchoolName(), saved.getSchoolCode(), saved.getStatus(), saved.isEnabled());
@@ -296,6 +326,6 @@ public class SchoolServiceImpl extends AbstractCRUDService<School, Integer> impl
     // Simple create method for bootstrap and other special cases
     @Override
     public School create(School school) {
-        return repository.save(school);
+        return schoolRepository.save(school);
     }
 }

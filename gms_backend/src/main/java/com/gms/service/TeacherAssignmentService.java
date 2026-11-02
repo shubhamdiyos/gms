@@ -8,19 +8,19 @@ import java.util.List;
 
 public interface TeacherAssignmentService {
 
-    TeacherAssignmentResponse createAssignment(TeacherAssignmentRequest request, Integer schoolId, Integer empId);
+    TeacherAssignmentResponse createAssignment(TeacherAssignmentRequest request);
     
-    List<TeacherAssignmentResponse> getAllAssignmentsBySchool(Integer schoolId);
+    List<TeacherAssignmentResponse> getAllAssignmentsBySchool();
     
-    List<TeacherAssignmentResponse> getAssignmentsByTeacher(Integer teacherId, Integer schoolId);
+    List<TeacherAssignmentResponse> getAssignmentsByTeacher(Integer teacherId);
     
-    List<TeacherAssignmentResponse> getAssignmentsByClassroom(Integer classroomId, Integer schoolId);
+    List<TeacherAssignmentResponse> getAssignmentsByClassroom(Integer classroomId);
     
-    List<TeacherAssignmentResponse> getAssignmentsByAcademicYear(String academicYear, Integer schoolId);
+    List<TeacherAssignmentResponse> getAssignmentsByAcademicYear(String academicYear);
     
-    TeacherAssignmentResponse updateAssignment(Integer id, TeacherAssignmentRequest request, Integer schoolId, Integer empId);
+    TeacherAssignmentResponse updateAssignment(Integer id, TeacherAssignmentRequest request);
     
-    void deleteAssignment(Integer id, Integer schoolId);
+    void deleteAssignment(Integer id);
     
     List<TeacherAssignmentResponse> getAssignmentsByUsername(String username);
 }

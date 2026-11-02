@@ -9,15 +9,15 @@ import java.util.List;
 
 public interface ExamService {
 
-    ResponseEntity<ExamResponse> createExam(ExamRequest examRequest, Integer schoolId, Integer empId);
+    ResponseEntity<ExamResponse> createExam(ExamRequest examRequest);
 
-    ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest, Integer schoolId, Integer empId);
+    ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest);
 
-    ResponseEntity<?> deleteExam(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteExam(Integer id);
 
-    ResponseEntity<List<Exam>> getAllExams(Integer schoolId);
+    ResponseEntity<List<Exam>> getAllExams();
 
-    ResponseEntity<Exam> getExamById(Integer id, Integer schoolId);
+    ResponseEntity<Exam> getExamById(Integer id);
 
-    ResponseEntity<List<Exam>> getExamsByAcademicYear(Integer schoolId, String academicYear);
+    ResponseEntity<List<Exam>> getExamsByAcademicYear(String academicYear);
 }

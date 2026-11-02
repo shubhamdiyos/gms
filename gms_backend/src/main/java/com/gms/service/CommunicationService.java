@@ -5,17 +5,17 @@ import org.springframework.http.ResponseEntity;
 
 public interface CommunicationService {
 
-    ResponseEntity<?> sendNotification(NotificationRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<?> sendNotification(NotificationRequest request);
 
-    ResponseEntity<?> sendEmail(String toEmail, String subject, String content, Integer schoolId);
+    ResponseEntity<?> sendEmail(String toEmail, String subject, String content);
 
-    ResponseEntity<?> sendSms(String toPhone, String message, Integer schoolId);
+    ResponseEntity<?> sendSms(String toPhone, String message);
 
-    ResponseEntity<?> sendInAppNotification(NotificationRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<?> sendInAppNotification(NotificationRequest request);
 
-    ResponseEntity<?> sendPushNotification(NotificationRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<?> sendPushNotification(NotificationRequest request);
 
-    ResponseEntity<?> sendBulkNotifications(NotificationRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<?> sendBulkNotifications(NotificationRequest request);
 
-    ResponseEntity<?> processScheduledNotifications(Integer schoolId);
+    ResponseEntity<?> processScheduledNotifications();
 }

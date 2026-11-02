@@ -9,11 +9,11 @@ import java.util.List;
 
 public interface StudentExamService {
 
-    ResponseEntity<StudentExamResponse> registerStudentForExam(StudentExamRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<StudentExamResponse> registerStudentForExam(StudentExamRequest request);
 
-    ResponseEntity<?> deregisterStudentFromExam(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deregisterStudentFromExam(Integer id);
 
-    ResponseEntity<List<StudentExam>> getStudentsForExamSubject(Integer examSubjectId, Integer schoolId);
+    ResponseEntity<List<StudentExam>> getStudentsForExamSubject(Integer examSubjectId);
 
-    ResponseEntity<List<StudentExam>> getExamsForStudent(Integer studentId, Integer schoolId);
+    ResponseEntity<List<StudentExam>> getExamsForStudent(Integer studentId);
 }

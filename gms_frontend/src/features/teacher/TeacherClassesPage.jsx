@@ -33,7 +33,7 @@ const TeacherClassesPage = () => {
   const [selectedClass, setSelectedClass] = useState(null);
 
   const getClassStudents = (classId) => {
-    return students.filter(student => student.classroomId === classId);
+    return students.filter(student => student.classId === Number(classId));
   };
 
   return (
@@ -77,13 +77,13 @@ const TeacherClassesPage = () => {
                         <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                           <Box>
                             <Typography variant="h6">
-                              {classItem.className || `Class ${classItem.id}`}
+                              {classItem.name || `Class ${classItem.id}`}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              Section: {classItem.section || 'A'}
+                              Grade: {classItem.grade || 'N/A'}
                             </Typography>
                             <Typography variant="body2" color="text.secondary">
-                              Room: {classItem.roomNumber || 'N/A'}
+                              Section: {classItem.section || 'N/A'}
                             </Typography>
                           </Box>
                           <Box sx={{ textAlign: 'center' }}>
@@ -95,17 +95,12 @@ const TeacherClassesPage = () => {
                             </Typography>
                           </Box>
                         </Box>
-                        
+
                         <Box sx={{ mt: 2, display: 'flex', gap: 1 }}>
-                          <Chip 
-                            label="Active" 
-                            color="success" 
-                            size="small" 
-                          />
-                          <Chip 
-                            label={`Capacity: ${classItem.capacity || 30}`}
-                            variant="outlined" 
-                            size="small" 
+                          <Chip
+                            label={`ID: ${classItem.id}`}
+                            variant="outlined"
+                            size="small"
                           />
                         </Box>
                       </CardContent>
@@ -122,9 +117,9 @@ const TeacherClassesPage = () => {
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom sx={{ display: 'flex', alignItems: 'center' }}>
               <Person sx={{ mr: 1 }} />
-              {selectedClass ? `${selectedClass.className} Students` : 'Select a Class'}
+              {selectedClass ? `${selectedClass.name} Students` : 'Select a Class'}
             </Typography>
-            
+
             {selectedClass ? (
               <Box>
                 {/* Class Info */}
@@ -132,19 +127,19 @@ const TeacherClassesPage = () => {
                   <Grid container spacing={2}>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="text.secondary">Class</Typography>
-                      <Typography variant="body1">{selectedClass.className}</Typography>
+                      <Typography variant="body1">{selectedClass.name}</Typography>
+                    </Grid>
+                    <Grid item xs={6}>
+                      <Typography variant="body2" color="text.secondary">Grade</Typography>
+                      <Typography variant="body1">{selectedClass.grade}</Typography>
                     </Grid>
                     <Grid item xs={6}>
                       <Typography variant="body2" color="text.secondary">Section</Typography>
                       <Typography variant="body1">{selectedClass.section}</Typography>
                     </Grid>
                     <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">Room</Typography>
-                      <Typography variant="body1">{selectedClass.roomNumber}</Typography>
-                    </Grid>
-                    <Grid item xs={6}>
-                      <Typography variant="body2" color="text.secondary">Capacity</Typography>
-                      <Typography variant="body1">{selectedClass.capacity}</Typography>
+                      <Typography variant="body2" color="text.secondary">Students</Typography>
+                      <Typography variant="body1">{getClassStudents(selectedClass.id).length}</Typography>
                     </Grid>
                   </Grid>
                 </Box>
@@ -189,7 +184,7 @@ const TeacherClassesPage = () => {
                         </Avatar>
                       </ListItemAvatar>
                       <ListItemText
-                        primary={student.fullName || `${student.firstName} ${student.lastName}`}
+                        primary={`${student.firstName ?? ''} ${student.lastName ?? ''}`.trim()}
                         secondary={`ID: ${student.studentId || student.id} • ${student.email || 'No email'}`}
                       />
                       <Chip 

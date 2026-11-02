@@ -5,5 +5,5 @@ import org.springframework.http.ResponseEntity;
 
 public interface FinancialDashboardService {
 
-    ResponseEntity<FinancialDashboardResponse> getFinancialDashboardData(Integer schoolId);
+    ResponseEntity<FinancialDashboardResponse> getFinancialDashboardData();
 }

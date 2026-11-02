@@ -10,17 +10,17 @@ import java.util.List;
 
 public interface FeeService {
 
-    ResponseEntity<FeeResponse> createFee(FeeRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FeeResponse> createFee(FeeRequest request);
 
-    ResponseEntity<FeeResponse> updateFee(Integer id, FeeRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FeeResponse> updateFee(Integer id, FeeRequest request);
 
-    ResponseEntity<?> deleteFee(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteFee(Integer id);
 
-    ResponseEntity<List<Fee>> getAllFees(Integer schoolId);
+    ResponseEntity<List<Fee>> getAllFees();
 
-    ResponseEntity<Fee> getFeeById(Integer id, Integer schoolId);
+    ResponseEntity<Fee> getFeeById(Integer id);
 
-    ResponseEntity<List<Fee>> getFeesByAcademicYear(Integer schoolId, String academicYear);
+    ResponseEntity<List<Fee>> getFeesByAcademicYear(String academicYear);
 
-    BigDecimal getTotalFeeAmountBySchoolIdAndAcademicYear(Integer schoolId, String academicYear);
+    BigDecimal getTotalFeeAmountBySchoolIdAndAcademicYear(String academicYear);
 }

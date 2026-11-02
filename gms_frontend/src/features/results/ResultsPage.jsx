@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import {
   Box,
   Typography,
@@ -13,14 +13,18 @@ import {
   IconButton,
   Tooltip,
   Button,
+  Alert,
+  Autocomplete,
+  CircularProgress,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
-import { Add, Edit, Delete, Visibility, Grade } from '@mui/icons-material';
+import { Add, Edit, Delete } from '@mui/icons-material';
 import { useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import {
-  useGetResultsQuery,
+  useGetStudentSearchQuery,
+  useGetResultsForStudentQuery,
   useRecordResultMutation,
   useUpdateResultMutation,
   useDeleteResultMutation,
@@ -40,24 +44,33 @@ const schema = yup.object({
     .min(0, 'Obtained marks cannot be negative')
     .required('Obtained marks are required'),
   grade: yup.string().required('Grade is required'),
-  percentage: yup
-    .number()
-    .typeError('Percentage must be a number')
-    .min(0, 'Percentage cannot be negative')
-    .max(100, 'Percentage cannot exceed 100')
-    .required('Percentage is required'),
   remarks: yup.string(),
 });
 
 const ResultsPage = () => {
+  const [selectedStudentId, setSelectedStudentId] = useState('');
+  const [pickedStudent, setPickedStudent] = useState(null);
+  const [studentTerm, setStudentTerm] = useState('');
   const [open, setOpen] = useState(false);
   const [editingResult, setEditingResult] = useState(null);
+
+  // Server-side, because a school at NFR-01 volume has 50,000 pupils and a picker over all of
+  // them is not a picker. The term goes to /students/search as `query`; an empty term asks for
+  // the first page, which is what the selector shows before anyone types.
+  const {
+    data: studentPage,
+    isFetching: studentsLoading,
+    error: studentsError,
+  } = useGetStudentSearchQuery({ query: studentTerm, size: 25 });
 
   const {
     data: results = [],
     isLoading,
-    refetch,
-  } = useGetResultsQuery(undefined, { skip: true });
+    isError,
+    error: resultsError,
+  } = useGetResultsForStudentQuery(selectedStudentId, {
+    skip: !selectedStudentId,
+  });
 
   const [recordResult] = useRecordResultMutation();
   const [updateResult] = useUpdateResultMutation();
@@ -72,14 +85,25 @@ const ResultsPage = () => {
     resolver: yupResolver(schema),
   });
 
+  const studentOptions = useMemo(
+    () =>
+      (Array.isArray(studentPage?.content) ? studentPage.content : [])
+        .filter((s) => s && s.id != null)
+        .map((s) => ({
+          id: s.id,
+          label: `${s.firstName ?? ''} ${s.lastName ?? ''}`.trim() || `Student #${s.id}`,
+          admission: s.studentId ?? '',
+        })),
+    [studentPage],
+  );
+
   const handleOpen = (result = null) => {
     setEditingResult(result);
     if (result) {
       reset({
-        studentExamId: result.studentExam?.id || result.studentExamId || '',
+        studentExamId: result.studentExamId ?? '',
         obtainedMarks: result.obtainedMarks ?? '',
         grade: result.grade || '',
-        percentage: result.percentage ?? '',
         remarks: result.remarks || '',
       });
     } else {
@@ -87,7 +111,6 @@ const ResultsPage = () => {
         studentExamId: '',
         obtainedMarks: '',
         grade: '',
-        percentage: '',
         remarks: '',
       });
     }
@@ -105,7 +128,6 @@ const ResultsPage = () => {
         studentExamId: Number(data.studentExamId),
         obtainedMarks: Number(data.obtainedMarks),
         grade: data.grade,
-        percentage: data.percentage,
         remarks: data.remarks,
       };
 
@@ -118,8 +140,7 @@ const ResultsPage = () => {
       }
 
       handleClose();
-      // Note: getResults is currently reserved; for now we rely on other pages to view results.
-    } catch (error) {
+    } catch {
       toast.error('Operation failed');
     }
   };
@@ -129,34 +150,23 @@ const ResultsPage = () => {
       try {
         await deleteResult(id).unwrap();
         toast.success('Result deleted successfully');
-      } catch (error) {
+      } catch {
         toast.error('Delete failed');
       }
     }
   };
 
-  // Placeholder rows until a list endpoint is implemented; CRUD is wired already.
-  const rows = results || [];
-
   const columns = [
-    {
-      field: 'studentExamId',
-      headerName: 'Student Exam ID',
-      width: 150,
-      valueGetter: (params) => params.row.studentExamId || params.row.studentExam?.id,
-    },
-    {
-      field: 'obtainedMarks',
-      headerName: 'Marks',
-      width: 100,
-    },
+    { field: 'examName', headerName: 'Exam', minWidth: 160, flex: 1 },
+    { field: 'subjectName', headerName: 'Subject', minWidth: 140, flex: 1 },
+    { field: 'obtainedMarks', headerName: 'Marks Obtained', width: 130 },
     {
       field: 'grade',
       headerName: 'Grade',
       width: 100,
       renderCell: (params) => (
         <Chip
-          label={params.value}
+          label={params.value ?? '-'}
           color={params.value === 'A' || params.value === 'A+' ? 'success' : 'primary'}
           size="small"
         />
@@ -166,7 +176,7 @@ const ResultsPage = () => {
       field: 'percentage',
       headerName: 'Percentage',
       width: 130,
-      renderCell: (params) => `${params.value ?? 0}%`,
+      renderCell: (params) => (params.value == null ? '-' : `${params.value}%`),
     },
     {
       field: 'status',
@@ -183,15 +193,11 @@ const ResultsPage = () => {
     {
       field: 'actions',
       headerName: 'Actions',
-      width: 170,
+      width: 130,
       sortable: false,
+      disableColumnMenu: true,
       renderCell: (params) => (
         <Box>
-          <Tooltip title="View">
-            <IconButton size="small">
-              <Visibility />
-            </IconButton>
-          </Tooltip>
           <Tooltip title="Edit">
             <IconButton size="small" onClick={() => handleOpen(params.row)}>
               <Edit />
@@ -210,8 +216,7 @@ const ResultsPage = () => {
   return (
     <Box>
       {/* Header */}
-      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>
-        <Box>
+      <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', mb: 3 }}>        <Box>
           <Typography variant="h4" component="h1" gutterBottom>
             Result Management
           </Typography>
@@ -223,6 +228,7 @@ const ResultsPage = () => {
           variant="contained"
           startIcon={<Add />}
           onClick={() => handleOpen()}
+          disabled={!selectedStudentId}
           sx={{
             background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
             '&:hover': {
@@ -234,26 +240,105 @@ const ResultsPage = () => {
         </Button>
       </Box>
 
-      {/* Data Grid (placeholder until list endpoint is implemented) */}
-      <Paper sx={{ height: 400, width: '100%' }}>
-        <DataGrid
-          rows={rows}
-          columns={columns}
-          loading={isLoading}
-          pageSizeOptions={[10, 25, 50]}
-          initialState={{
-            pagination: {
-              paginationModel: { pageSize: 10 },
-            },
-          }}
-          disableRowSelectionOnClick
-          sx={{
-            '& .MuiDataGrid-cell:hover': {
-              color: 'primary.main',
-            },
-          }}
-        />
+      {/* Student selector */}
+      <Paper sx={{ p: 2, mb: 3 }}>
+        <Grid container spacing={2} alignItems="center">
+          <Grid item xs={12} md={4}>
+            <Autocomplete
+              options={studentOptions}
+              value={pickedStudent}
+              getOptionKey={(option) => option.id}
+              isOptionEqualToValue={(option, value) => option.id === value?.id}
+              onChange={(_, option) => {
+                setPickedStudent(option);
+                setSelectedStudentId(option?.id ?? '');
+              }}
+              onInputChange={(_, value, reason) => {
+                if (reason === 'input') setStudentTerm(value);
+              }}
+              loading={studentsLoading}
+              loadingText="Searching this school's pupils…"
+              noOptionsText={
+                studentTerm
+                  ? 'No pupil in this school matches that search.'
+                  : 'No students found for the current school. Add students first.'
+              }
+              blurOnSelect
+              selectOnFocus
+              handleHomeEndKeys
+              renderOption={(props, option) => (
+                <li {...props} key={option.id}>
+                  {option.label}
+                  {option.admission ? ` · ${option.admission}` : ''}
+                </li>
+              )}
+              renderInput={(params) => (
+                <TextField
+                  {...params}
+                  label="Student"
+                  placeholder="Type a name or admission number"
+                  InputProps={{
+                    ...params.InputProps,
+                    endAdornment: (
+                      <>
+                        {studentsLoading ? <CircularProgress color="inherit" size={18} /> : null}
+                        {params.InputProps.endAdornment}
+                      </>
+                    ),
+                  }}
+                />
+              )}
+            />
+          </Grid>
+          <Grid item xs={12} md={8}>
+            {studentsError && (
+              <Alert severity="error">
+                Could not load students: {studentsError.message || 'Failed to load students'}
+              </Alert>
+            )}
+            {!studentsLoading && !studentsError && studentOptions.length === 0 && (
+              <Alert severity="info">
+                No students found for the current school. Add students first.
+              </Alert>
+            )}
+          </Grid>
+        </Grid>
       </Paper>
+
+      {/* Results grid */}
+      <Paper sx={{ height: 400, width: '100%' }}>
+        {!selectedStudentId ? (
+          <Box sx={{ p: 3 }}>
+            <Typography variant="body1" color="text.secondary">
+              Select a student to view their exam results.
+            </Typography>
+          </Box>
+        ) : (
+          <DataGrid
+            rows={Array.isArray(results) ? results : []}
+            columns={columns}
+            loading={isLoading}
+            pageSizeOptions={[10, 25, 50]}
+            initialState={{
+              pagination: {
+                paginationModel: { pageSize: 10 },
+              },
+            }}
+            disableRowSelectionOnClick
+            sx={{
+              '& .MuiDataGrid-cell:hover': {
+                color: 'primary.main',
+              },
+            }}
+          />
+        )}
+      </Paper>
+
+      {isError && selectedStudentId && (
+        <Alert severity="error" sx={{ mt: 2 }}>
+          Could not load results: {resultsError?.message || 'Failed to load results'}
+        </Alert>
+      )}
 
       {/* Add/Edit Dialog */}
       <Dialog open={open} onClose={handleClose} maxWidth="sm" fullWidth>
@@ -290,16 +375,6 @@ const ResultsPage = () => {
                   helperText={errors.grade?.message}
                 />
               </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('percentage')}
-                  fullWidth
-                  label="Percentage"
-                  type="number"
-                  error={!!errors.percentage}
-                  helperText={errors.percentage?.message}
-                />
-              </Grid>
               <Grid item xs={12}>
                 <TextField
                   {...register('remarks')}
@@ -310,6 +385,12 @@ const ResultsPage = () => {
                   error={!!errors.remarks}
                   helperText={errors.remarks?.message}
                 />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="body2" color="text.secondary">
+                  Percentage is calculated by the server from the obtained marks and the
+                  subject&apos;s maximum marks.
+                </Typography>
               </Grid>
             </Grid>
           </DialogContent>

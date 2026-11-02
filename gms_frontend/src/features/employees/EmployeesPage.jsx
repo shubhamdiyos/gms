@@ -22,7 +22,6 @@ import { DataGrid } from '@mui/x-data-grid';
 import {
   Add,
   Edit,
-  Delete,
   Visibility,
   Person,
   Work,
@@ -42,11 +41,9 @@ const schema = yup.object({
   lastName: yup.string().required('Last name is required'),
   email: yup.string().email('Invalid email').required('Email is required'),
   phoneNumber: yup.string().required('Phone number is required'),
-  dateOfBirth: yup.date().required('Date of birth is required'),
-  gender: yup.string().required('Gender is required'),
   designation: yup.string().required('Designation is required'),
   department: yup.string().required('Department is required'),
-  salary: yup.number().positive('Salary must be positive').required('Salary is required'),
+  teaching: yup.boolean().required('Teaching status is required'),
 });
 
 const EmployeesPage = () => {
@@ -64,16 +61,14 @@ const EmployeesPage = () => {
     control,
     formState: { errors },
   } = useForm({
+    defaultValues: { teaching: false },
     resolver: yupResolver(schema),
   });
 
   const handleOpen = (employee = null) => {
     setEditingEmployee(employee);
     if (employee) {
-      reset({
-        ...employee,
-        dateOfBirth: employee.dateOfBirth ? new Date(employee.dateOfBirth).toISOString().split('T')[0] : '',
-      });
+      reset({ ...employee, teaching: Boolean(employee.teaching) });
     } else {
       reset();
     }
@@ -87,17 +82,26 @@ const EmployeesPage = () => {
   };
 
   const onSubmit = async (data) => {
+    const payload = {
+      firstName: data.firstName,
+      lastName: data.lastName,
+      email: data.email,
+      phoneNumber: data.phoneNumber,
+      designation: data.designation,
+      department: data.department,
+      teaching: data.teaching,
+    };
     try {
       if (editingEmployee) {
-        await updateEmployee({ id: editingEmployee.id, ...data }).unwrap();
+        await updateEmployee({ id: editingEmployee.id, ...payload }).unwrap();
         toast.success('Employee updated successfully');
       } else {
-        await createEmployee(data).unwrap();
+        await createEmployee(payload).unwrap();
         toast.success('Employee created successfully');
       }
       handleClose();
       refetch();
-    } catch (error) {
+    } catch {
       toast.error('Operation failed');
     }
   };
@@ -109,13 +113,13 @@ const EmployeesPage = () => {
       width: 120,
     },
     {
-      field: 'fullName',
+      field: 'full_name',
       headerName: 'Full Name',
       width: 200,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <Person sx={{ mr: 1, color: '#388e3c' }} />
-          {params.row.fullName || `${params.row.firstName} ${params.row.lastName}`}
+          {params.value || `${params.row.firstName} ${params.row.lastName}`}
         </Box>
       ),
     },
@@ -152,7 +156,7 @@ const EmployeesPage = () => {
       renderCell: (params) => `₹${params.value?.toLocaleString()}`,
     },
     {
-      field: 'status',
+      field: 'employeeStatus',
       headerName: 'Status',
       width: 100,
       renderCell: (params) => (
@@ -280,38 +284,6 @@ const EmployeesPage = () => {
               </Grid>
               <Grid item xs={12} md={6}>
                 <TextField
-                  {...register('dateOfBirth')}
-                  fullWidth
-                  label="Date of Birth"
-                  type="date"
-                  InputLabelProps={{ shrink: true }}
-                  error={!!errors.dateOfBirth}
-                  helperText={errors.dateOfBirth?.message}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <FormControl fullWidth error={!!errors.gender}>
-                  <InputLabel>Gender</InputLabel>
-                  <Controller
-                    name="gender"
-                    control={control}
-                    render={({ field }) => (
-                      <Select {...field} label="Gender">
-                        <MenuItem value="MALE">Male</MenuItem>
-                        <MenuItem value="FEMALE">Female</MenuItem>
-                        <MenuItem value="OTHER">Other</MenuItem>
-                      </Select>
-                    )}
-                  />
-                  {errors.gender && (
-                    <Typography variant="caption" color="error" sx={{ mt: 1, ml: 2 }}>
-                      {errors.gender?.message}
-                    </Typography>
-                  )}
-                </FormControl>
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
                   {...register('designation')}
                   fullWidth
                   label="Designation"
@@ -341,15 +313,25 @@ const EmployeesPage = () => {
                   )}
                 </FormControl>
               </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  {...register('salary')}
-                  fullWidth
-                  label="Salary"
-                  type="number"
-                  error={!!errors.salary}
-                  helperText={errors.salary?.message}
-                />
+              <Grid item xs={12} md={6}>
+                <FormControl fullWidth error={!!errors.teaching}>
+                  <InputLabel>Teaching</InputLabel>
+                  <Controller
+                    name="teaching"
+                    control={control}
+                    render={({ field }) => (
+                      <Select {...field} label="Teaching">
+                        <MenuItem value={true}>Yes</MenuItem>
+                        <MenuItem value={false}>No</MenuItem>
+                      </Select>
+                    )}
+                  />
+                  {errors.teaching && (
+                    <Typography variant="caption" color="error" sx={{ mt: 1, ml: 2 }}>
+                      {errors.teaching?.message}
+                    </Typography>
+                  )}
+                </FormControl>
               </Grid>
             </Grid>
           </DialogContent>

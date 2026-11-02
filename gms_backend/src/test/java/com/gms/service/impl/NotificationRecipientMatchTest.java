@@ -8,8 +8,11 @@ import com.gms.model.entity.Notification;
 import com.gms.repository.NotificationRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import java.time.Instant;
 import java.util.List;
+import org.junit.jupiter.api.AfterEach;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.extension.ExtendWith;
 import org.mockito.InjectMocks;
@@ -40,6 +43,16 @@ class NotificationRecipientMatchTest {
     @InjectMocks
     private NotificationServiceImpl service;
 
+    @BeforeEach
+    void becomeACallerOfThisSchool() {
+        TenantContext.set(new TenantContext.Principal("reader", 61, SCHOOL, 5, java.util.Set.of("ADMIN")));
+    }
+
+    @AfterEach
+    void clearTheTenant() {
+        TenantContext.clear();
+    }
+
     private Notification addressedTo(String recipientIds) {
         Notification notification = new Notification();
         notification.setRecipientType("INDIVIDUAL");
@@ -56,7 +69,7 @@ class NotificationRecipientMatchTest {
         when(notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(SCHOOL, "INDIVIDUAL", "PENDING"))
                 .thenReturn(List.of(addressedTo("[11]"), addressedTo("[1,7]"), addressedTo("[21]"), addressedTo("[1234]")));
 
-        List<Notification> forUserOne = body(service.getNotificationsByUserId(SCHOOL, 1));
+        List<Notification> forUserOne = body(service.getNotificationsByUserId(1));
 
         assertThat(forUserOne).hasSize(1);
         assertThat(forUserOne.get(0).getRecipientIds()).isEqualTo("[1,7]");
@@ -67,7 +80,7 @@ class NotificationRecipientMatchTest {
         when(notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(SCHOOL, "INDIVIDUAL", "PENDING"))
                 .thenReturn(List.of());
 
-        assertThat(body(service.getNotificationsByUserId(SCHOOL, 1))).isEmpty();
+        assertThat(body(service.getNotificationsByUserId(1))).isEmpty();
 
         verify(notificationRepository).findBySchoolIdAndRecipientTypeAndDeliveryStatus(SCHOOL, "INDIVIDUAL", "PENDING");
     }
@@ -81,7 +94,7 @@ class NotificationRecipientMatchTest {
         when(notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(SCHOOL, "INDIVIDUAL", "PENDING"))
                 .thenReturn(List.of(older, newer));
 
-        assertThat(body(service.getNotificationsByUserId(SCHOOL, 1)))
+        assertThat(body(service.getNotificationsByUserId(1)))
                 .extracting(Notification::getCreatedOn)
                 .containsExactly(Instant.parse("2026-06-01T00:00:00Z"), Instant.parse("2026-01-01T00:00:00Z"));
     }

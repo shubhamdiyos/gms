@@ -9,17 +9,42 @@ import org.springframework.http.ResponseEntity;
 
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 
 public interface UserService {
     UserResponse getById(Integer id);
-    Page<UserResponse> listBySchool(Integer schoolId, Pageable pageable);
-    List<User> findBySchool(Integer schoolId);
-    ResponseEntity<UserResponse> create(UserRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<UserResponse> update(UserRequest request, Integer empId, Integer schoolId);
+    Page<UserResponse> listBySchool(Pageable pageable);
+    List<User> findBySchool();
+    ResponseEntity<UserResponse> create(UserRequest request);
+    ResponseEntity<UserResponse> update(UserRequest request);
+
+    /**
+     * Deletes a user, but only if it belongs to the caller's school.
+     *
+     * <p>Replaces the inherited {@code existsById}/{@code deleteById} pair, which reached
+     * {@code repository.deleteById(id)} with no tenant predicate: any school administrator could
+     * delete any other school's account.</p>
+     *
+     * @return true when a row was deleted, false when no such user exists in that school
+     */
+    boolean deleteWithinSchool(Integer id);
     
     // Additional methods needed for service-to-service communication
     Optional<User> findByUsername(String username);
-    Optional<User> findByEmployee_Id(Integer employeeId);
+
+    /**
+     * The caller's own account, resolved from the tenant in the request context.
+     */
+    Optional<User> findByEmployee_Id();
+
+    /**
+     * Whether an employee already has an account. The employee is the subject of the question, not
+     * the caller: self-registration asks about the employee being registered. The parameter is
+     * named for what it is, because {@code employeeId} means "the caller's own employee" everywhere
+     * else in this package.
+     */
+    boolean existsByEmployee_Id(Integer subjectEmployeeId);
+
     boolean existsByEmail(String email);
     boolean existsByUsername(String username);
     User save(User user);
@@ -29,4 +54,20 @@ public interface UserService {
      * the entity's lazy associations fail JSON writing (500) and its shape is not a contract.
      */
     UserResponse toResponse(User user);
+
+    /**
+     * The one role-code validator in the application, shared by every path that writes
+     * {@code users}/{@code user_roles}.
+     *
+     * <p>{@code /users/create} and {@code /users/update} already route the caller's role list through
+     * it; any other endpoint that mints roles must call this too, because a role written straight onto
+     * the entity bypasses {@link com.gms.enums.RoleEnum} entirely and produces an account no guard can
+     * ever answer — the defect the audit calls SEC-17's {@code EMPLOYEE} mirror. Stage 3 C-6.</p>
+     *
+     * @param requested the role codes to mint
+     * @return the validated codes, always members of the {@code RoleEnum} vocabulary
+     * @throws IllegalArgumentException when a code is outside the vocabulary, or the caller tries to
+     *                                  grant SUPERADMIN without holding it
+     */
+    Set<String> authoriseRoles(Set<String> requested);
 }

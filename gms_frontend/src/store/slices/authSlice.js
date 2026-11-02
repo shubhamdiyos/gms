@@ -62,6 +62,5 @@ export const {
 export const selectAuth = (state) => state.auth;
 export const selectUser = (state) => state.auth.user;
 export const selectIsAuthenticated = (state) => state.auth.isAuthenticated;
-export const selectUserRole = (state) => state.auth.user?.roles?.[0];
 
 export default authSlice.reducer;

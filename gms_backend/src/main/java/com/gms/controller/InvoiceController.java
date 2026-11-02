@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.Invoice;
 import com.gms.model.request.InvoiceRequest;
 import com.gms.model.response.InvoiceResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.InvoiceService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -28,40 +28,32 @@ public class InvoiceController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<InvoiceResponse> createInvoice(@Valid @RequestBody InvoiceRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return invoiceService.createInvoice(request, schoolId, empId);
+        return invoiceService.createInvoice(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<InvoiceResponse> updateInvoice(@PathVariable Integer id,
                                                        @Valid @RequestBody InvoiceRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return invoiceService.updateInvoice(id, request, schoolId, empId);
+        return invoiceService.updateInvoice(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteInvoice(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return invoiceService.deleteInvoice(id, schoolId, empId);
+        return invoiceService.deleteInvoice(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Invoice>> getAllInvoices() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return invoiceService.getAllInvoices(schoolId);
+        return invoiceService.getAllInvoices();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Invoice> getInvoiceById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return invoiceService.getInvoiceById(id, schoolId);
+        return invoiceService.getInvoiceById(id);
     }
 
     @GetMapping("/date-range")
@@ -69,14 +61,12 @@ public class InvoiceController {
     public ResponseEntity<List<Invoice>> getInvoicesByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return invoiceService.getInvoicesByDateRange(schoolId, startDate, endDate);
+        return invoiceService.getInvoicesByDateRange(startDate, endDate);
     }
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
     public ResponseEntity<List<Invoice>> getInvoicesByStudent(@PathVariable Integer studentId) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return invoiceService.getInvoicesByStudent(studentId, schoolId);
+        return invoiceService.getInvoicesByStudent(studentId);
     }
 }

@@ -54,7 +54,7 @@ const Login = () => {
   const onSubmit = async (data) => {
     try {
       await login(data);
-    } catch (error) {
+    } catch {
       // Error is handled in useAuth hook
     }
   };

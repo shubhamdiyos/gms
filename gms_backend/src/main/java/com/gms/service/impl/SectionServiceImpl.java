@@ -8,7 +8,7 @@ import com.gms.model.response.SectionResponse;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.SectionRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.SectionService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -19,7 +19,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> implements SectionService {
+public class SectionServiceImpl implements SectionService {
 
     private final SectionRepository sectionRepository;
     private final SchoolRepository schoolRepository;
@@ -29,24 +29,23 @@ public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> im
     public SectionServiceImpl(SectionRepository sectionRepository, 
                              SchoolRepository schoolRepository,
                              UserRepository userRepository) {
-        super(sectionRepository);
         this.sectionRepository = sectionRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<SectionResponse> createSection(SectionRequest sectionRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<SectionResponse> createSection(SectionRequest sectionRequest) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Check if section with same name already exists
-        if (sectionRepository.existsBySchool_IdAndName(schoolId, sectionRequest.getName())) {
+        if (sectionRepository.existsBySchool_IdAndName(TenantContext.schoolId(), sectionRequest.getName())) {
             throw new IllegalArgumentException("Section with the same name already exists in this school");
         }
 
@@ -76,18 +75,15 @@ public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> im
     }
 
     @Override
-    public ResponseEntity<SectionResponse> updateSection(Integer id, SectionRequest sectionRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<SectionResponse> updateSection(Integer id, SectionRequest sectionRequest) {
         // Validate section exists
         Section section = sectionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Section not found"));
 
-        // Validate school
-        if (!section.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The load is scoped to the caller's school, so a foreign id yields nothing here; the school
+        // comparison this replaced was a second copy of that predicate.
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update section
@@ -112,21 +108,16 @@ public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> im
     }
 
     @Override
-    public ResponseEntity<?> deleteSection(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteSection(Integer id) {
         // Validate section exists
         Section section = sectionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Section not found"));
-
-        // Validate school
-        if (!section.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Soft delete
         section.setStatus("0");
         
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         section.setUpdatedBy(updater);
 
@@ -135,23 +126,21 @@ public class SectionServiceImpl extends AbstractCRUDService<Section, Integer> im
     }
 
     @Override
-    public ResponseEntity<List<Section>> getAllSections(Integer schoolId) {
-        List<Section> sections = sectionRepository.findBySchool_IdAndStatus(schoolId, "1");
+    public ResponseEntity<List<Section>> getAllSections() {
+        List<Section> sections = sectionRepository.findBySchool_IdAndStatus(TenantContext.schoolId(), "1");
         return ResponseEntity.ok(sections);
     }
 
     @Override
-    public ResponseEntity<Section> getSectionById(Integer id, Integer schoolId) {
+    public ResponseEntity<Section> getSectionById(Integer id) {
         Optional<Section> sectionOptional = sectionRepository.findById(id);
         if (sectionOptional.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
 
         Section section = sectionOptional.get();
-        if (!section.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped load above is the ownership check: a school caller gets the 404 for a foreign
+        // id, and the platform owner's cross-tenant branch gets the row it administers.
         return ResponseEntity.ok(section);
     }
 

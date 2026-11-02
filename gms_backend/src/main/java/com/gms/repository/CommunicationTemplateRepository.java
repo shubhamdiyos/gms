@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface CommunicationTemplateRepository extends JpaRepository<CommunicationTemplate, Integer> {
+public interface CommunicationTemplateRepository extends TenantScopedRepository<CommunicationTemplate> {
 
     List<CommunicationTemplate> findBySchoolIdAndIsActiveTrue(Integer schoolId);
 

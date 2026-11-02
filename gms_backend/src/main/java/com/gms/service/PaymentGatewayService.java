@@ -9,13 +9,13 @@ import java.util.List;
 
 public interface PaymentGatewayService {
 
-    ResponseEntity<PaymentGatewayResponse> createPaymentGateway(PaymentGatewayRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<PaymentGatewayResponse> createPaymentGateway(PaymentGatewayRequest request);
 
-    ResponseEntity<PaymentGatewayResponse> updatePaymentGateway(Integer id, PaymentGatewayRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<PaymentGatewayResponse> updatePaymentGateway(Integer id, PaymentGatewayRequest request);
 
-    ResponseEntity<?> deletePaymentGateway(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deletePaymentGateway(Integer id);
 
-    ResponseEntity<List<PaymentGateway>> getAllPaymentGateways(Integer schoolId);
+    ResponseEntity<List<PaymentGateway>> getAllPaymentGateways();
 
-    ResponseEntity<PaymentGateway> getPaymentGatewayById(Integer id, Integer schoolId);
+    ResponseEntity<PaymentGateway> getPaymentGatewayById(Integer id);
 }

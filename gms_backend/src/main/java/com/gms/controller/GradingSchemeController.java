@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.GradingScheme;
 import com.gms.model.request.GradingSchemeRequest;
 import com.gms.model.response.GradingSchemeResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.GradingSchemeService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -26,39 +26,31 @@ public class GradingSchemeController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<GradingSchemeResponse> createGradingScheme(@Valid @RequestBody GradingSchemeRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return gradingSchemeService.createGradingScheme(request, schoolId, empId);
+        return gradingSchemeService.createGradingScheme(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<GradingSchemeResponse> updateGradingScheme(@PathVariable Integer id,
                                                                    @Valid @RequestBody GradingSchemeRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return gradingSchemeService.updateGradingScheme(id, request, schoolId, empId);
+        return gradingSchemeService.updateGradingScheme(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteGradingScheme(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return gradingSchemeService.deleteGradingScheme(id, schoolId, empId);
+        return gradingSchemeService.deleteGradingScheme(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
     public ResponseEntity<List<GradingScheme>> getAllGradingSchemes() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return gradingSchemeService.getAllGradingSchemes(schoolId);
+        return gradingSchemeService.getAllGradingSchemes();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
     public ResponseEntity<GradingScheme> getGradingSchemeById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return gradingSchemeService.getGradingSchemeById(id, schoolId);
+        return gradingSchemeService.getGradingSchemeById(id);
     }
 }

@@ -9,13 +9,13 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ParentService {
-    List<Parent> findBySchool(Integer schoolId);
+    List<Parent> findBySchool();
     
     // Standard CRUD methods following reference pattern
-    ResponseEntity<ParentResponse> create(ParentRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<ParentResponse> update(ParentRequest request, Integer empId, Integer schoolId);
-    ResponseEntity<?> toggleParent(Integer id, Boolean isActive, Integer schoolId, Integer empId);
-    ParentResponse createParentFromRequest(ParentRequest request, Parent parent, Integer empId, Integer schoolId);
+    ResponseEntity<ParentResponse> create(ParentRequest request);
+    ResponseEntity<ParentResponse> update(ParentRequest request);
+    ResponseEntity<?> toggleParent(Integer id, Boolean isActive);
+    ParentResponse createParentFromRequest(ParentRequest request, Parent parent);
     
     // Service-to-service communication methods
     Optional<Parent> findById(Integer id);
@@ -23,7 +23,7 @@ public interface ParentService {
     boolean existsByEmail(String email);
     
     // Existing methods
-    ResponseEntity<ParentResponse> createParent(ParentRequest parentRequest, Integer schoolId);
+    ResponseEntity<ParentResponse> createParent(ParentRequest parentRequest);
     List<StudentResponse> getMyChildren();
     
     // Parent-specific methods for profile and children

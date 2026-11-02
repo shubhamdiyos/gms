@@ -11,21 +11,21 @@ import java.util.List;
 
 public interface FeePaymentService {
 
-    ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request);
 
-    ResponseEntity<FeePaymentResponse> updateFeePayment(Integer id, FeePaymentRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FeePaymentResponse> updateFeePayment(Integer id, FeePaymentRequest request);
 
-    ResponseEntity<?> deleteFeePayment(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteFeePayment(Integer id);
 
-    ResponseEntity<List<FeePayment>> getAllFeePayments(Integer schoolId);
+    ResponseEntity<List<FeePayment>> getAllFeePayments();
 
-    ResponseEntity<FeePayment> getFeePaymentById(Integer id, Integer schoolId);
+    ResponseEntity<FeePayment> getFeePaymentById(Integer id);
 
-    ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(Integer studentId, Integer schoolId);
+    ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(Integer studentId);
 
-    ResponseEntity<List<FeePayment>> getFeePaymentsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<FeePayment>> getFeePaymentsByDateRange(LocalDate startDate, LocalDate endDate);
 
-    BigDecimal getTotalPaymentsBySchoolIdAndDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    BigDecimal getTotalPaymentsBySchoolIdAndDateRange(LocalDate startDate, LocalDate endDate);
 
-    Long getCountOfPaymentsBySchoolIdAndDate(Integer schoolId, LocalDate paymentDate);
+    Long getCountOfPaymentsBySchoolIdAndDate(LocalDate paymentDate);
 }

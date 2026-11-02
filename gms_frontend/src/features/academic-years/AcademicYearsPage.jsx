@@ -13,6 +13,10 @@ import {
   Chip,
   IconButton,
   Tooltip,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -22,7 +26,7 @@ import {
   Visibility,
   CalendarToday,
 } from '@mui/icons-material';
-import { useForm } from 'react-hook-form';
+import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import {
@@ -34,16 +38,26 @@ import {
 import { toast } from 'react-toastify';
 
 const schema = yup.object({
-  yearName: yup.string().required('Year name is required'),
-  startDate: yup.date().required('Start date is required'),
-  endDate: yup.date().required('End date is required').min(yup.ref('startDate'), 'End date must be after start date'),
-  description: yup.string(),
+  name: yup.string().required('Year name is required'),
+  startDate: yup
+    .string()
+    .matches(/^\d{4}-\d{2}-\d{2}$/, 'Start date is required')
+    .required('Start date is required'),
+  endDate: yup
+    .string()
+    .matches(/^\d{4}-\d{2}-\d{2}$/, 'End date is required')
+    .required('End date is required')
+    .test('is-after-start', 'End date must be after start date', function (value) {
+      const { startDate } = this.parent;
+      return !value || !startDate || value >= startDate;
+    }),
+  current: yup.boolean().defined(),
 });
 
 const AcademicYearsPage = () => {
   const [open, setOpen] = useState(false);
   const [editingYear, setEditingYear] = useState(null);
-  
+
   const { data: academicYears = [], isLoading, refetch } = useGetAcademicYearsQuery();
   const [createAcademicYear] = useCreateAcademicYearMutation();
   const [updateAcademicYear] = useUpdateAcademicYearMutation();
@@ -53,8 +67,10 @@ const AcademicYearsPage = () => {
     register,
     handleSubmit,
     reset,
+    control,
     formState: { errors },
   } = useForm({
+    defaultValues: { current: false },
     resolver: yupResolver(schema),
   });
 
@@ -63,8 +79,9 @@ const AcademicYearsPage = () => {
     if (year) {
       reset({
         ...year,
-        startDate: year.startDate ? new Date(year.startDate).toISOString().split('T')[0] : '',
-        endDate: year.endDate ? new Date(year.endDate).toISOString().split('T')[0] : '',
+        startDate: year.startDate ? String(year.startDate).split('T')[0] : '',
+        endDate: year.endDate ? String(year.endDate).split('T')[0] : '',
+        current: Boolean(year.current),
       });
     } else {
       reset();
@@ -79,17 +96,23 @@ const AcademicYearsPage = () => {
   };
 
   const onSubmit = async (data) => {
+    const payload = {
+      name: data.name,
+      startDate: data.startDate,
+      endDate: data.endDate,
+      current: data.current,
+    };
     try {
       if (editingYear) {
-        await updateAcademicYear({ id: editingYear.id, ...data }).unwrap();
+        await updateAcademicYear({ id: editingYear.id, ...payload }).unwrap();
         toast.success('Academic year updated successfully');
       } else {
-        await createAcademicYear(data).unwrap();
+        await createAcademicYear(payload).unwrap();
         toast.success('Academic year created successfully');
       }
       handleClose();
       refetch();
-    } catch (error) {
+    } catch {
       toast.error('Operation failed');
     }
   };
@@ -100,7 +123,7 @@ const AcademicYearsPage = () => {
         await deleteAcademicYear(id).unwrap();
         toast.success('Academic year deleted successfully');
         refetch();
-      } catch (error) {
+      } catch {
         toast.error('Delete failed');
       }
     }
@@ -113,9 +136,9 @@ const AcademicYearsPage = () => {
 
   const columns = [
     {
-      field: 'yearName',
+      field: 'name',
       headerName: 'Academic Year',
-      width: 200,
+      width: 160,
       renderCell: (params) => (
         <Box sx={{ display: 'flex', alignItems: 'center' }}>
           <CalendarToday sx={{ mr: 1, color: '#1976d2' }} />
@@ -136,9 +159,16 @@ const AcademicYearsPage = () => {
       renderCell: (params) => formatDate(params.value),
     },
     {
-      field: 'description',
-      headerName: 'Description',
-      width: 250,
+      field: 'current',
+      headerName: 'Current',
+      width: 110,
+      renderCell: (params) => (
+        <Chip
+          label={params.value ? 'Current' : 'Not Current'}
+          color={params.value ? 'success' : 'default'}
+          size="small"
+        />
+      ),
     },
     {
       field: 'status',
@@ -237,12 +267,12 @@ const AcademicYearsPage = () => {
             <Grid container spacing={2} sx={{ mt: 1 }}>
               <Grid item xs={12}>
                 <TextField
-                  {...register('yearName')}
+                  {...register('name')}
                   fullWidth
                   label="Academic Year Name"
                   placeholder="e.g., 2024-2025"
-                  error={!!errors.yearName}
-                  helperText={errors.yearName?.message}
+                  error={!!errors.name}
+                  helperText={errors.name?.message}
                 />
               </Grid>
               <Grid item xs={12} md={6}>
@@ -268,15 +298,24 @@ const AcademicYearsPage = () => {
                 />
               </Grid>
               <Grid item xs={12}>
-                <TextField
-                  {...register('description')}
-                  fullWidth
-                  label="Description"
-                  multiline
-                  rows={3}
-                  error={!!errors.description}
-                  helperText={errors.description?.message}
-                />
+                <FormControl fullWidth error={!!errors.current}>
+                  <InputLabel>Current Academic Year</InputLabel>
+                  <Controller
+                    name="current"
+                    control={control}
+                    render={({ field }) => (
+                      <Select {...field} label="Current Academic Year">
+                        <MenuItem value={true}>Yes</MenuItem>
+                        <MenuItem value={false}>No</MenuItem>
+                      </Select>
+                    )}
+                  />
+                  {errors.current && (
+                    <Typography variant="caption" color="error" sx={{ mt: 1, ml: 2 }}>
+                      {errors.current?.message}
+                    </Typography>
+                  )}
+                </FormControl>
               </Grid>
             </Grid>
           </DialogContent>

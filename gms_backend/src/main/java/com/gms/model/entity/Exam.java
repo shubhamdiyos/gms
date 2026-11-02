@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.Hibernate;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -17,7 +18,7 @@ import java.util.List;
 @Setter
 @Entity
 @Table(name = "exams")
-public class Exam extends BaseAuditEntity {
+public class Exam extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -64,6 +65,7 @@ public class Exam extends BaseAuditEntity {
     @Column(name = "updated_at")
     private Instant updatedAt;
 
+    @JsonIgnore
     @OneToMany(mappedBy = "exam", cascade = CascadeType.ALL, orphanRemoval = true)
     private List<ExamSubject> examSubjects = new ArrayList<>();
 
@@ -74,6 +76,6 @@ public class Exam extends BaseAuditEntity {
 
     @JsonProperty("school_name")
     public String getSchoolName() {
-        return school != null ? school.getSchoolName() : null;
+        return school != null && Hibernate.isInitialized(school) ? school.getSchoolName() : null;
     }
 }

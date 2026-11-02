@@ -8,12 +8,12 @@ import org.springframework.http.ResponseEntity;
 import java.util.List;
 
 public interface EmployeeService {
-    List<Employee> listBySchool(Integer schoolId);
-    Employee getById(Integer id, Integer schoolId);
-    ResponseEntity<EmployeeResponse> create(EmployeeRequest request, Integer creatorEmpId, Integer schoolId);
-    ResponseEntity<EmployeeResponse> update(EmployeeRequest request, Integer updaterEmpId, Integer schoolId);
-    ResponseEntity<?> toggleEmployee(Integer id, Boolean isActive, Integer updaterEmpId, Integer schoolId);
-    Employee createEmployeeFromRequest(EmployeeRequest request, Employee employee, Integer creatorEmpId, Integer schoolId);
+    List<Employee> listBySchool();
+    Employee getById(Integer id);
+    ResponseEntity<EmployeeResponse> create(EmployeeRequest request);
+    ResponseEntity<EmployeeResponse> update(EmployeeRequest request);
+    ResponseEntity<?> toggleEmployee(Integer id, Boolean isActive);
+    Employee createEmployeeFromRequest(EmployeeRequest request, Employee employee);
     
     // Service-to-service communication method
     java.util.Optional<Employee> findById(Integer id);

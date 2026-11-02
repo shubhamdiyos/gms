@@ -8,7 +8,7 @@ import com.gms.model.response.SchoolCalendarResponse;
 import com.gms.repository.SchoolCalendarRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.SchoolCalendarService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -20,7 +20,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Service
-public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalendar, Integer> implements SchoolCalendarService {
+public class SchoolCalendarServiceImpl implements SchoolCalendarService {
 
     private final SchoolCalendarRepository schoolCalendarRepository;
     private final SchoolRepository schoolRepository;
@@ -30,20 +30,19 @@ public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalenda
     public SchoolCalendarServiceImpl(SchoolCalendarRepository schoolCalendarRepository,
                                     SchoolRepository schoolRepository,
                                     UserRepository userRepository) {
-        super(schoolCalendarRepository);
         this.schoolCalendarRepository = schoolCalendarRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<SchoolCalendarResponse> createCalendarEvent(SchoolCalendarRequest calendarRequest, Integer schoolId, Integer empId) {
+    public ResponseEntity<SchoolCalendarResponse> createCalendarEvent(SchoolCalendarRequest calendarRequest) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create calendar event
@@ -78,18 +77,14 @@ public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalenda
     }
 
     @Override
-    public ResponseEntity<SchoolCalendarResponse> updateCalendarEvent(Integer id, SchoolCalendarRequest calendarRequest, Integer schoolId, Integer empId) {
-        // Validate calendar event exists
+    public ResponseEntity<SchoolCalendarResponse> updateCalendarEvent(Integer id, SchoolCalendarRequest calendarRequest) {
+        // Validate calendar event exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         SchoolCalendar calendarEvent = schoolCalendarRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Calendar event not found"));
 
-        // Validate school
-        if (!calendarEvent.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update calendar event
@@ -120,21 +115,17 @@ public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalenda
     }
 
     @Override
-    public ResponseEntity<?> deleteCalendarEvent(Integer id, Integer schoolId, Integer empId) {
-        // Validate calendar event exists
+    public ResponseEntity<?> deleteCalendarEvent(Integer id) {
+        // Validate calendar event exists; the scoped load already filters by the caller's school,
+        // so the hand-written school comparison is gone — a foreign id throws.
         SchoolCalendar calendarEvent = schoolCalendarRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Calendar event not found"));
-
-        // Validate school
-        if (!calendarEvent.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         // Soft delete
         calendarEvent.setStatus("0");
 
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         calendarEvent.setUpdatedBy(updater);
 
@@ -143,35 +134,32 @@ public class SchoolCalendarServiceImpl extends AbstractCRUDService<SchoolCalenda
     }
 
     @Override
-    public ResponseEntity<List<SchoolCalendar>> getAllCalendarEvents(Integer schoolId) {
-        List<SchoolCalendar> events = schoolCalendarRepository.findBySchool_IdAndStatus(schoolId, "1");
+    public ResponseEntity<List<SchoolCalendar>> getAllCalendarEvents() {
+        List<SchoolCalendar> events = schoolCalendarRepository.findBySchool_IdAndStatus(TenantContext.schoolId(), "1");
         return ResponseEntity.ok(events);
     }
 
     @Override
-    public ResponseEntity<SchoolCalendar> getCalendarEventById(Integer id, Integer schoolId) {
+    public ResponseEntity<SchoolCalendar> getCalendarEventById(Integer id) {
+        // The scoped load already confines the answer to the caller's school, so the
+        // hand-written comparison and its 403 are gone — a foreign id is 404.
         Optional<SchoolCalendar> eventOptional = schoolCalendarRepository.findById(id);
         if (eventOptional.isEmpty()) {
             return ResponseEntity.notFound().build();
         }
 
-        SchoolCalendar event = eventOptional.get();
-        if (!event.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
-        return ResponseEntity.ok(event);
+        return ResponseEntity.ok(eventOptional.get());
     }
 
     @Override
-    public ResponseEntity<List<SchoolCalendar>> getCalendarEventsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<SchoolCalendar> events = schoolCalendarRepository.findBySchool_IdAndEventDateBetween(schoolId, startDate, endDate);
+    public ResponseEntity<List<SchoolCalendar>> getCalendarEventsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<SchoolCalendar> events = schoolCalendarRepository.findBySchool_IdAndEventDateBetween(TenantContext.schoolId(), startDate, endDate);
         return ResponseEntity.ok(events);
     }
 
     @Override
-    public ResponseEntity<List<SchoolCalendar>> getCalendarEventsByAcademicYear(Integer schoolId, String academicYear) {
-        List<SchoolCalendar> events = schoolCalendarRepository.findBySchool_IdAndAcademicYearAndStatus(schoolId, academicYear, "1");
+    public ResponseEntity<List<SchoolCalendar>> getCalendarEventsByAcademicYear(String academicYear) {
+        List<SchoolCalendar> events = schoolCalendarRepository.findBySchool_IdAndAcademicYearAndStatus(TenantContext.schoolId(), academicYear, "1");
         return ResponseEntity.ok(events);
     }
 }

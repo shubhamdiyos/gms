@@ -10,7 +10,7 @@ import java.util.List;
 import java.util.Optional;
 
 @Repository
-public interface EmployeeRepository extends JpaRepository<Employee, Integer> {
+public interface EmployeeRepository extends TenantScopedRepository<Employee> {
 
     /**
      * Find all employees by school ID
@@ -18,14 +18,17 @@ public interface EmployeeRepository extends JpaRepository<Employee, Integer> {
     List<Employee> findAllBySchool_Id(Integer schoolId);
 
     /**
-     * Find employee by employee ID
+     * Find an employee by its business code inside one school. {@code uq_employees_school_employee_id}
+     * (V3:52) makes that code unique per school, not platform-wide, so the same code exists in
+     * every school and an unscoped {@code Optional} lookup would throw once two schools use it.
      */
-    Optional<Employee> findByEmployeeId(String employeeId);
+    Optional<Employee> findBySchool_IdAndEmployeeId(Integer schoolId, String employeeId);
 
     /**
-     * Find employee by email
+     * Find an employee by email inside one school — same reason, {@code uq_employees_school_email}
+     * at V3:53.
      */
-    Optional<Employee> findByEmail(String email);
+    Optional<Employee> findBySchool_IdAndEmail(Integer schoolId, String email);
 
     /**
      * Find employees by school ID and status
@@ -48,14 +51,12 @@ public interface EmployeeRepository extends JpaRepository<Employee, Integer> {
     List<Employee> findAllBySchool_IdAndDepartment(Integer schoolId, String department);
 
     /**
-     * Check if email exists in the system
+     * Whether this school already uses an email. The global form was a cross-tenant oracle: it
+     * told school A that school B had already registered a mailbox.
      */
-    boolean existsByEmail(String email);
+    boolean existsBySchool_IdAndEmail(Integer schoolId, String email);
 
-    /**
-     * Check if employee ID exists
-     */
-    boolean existsByEmployeeId(String employeeId);
+    boolean existsBySchool_IdAndEmployeeId(Integer schoolId, String employeeId);
 
     /**
      * Find all employees by school excluding a given status (e.g., "0" for soft-deleted)

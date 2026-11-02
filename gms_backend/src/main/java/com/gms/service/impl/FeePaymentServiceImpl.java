@@ -7,17 +7,19 @@ import com.gms.model.entity.User;
 import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
 import com.gms.repository.FeePaymentRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
 
 @Service
-public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integer> implements FeePaymentService {
+public class FeePaymentServiceImpl implements FeePaymentService {
 
     private final FeePaymentRepository feePaymentRepository;
     private final StudentFeeService studentFeeService;
@@ -28,28 +30,29 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
                                 StudentFeeService studentFeeService,
                                 SchoolService schoolService,
                                 UserService userService) {
-        super(feePaymentRepository);
         this.feePaymentRepository = feePaymentRepository;
         this.studentFeeService = studentFeeService;
         this.schoolService = schoolService;
         this.userService = userService;
     }
 
+    @Transactional
     @Override
-    public ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request) {
         // Validate school exists
-        School school = schoolService.findById(schoolId)
+        School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Validate student fee exists and belongs to school
-        StudentFee studentFee = studentFeeService.findById(request.getStudentFeeId(), schoolId);
+        StudentFee studentFee = studentFeeService.findById(request.getStudentFeeId());
 
         // Create fee payment
         FeePayment feePayment = new FeePayment();
+        feePayment.setSchool(school);
         feePayment.setStudentFee(studentFee);
         feePayment.setAmount(request.getAmount());
         feePayment.setPaymentDate(request.getPaymentDate());
@@ -72,18 +75,13 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
     }
 
     @Override
-    public ResponseEntity<FeePaymentResponse> updateFeePayment(Integer id, FeePaymentRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<FeePaymentResponse> updateFeePayment(Integer id, FeePaymentRequest request) {
         // Validate fee payment exists
         FeePayment feePayment = feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
 
-        // Validate school
-        if (!feePayment.getStudentFee().getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update fee payment
@@ -104,18 +102,13 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
     }
 
     @Override
-    public ResponseEntity<?> deleteFeePayment(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteFeePayment(Integer id) {
         // Validate fee payment exists
         FeePayment feePayment = feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
 
-        // Validate school
-        if (!feePayment.getStudentFee().getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
         // Validate updater exists
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
@@ -127,45 +120,41 @@ public class FeePaymentServiceImpl extends AbstractCRUDService<FeePayment, Integ
     }
 
     @Override
-    public ResponseEntity<List<FeePayment>> getAllFeePayments(Integer schoolId) {
+    public ResponseEntity<List<FeePayment>> getAllFeePayments() {
         List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_School_IdAndPaymentDateBetween(
-                schoolId, LocalDate.now().minusYears(1), LocalDate.now());
+                TenantContext.schoolId(), LocalDate.now().minusYears(1), LocalDate.now());
         return ResponseEntity.ok(feePayments);
     }
 
     @Override
-    public ResponseEntity<FeePayment> getFeePaymentById(Integer id, Integer schoolId) {
+    public ResponseEntity<FeePayment> getFeePaymentById(Integer id) {
         FeePayment feePayment = feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
-
-        if (!feePayment.getStudentFee().getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         return ResponseEntity.ok(feePayment);
     }
 
     @Override
-    public ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(Integer studentId, Integer schoolId) {
-        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_Id(studentId);
-        // Filter by schoolId if needed
+    public ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(Integer studentId) {
+        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_School_IdAndStudentFee_Student_Id(TenantContext.schoolId(), studentId);
+        // Filter by the tenant's school if needed
         return ResponseEntity.ok(feePayments);
     }
 
     @Override
-    public ResponseEntity<List<FeePayment>> getFeePaymentsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_School_IdAndPaymentDateBetween(schoolId, startDate, endDate);
+    public ResponseEntity<List<FeePayment>> getFeePaymentsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_School_IdAndPaymentDateBetween(TenantContext.schoolId(), startDate, endDate);
         return ResponseEntity.ok(feePayments);
     }
 
     @Override
-    public BigDecimal getTotalPaymentsBySchoolIdAndDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        return feePaymentRepository.getTotalPaymentsBySchoolIdAndDateRange(schoolId, startDate, endDate);
+    public BigDecimal getTotalPaymentsBySchoolIdAndDateRange(LocalDate startDate, LocalDate endDate) {
+        return feePaymentRepository.getTotalPaymentsBySchoolIdAndDateRange(TenantContext.schoolId(), startDate, endDate);
     }
 
     @Override
-    public Long getCountOfPaymentsBySchoolIdAndDate(Integer schoolId, LocalDate paymentDate) {
-        return feePaymentRepository.getCountOfPaymentsBySchoolIdAndDate(schoolId, paymentDate);
+    public Long getCountOfPaymentsBySchoolIdAndDate(LocalDate paymentDate) {
+        return feePaymentRepository.getCountOfPaymentsBySchoolIdAndDate(TenantContext.schoolId(), paymentDate);
     }
 
     private void updateStudentFeeWithPayment(StudentFee studentFee, BigDecimal paymentAmount) {

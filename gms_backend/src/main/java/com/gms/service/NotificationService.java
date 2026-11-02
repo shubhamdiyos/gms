@@ -10,31 +10,31 @@ import java.util.List;
 
 public interface NotificationService {
 
-    ResponseEntity<NotificationResponse> createNotification(NotificationRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<NotificationResponse> createNotification(NotificationRequest request);
 
-    ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<NotificationResponse> updateNotification(Integer id, NotificationRequest request);
 
-    ResponseEntity<?> deleteNotification(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteNotification(Integer id);
 
-    ResponseEntity<List<Notification>> getAllNotifications(Integer schoolId);
+    ResponseEntity<List<Notification>> getAllNotifications();
 
-    ResponseEntity<Notification> getNotificationById(Integer id, Integer schoolId);
+    ResponseEntity<Notification> getNotificationById(Integer id);
 
-    ResponseEntity<List<Notification>> getNotificationsByRecipientType(Integer schoolId, String recipientType);
+    ResponseEntity<List<Notification>> getNotificationsByRecipientType(String recipientType);
 
-    ResponseEntity<List<Notification>> getNotificationsByUserId(Integer schoolId, Integer userId);
+    ResponseEntity<List<Notification>> getNotificationsByUserId(Integer userId);
 
-    ResponseEntity<List<Notification>> getScheduledNotifications(Integer schoolId, LocalDateTime scheduledTime);
+    ResponseEntity<List<Notification>> getScheduledNotifications(LocalDateTime scheduledTime);
 
-    ResponseEntity<List<Notification>> getNotificationsByType(Integer schoolId, String notificationType);
+    ResponseEntity<List<Notification>> getNotificationsByType(String notificationType);
 
-    ResponseEntity<List<Notification>> getNotificationsByPriority(Integer schoolId, String priority);
+    ResponseEntity<List<Notification>> getNotificationsByPriority(String priority);
 
-    ResponseEntity<Long> countPendingNotifications(Integer schoolId);
+    ResponseEntity<Long> countPendingNotifications();
 
-    ResponseEntity<Long> countUnreadNotifications(Integer schoolId);
+    ResponseEntity<Long> countUnreadNotifications();
 
-    ResponseEntity<?> markNotificationAsRead(Integer id, Integer schoolId);
+    ResponseEntity<?> markNotificationAsRead(Integer id);
 
-    ResponseEntity<?> sendScheduledNotifications(Integer schoolId);
+    ResponseEntity<?> sendScheduledNotifications();
 }

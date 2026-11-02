@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.Hibernate;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -16,7 +17,7 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "employees")
-public class Employee {
+public class Employee implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -115,7 +116,7 @@ public class Employee {
 
     @JsonProperty("school_name")
     public String getSchoolName() {
-        return school != null ? school.getSchoolName() : null;
+        return school != null && Hibernate.isInitialized(school) ? school.getSchoolName() : null;
     }
 
     @JsonProperty("full_name")
@@ -145,7 +146,7 @@ public class Employee {
     
     @JsonProperty("created_by_name")
     public String getCreatedByName() {
-        return createdBy != null ? createdBy.getFullName() : null;
+        return createdBy != null && Hibernate.isInitialized(createdBy) ? createdBy.getFullName() : null;
     }
     
     @JsonProperty("updated_by_id")
@@ -155,6 +156,6 @@ public class Employee {
     
     @JsonProperty("updated_by_name")
     public String getUpdatedByName() {
-        return updatedBy != null ? updatedBy.getFullName() : null;
+        return updatedBy != null && Hibernate.isInitialized(updatedBy) ? updatedBy.getFullName() : null;
     }
 }

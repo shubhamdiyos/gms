@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.Hibernate;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -15,7 +16,7 @@ import java.util.Set;
 @Getter @Setter
 @Entity
 @Table(name = "users")
-public class User {
+public class User implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -139,7 +140,7 @@ public class User {
     
     @JsonProperty("school_name")
     public String getSchoolName() {
-        return school != null ? school.getSchoolName() : null;
+        return school != null && Hibernate.isInitialized(school) ? school.getSchoolName() : null;
     }
     
     @JsonProperty("created_by_id")
@@ -149,7 +150,7 @@ public class User {
     
     @JsonProperty("created_by_name")
     public String getCreatedByName() {
-        return createdBy != null ? createdBy.getFullName() : null;
+        return createdBy != null && Hibernate.isInitialized(createdBy) ? createdBy.getFullName() : null;
     }
     
     @JsonProperty("updated_by_id")
@@ -159,7 +160,7 @@ public class User {
     
     @JsonProperty("updated_by_name")
     public String getUpdatedByName() {
-        return updatedBy != null ? updatedBy.getFullName() : null;
+        return updatedBy != null && Hibernate.isInitialized(updatedBy) ? updatedBy.getFullName() : null;
     }
 
     @JsonProperty("employee_id")
@@ -169,7 +170,7 @@ public class User {
 
     @JsonProperty("employee_name")
     public String getEmployeeName() {
-        return employee != null ? employee.getFullName() : null;
+        return employee != null && Hibernate.isInitialized(employee) ? employee.getFullName() : null;
     }
 
     @JsonIgnore
@@ -184,7 +185,7 @@ public class User {
 
     @JsonProperty("student_name")
     public String getStudentName() {
-        return student != null ? student.getFullName() : null;
+        return student != null && Hibernate.isInitialized(student) ? student.getFullName() : null;
     }
 
     @JsonIgnore
@@ -199,7 +200,9 @@ public class User {
 
     @JsonProperty("parent_name")
     public String getParentName() {
-        return parent != null ? (parent.getFirstName() + " " + parent.getLastName()) : null;
+        return parent != null && Hibernate.isInitialized(parent)
+                ? parent.getFirstName() + " " + parent.getLastName()
+                : null;
     }
 
     @JsonIgnore

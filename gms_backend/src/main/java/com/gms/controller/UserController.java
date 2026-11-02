@@ -3,11 +3,12 @@ package com.gms.controller;
 import com.gms.model.entity.User;
 import com.gms.model.request.UserRequest;
 import com.gms.model.response.UserResponse;
-import com.gms.service.impl.UserServiceImpl;
+import com.gms.security.TenantContext;
+import com.gms.service.UserService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.List;
@@ -15,33 +16,32 @@ import java.util.List;
 /**
  * User administration for the caller's tenant.
  *
- * <p>This controller no longer extends {@code AbstractCRUDController}: that template answers
- * {@code GET /} and {@code GET /{id}} with the JPA entity, and mandating a DTO there would change
- * the response type of all nine inherited controllers at once. The two affected endpoints are
- * declared here against {@code UserResponse} instead (mandate §10.2).</p>
+ * <p>This controller answers {@code GET /} and {@code GET /{id}} with {@link UserResponse} rather
+ * than with the JPA entity, because the entity's lazy {@code School} proxy failed JSON writing and
+ * answered 500 for every caller — reproduced in {@code docs/audit/BASELINE_STATUS.md} §4.5. Every
+ * read and write here is scoped to the caller's school: an administrator sees and deletes only its
+ * own school's accounts.</p>
  */
 @RestController
 @RequestMapping(Constants.API_BASE_V1 + "/users")
 public class UserController {
 
-    private final UserServiceImpl userService;
+    private final UserService userService;
 
-    public UserController(UserServiceImpl userService) {
+    public UserController(UserService userService) {
         this.userService = userService;
     }
 
     @PostMapping("/create")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<UserResponse> create(@Valid @RequestBody UserRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return userService.create(request, empId, schoolId);
+        return userService.create(request);
     }
 
     @PutMapping("/update")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<UserResponse> update(@Valid @RequestBody UserRequest request) {
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return userService.update(request, empId, schoolId);
+        return userService.update(request);
     }
 
     /**
@@ -51,9 +51,9 @@ public class UserController {
      * layer for exactly this reason.
      */
     @GetMapping
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<List<UserResponse>> getAll() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        List<UserResponse> users = userService.findBySchool(schoolId).stream()
+        List<UserResponse> users = userService.findBySchool().stream()
                 .map(userService::toResponse)
                 .toList();
         if (users.isEmpty()) {
@@ -63,22 +63,44 @@ public class UserController {
     }
 
     @GetMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<UserResponse> getById(@PathVariable Integer id) {
-        return ResponseEntity.ok(userService.getById(id));
+        Integer schoolId = TenantContext.schoolId();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        try {
+            return ResponseEntity.ok(userService.getById(id));
+        } catch (com.gms.exception.NotFoundException ex) {
+            return ResponseEntity.status(404).build();
+        }
     }
 
+    /**
+     * Deletes one of the caller's own accounts.
+     *
+     * <p>The inherited {@code existsById}/{@code deleteById} pair reached
+     * {@code repository.deleteById(id)} with no tenant predicate, so any administrator could
+     * delete any other school's account; the replacement takes the caller's school and refuses
+     * the row if it belongs to another one.</p>
+     */
     @DeleteMapping("/{id}")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<Void> delete(@PathVariable Integer id) {
-        if (!userService.existsById(id)) {
+        Integer schoolId = TenantContext.schoolId();
+        if (schoolId == null) {
+            return ResponseEntity.status(401).build();
+        }
+        if (!userService.deleteWithinSchool(id)) {
             return ResponseEntity.notFound().build();
         }
-        userService.deleteById(id);
         return ResponseEntity.noContent().build();
     }
 
     @GetMapping("/me")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserResponse> me() {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }
@@ -88,8 +110,9 @@ public class UserController {
     }
 
     @PutMapping("/me")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<UserResponse> updateMe(@Valid @RequestBody UserRequest request) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }

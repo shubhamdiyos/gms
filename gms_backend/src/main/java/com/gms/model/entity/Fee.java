@@ -13,7 +13,7 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "fees")
-public class Fee extends BaseAuditEntity {
+public class Fee extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)

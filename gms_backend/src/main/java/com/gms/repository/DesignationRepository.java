@@ -8,7 +8,7 @@ import org.springframework.stereotype.Repository;
 import java.util.List;
 
 @Repository
-public interface DesignationRepository extends JpaRepository<Designation, Integer> {
+public interface DesignationRepository extends TenantScopedRepository<Designation> {
     List<Designation> findBySchool_Id(Integer schoolId);
     boolean existsBySchool_IdAndTitle(Integer schoolId, String title);
 }

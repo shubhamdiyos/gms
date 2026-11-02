@@ -8,7 +8,7 @@ import com.gms.model.response.GradingSchemeResponse;
 import com.gms.repository.GradingSchemeRepository;
 import com.gms.repository.SchoolRepository;
 import com.gms.repository.UserRepository;
-import com.gms.service.AbstractCRUDService;
+import com.gms.security.TenantContext;
 import com.gms.service.GradingSchemeService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -17,7 +17,7 @@ import org.springframework.stereotype.Service;
 import java.util.List;
 
 @Service
-public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme, Integer> implements GradingSchemeService {
+public class GradingSchemeServiceImpl implements GradingSchemeService {
 
     private final GradingSchemeRepository gradingSchemeRepository;
     private final SchoolRepository schoolRepository;
@@ -26,20 +26,19 @@ public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme,
     public GradingSchemeServiceImpl(GradingSchemeRepository gradingSchemeRepository,
                                   SchoolRepository schoolRepository,
                                   UserRepository userRepository) {
-        super(gradingSchemeRepository);
         this.gradingSchemeRepository = gradingSchemeRepository;
         this.schoolRepository = schoolRepository;
         this.userRepository = userRepository;
     }
 
     @Override
-    public ResponseEntity<GradingSchemeResponse> createGradingScheme(GradingSchemeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<GradingSchemeResponse> createGradingScheme(GradingSchemeRequest request) {
         // Validate school exists
-        School school = schoolRepository.findById(schoolId)
+        School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
         // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(empId)
+        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Create grading scheme
@@ -62,18 +61,17 @@ public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme,
     }
 
     @Override
-    public ResponseEntity<GradingSchemeResponse> updateGradingScheme(Integer id, GradingSchemeRequest request, Integer schoolId, Integer empId) {
+    public ResponseEntity<GradingSchemeResponse> updateGradingScheme(Integer id, GradingSchemeRequest request) {
         // Validate grading scheme exists
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        // Validate school
-        if (!gradingScheme.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The load above is scoped to the caller's school, so the school comparison this replaces was
+        // a second copy of that predicate — and for the platform owner, whose own SYSTEM school id
+        // differs from the rows it administers across tenants, it was a 403 the mechanism never
+        // asked for.
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Update grading scheme
@@ -93,18 +91,15 @@ public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme,
     }
 
     @Override
-    public ResponseEntity<?> deleteGradingScheme(Integer id, Integer schoolId, Integer empId) {
+    public ResponseEntity<?> deleteGradingScheme(Integer id) {
         // Validate grading scheme exists
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        // Validate school
-        if (!gradingScheme.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // Scoped load: a foreign id yielded nothing, so no school comparison stands between this row
+        // and the deactivation below.
         // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(empId)
+        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting active to false
@@ -116,20 +111,18 @@ public class GradingSchemeServiceImpl extends AbstractCRUDService<GradingScheme,
     }
 
     @Override
-    public ResponseEntity<List<GradingScheme>> getAllGradingSchemes(Integer schoolId) {
-        List<GradingScheme> gradingSchemes = gradingSchemeRepository.findBySchoolIdAndIsActive(schoolId, true);
+    public ResponseEntity<List<GradingScheme>> getAllGradingSchemes() {
+        List<GradingScheme> gradingSchemes = gradingSchemeRepository.findBySchoolIdAndIsActive(TenantContext.schoolId(), true);
         return ResponseEntity.ok(gradingSchemes);
     }
 
     @Override
-    public ResponseEntity<GradingScheme> getGradingSchemeById(Integer id, Integer schoolId) {
+    public ResponseEntity<GradingScheme> getGradingSchemeById(Integer id) {
         GradingScheme gradingScheme = gradingSchemeRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Grading scheme not found"));
 
-        if (!gradingScheme.getSchool().getId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
-
+        // The scoped findById answered the tenancy question at the point of load; the school
+        // comparison it replaced only ever refused the platform owner.
         return ResponseEntity.ok(gradingScheme);
     }
 

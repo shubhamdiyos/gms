@@ -5,6 +5,7 @@ import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.Hibernate;
 import org.hibernate.annotations.CreationTimestamp;
 import org.hibernate.annotations.UpdateTimestamp;
 
@@ -15,7 +16,7 @@ import java.time.LocalDate;
 @Setter
 @Entity
 @Table(name = "school_calendars")
-public class SchoolCalendar extends BaseAuditEntity {
+public class SchoolCalendar extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -63,6 +64,6 @@ public class SchoolCalendar extends BaseAuditEntity {
 
     @JsonProperty("school_name")
     public String getSchoolName() {
-        return school != null ? school.getSchoolName() : null;
+        return school != null && Hibernate.isInitialized(school) ? school.getSchoolName() : null;
     }
 }

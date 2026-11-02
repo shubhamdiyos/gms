@@ -8,6 +8,7 @@ public enum RoleEnum {
     SUPERADMIN("SUPERADMIN", "Super Administrator - System-wide access"),
     ADMIN("ADMIN", "School Administrator - School-level access"),
     TEACHER("TEACHER", "Teacher - Academic operations within assigned classes"),
+    ACCOUNTANT("ACCOUNTANT", "Accountant - Fee, invoice, receipt and financial-report operations"),
     STUDENT("STUDENT", "Student - View personal academic information"),
     PARENT("PARENT", "Parent - View child's academic information");
 

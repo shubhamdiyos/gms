@@ -1,17 +1,18 @@
-import { Box, Grid, Card, CardContent, Typography, Avatar, CircularProgress, Alert, Paper, Divider, Chip } from '@mui/material';
+import { Box, Grid, Card, CardContent, Typography, Avatar, CircularProgress, Alert, Paper, Chip } from '@mui/material';
 import {
   School,
-  People,
   TrendingUp,
-  NotificationsActive,
-  Assessment,
+  Block,
+  HourglassBottom,
 } from '@mui/icons-material';
-import {
-  useGetSchoolsQuery,
-  useGetStudentsQuery,
-  useGetEmployeesQuery,
-  useGetNotificationsQuery,
-} from '../../store/api/apiSlice';
+import { useGetSchoolsQuery } from '../../store/api/apiSlice';
+
+const SCHOOL_STATUS_LABELS = {
+  '1': 'Active',
+  INACTIVE: 'Inactive',
+  SUSPENDED: 'Suspended',
+  PENDING_APPROVAL: 'Pending Approval',
+};
 
 const StatCard = ({ title, value, icon, color, subtitle }) => (
   <Card sx={{ height: '100%' }}>
@@ -44,70 +45,15 @@ const SuperAdminReportsPage = () => {
     isLoading: schoolsLoading,
     error: schoolsError,
   } = useGetSchoolsQuery();
-  const {
-    data: students = [],
-    isLoading: studentsLoading,
-    error: studentsError,
-  } = useGetStudentsQuery();
-  const {
-    data: employees = [],
-    isLoading: employeesLoading,
-    error: employeesError,
-  } = useGetEmployeesQuery();
-  const {
-    data: notifications = [],
-    isLoading: notificationsLoading,
-    error: notificationsError,
-  } = useGetNotificationsQuery();
 
-  const isLoading =
-    schoolsLoading || studentsLoading || employeesLoading || notificationsLoading;
+  const schoolList = Array.isArray(schools) ? schools : [];
+  const totalSchools = schoolList.length;
+  const activeSchools = schoolList.filter((s) => s.status === '1').length;
+  const inactiveSchools = schoolList.filter((s) => s.status === 'INACTIVE').length;
+  const suspendedSchools = schoolList.filter((s) => s.status === 'SUSPENDED').length;
+  const pendingApprovalSchools = schoolList.filter((s) => s.status === 'PENDING_APPROVAL').length;
 
-  const totalSchools = Array.isArray(schools) ? schools.length : 0;
-  const activeSchools = Array.isArray(schools)
-    ? schools.filter((s) => s.status === '1').length
-    : 0;
-  const inactiveSchools = totalSchools - activeSchools;
-
-  const totalStudents = Array.isArray(students) ? students.length : 0;
-  const totalEmployees = Array.isArray(employees) ? employees.length : 0;
-
-  const pendingNotifications = Array.isArray(notifications)
-    ? notifications.filter((n) => n.read_status !== 'read').length
-    : 0;
-
-  const stats = [
-    {
-      title: 'Total Schools',
-      value: totalSchools,
-      icon: <School />,
-      color: '#1976d2',
-      subtitle: 'Registered institutions',
-    },
-    {
-      title: 'Active Schools',
-      value: activeSchools,
-      icon: <TrendingUp />,
-      color: '#388e3c',
-      subtitle: `${inactiveSchools} inactive`,
-    },
-    {
-      title: 'Total Students',
-      value: totalStudents,
-      icon: <People />,
-      color: '#f57c00',
-      subtitle: 'Across all schools (current scope)',
-    },
-    {
-      title: 'Total Employees',
-      value: totalEmployees,
-      icon: <Assessment />,
-      color: '#7b1fa2',
-      subtitle: 'Teachers & staff',
-    },
-  ];
-
-  if (isLoading) {
+  if (schoolsLoading) {
     return (
       <Box display="flex" justifyContent="center" alignItems="center" minHeight="400px">
         <CircularProgress />
@@ -118,35 +64,44 @@ const SuperAdminReportsPage = () => {
     );
   }
 
-  if (schoolsError || studentsError || employeesError || notificationsError) {
+  if (schoolsError) {
     return (
-      <Box>
-        <Alert severity="error" sx={{ mb: 2 }}>
-          Error loading system reports. Please try refreshing the page.
-        </Alert>
-        {schoolsError && (
-          <Alert severity="warning" sx={{ mb: 1 }}>
-            Schools: {schoolsError.message || 'Failed to load schools data'}
-          </Alert>
-        )}
-        {studentsError && (
-          <Alert severity="warning" sx={{ mb: 1 }}>
-            Students: {studentsError.message || 'Failed to load students data'}
-          </Alert>
-        )}
-        {employeesError && (
-          <Alert severity="warning" sx={{ mb: 1 }}>
-            Employees: {employeesError.message || 'Failed to load employees data'}
-          </Alert>
-        )}
-        {notificationsError && (
-          <Alert severity="warning" sx={{ mb: 1 }}>
-            Notifications: {notificationsError.message || 'Failed to load notifications data'}
-          </Alert>
-        )}
-      </Box>
+      <Alert severity="error">
+        Error loading schools: {schoolsError.message || 'Failed to load schools data'}
+      </Alert>
     );
   }
+
+  const stats = [
+    {
+      title: 'Total Schools',
+      value: totalSchools,
+      icon: <School />,
+      color: '#1976d2',
+      subtitle: 'Every institution on the platform',
+    },
+    {
+      title: 'Active Schools',
+      value: activeSchools,
+      icon: <TrendingUp />,
+      color: '#388e3c',
+      subtitle: 'Status Active',
+    },
+    {
+      title: 'Inactive Schools',
+      value: inactiveSchools,
+      icon: <Block />,
+      color: '#757575',
+      subtitle: `${suspendedSchools} suspended`,
+    },
+    {
+      title: 'Pending Approval',
+      value: pendingApprovalSchools,
+      icon: <HourglassBottom />,
+      color: '#f57c00',
+      subtitle: 'Awaiting activation',
+    },
+  ];
 
   return (
     <Box>
@@ -156,14 +111,14 @@ const SuperAdminReportsPage = () => {
           System Reports
         </Typography>
         <Typography variant="body1" color="text.secondary">
-          High-level overview of schools, users, and notifications for SuperAdmin.
+          Platform-wide school overview for the platform owner.
         </Typography>
       </Box>
 
       {/* Summary stats */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
-        {stats.map((stat, index) => (
-          <Grid item xs={12} sm={6} md={3} key={index}>
+        {stats.map((stat) => (
+          <Grid item xs={12} sm={6} md={3} key={stat.title}>
             <StatCard {...stat} />
           </Grid>
         ))}
@@ -177,18 +132,18 @@ const SuperAdminReportsPage = () => {
               Schools Overview
             </Typography>
             <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-              List of all schools accessible in the current context with status.
+              All schools on the platform with their registration status.
             </Typography>
 
-            {(!schools || !Array.isArray(schools) || schools.length === 0) && (
+            {schoolList.length === 0 && (
               <Typography color="text.secondary">
                 No schools found in the system.
               </Typography>
             )}
 
-            {Array.isArray(schools) && schools.length > 0 && (
+            {schoolList.length > 0 && (
               <Box>
-                {schools.map((school) => (
+                {schoolList.map((school) => (
                   <Box
                     key={school.id}
                     sx={{
@@ -212,7 +167,7 @@ const SuperAdminReportsPage = () => {
                       </Typography>
                     </Box>
                     <Chip
-                      label={school.status === '1' ? 'Active' : 'Inactive'}
+                      label={SCHOOL_STATUS_LABELS[school.status] ?? school.status}
                       color={school.status === '1' ? 'success' : 'default'}
                       size="small"
                     />
@@ -223,62 +178,27 @@ const SuperAdminReportsPage = () => {
           </Paper>
         </Grid>
 
-        {/* Notifications and activity */}
+        {/* Stats with no platform-wide backend source */}
         <Grid item xs={12} md={4}>
-          <Paper sx={{ p: 3, mb: 3 }}>
-            <Typography variant="h6" gutterBottom>
-              Notifications Summary
-            </Typography>
-            <Box sx={{ display: 'flex', alignItems: 'center', mb: 2 }}>
-              <Avatar sx={{ bgcolor: '#ff9800', mr: 2 }}>
-                <NotificationsActive />
-              </Avatar>
-              <Box>
-                <Typography variant="subtitle1">
-                  {pendingNotifications}
-                </Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Pending / unread notifications
-                </Typography>
-              </Box>
-            </Box>
-            <Divider sx={{ my: 2 }} />
-            <Typography variant="body2" color="text.secondary">
-              Use the notifications panel in the top bar to view and manage
-              individual notifications.
-            </Typography>
-          </Paper>
-
           <Paper sx={{ p: 3 }}>
             <Typography variant="h6" gutterBottom>
-              System Activity Snapshot
+              Not Available Platform-Wide
             </Typography>
-            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 1.5 }}>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Total schools
-                </Typography>
-                <Typography variant="body2">{totalSchools}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Active schools
-                </Typography>
-                <Typography variant="body2">{activeSchools}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Total students
-                </Typography>
-                <Typography variant="body2">{totalStudents}</Typography>
-              </Box>
-              <Box sx={{ display: 'flex', justifyContent: 'space-between' }}>
-                <Typography variant="body2" color="text.secondary">
-                  Total employees
-                </Typography>
-                <Typography variant="body2">{totalEmployees}</Typography>
-              </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mb: 1.5 }}>
+              The backend exposes no cross-tenant endpoint for these figures, so they are
+              intentionally not shown rather than guessed:
+            </Typography>
+            <Box sx={{ display: 'flex', flexWrap: 'wrap', gap: 1 }}>
+              <Chip label="Total students" size="small" variant="outlined" />
+              <Chip label="Total employees" size="small" variant="outlined" />
+              <Chip label="Unread notifications" size="small" variant="outlined" />
+              <Chip label="Financial totals" size="small" variant="outlined" />
             </Box>
+            <Typography variant="body2" color="text.secondary" sx={{ mt: 2 }}>
+              /students, /employees and /notifications are scoped to the caller&apos;s
+              school, and /financial-dashboard is restricted to school Admin and
+              Accountant roles — none answers a platform-wide query.
+            </Typography>
           </Paper>
         </Grid>
       </Grid>

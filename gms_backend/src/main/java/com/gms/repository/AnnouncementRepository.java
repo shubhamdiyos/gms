@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 import java.util.List;
 
 @Repository
-public interface AnnouncementRepository extends JpaRepository<Announcement, Integer> {
+public interface AnnouncementRepository extends TenantScopedRepository<Announcement> {
 
     List<Announcement> findBySchoolIdOrderByPublishDateDesc(Integer schoolId);
 

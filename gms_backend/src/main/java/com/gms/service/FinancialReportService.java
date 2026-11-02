@@ -10,17 +10,17 @@ import java.util.List;
 
 public interface FinancialReportService {
 
-    ResponseEntity<FinancialReportResponse> createFinancialReport(FinancialReportRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FinancialReportResponse> createFinancialReport(FinancialReportRequest request);
 
-    ResponseEntity<FinancialReportResponse> updateFinancialReport(Integer id, FinancialReportRequest request, Integer schoolId, Integer empId);
+    ResponseEntity<FinancialReportResponse> updateFinancialReport(Integer id, FinancialReportRequest request);
 
-    ResponseEntity<?> deleteFinancialReport(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteFinancialReport(Integer id);
 
-    ResponseEntity<List<FinancialReport>> getAllFinancialReports(Integer schoolId);
+    ResponseEntity<List<FinancialReport>> getAllFinancialReports();
 
-    ResponseEntity<FinancialReport> getFinancialReportById(Integer id, Integer schoolId);
+    ResponseEntity<FinancialReport> getFinancialReportById(Integer id);
 
-    ResponseEntity<List<FinancialReport>> getFinancialReportsByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<FinancialReport>> getFinancialReportsByDateRange(LocalDate startDate, LocalDate endDate);
 
-    ResponseEntity<List<FinancialReport>> getFinancialReportsByAcademicYear(Integer schoolId, String academicYear);
+    ResponseEntity<List<FinancialReport>> getFinancialReportsByAcademicYear(String academicYear);
 }

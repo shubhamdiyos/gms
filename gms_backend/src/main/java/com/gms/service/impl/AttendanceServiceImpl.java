@@ -2,6 +2,7 @@
 package com.gms.service.impl;
 
 import com.gms.model.entity.Attendance;
+import com.gms.model.entity.School;
 import com.gms.model.entity.Student;
 import com.gms.model.entity.TimetableSlot;
 import com.gms.model.entity.User;
@@ -12,7 +13,10 @@ import com.gms.model.response.AttendanceResponse;
 import com.gms.model.response.StudentResponse;
 import com.gms.model.response.TimetableSlotResponse;
 import com.gms.repository.AttendanceRepository;
+import com.gms.repository.SchoolRepository;
+import com.gms.repository.TimetableSlotRepository;
 import com.gms.repository.UserRepository;
+import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
@@ -24,19 +28,24 @@ import java.util.List;
 import java.util.stream.Collectors;
 
 @Service
-public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integer> implements AttendanceService {
+public class AttendanceServiceImpl implements AttendanceService {
 
     private final AttendanceRepository attendanceRepository;
+    private final SchoolRepository schoolRepository;
+    private final TimetableSlotRepository timetableSlotRepository;
     private final StudentService studentService;
     private final TimetableService timetableService;
     private final UserService userService;
 
-    public AttendanceServiceImpl(AttendanceRepository attendanceRepository, 
-                               StudentService studentService, 
+    public AttendanceServiceImpl(AttendanceRepository attendanceRepository,
+                               SchoolRepository schoolRepository,
+                               TimetableSlotRepository timetableSlotRepository,
+                               StudentService studentService,
                                TimetableService timetableService,
                                UserService userService) {
-        super(attendanceRepository);
         this.attendanceRepository = attendanceRepository;
+        this.schoolRepository = schoolRepository;
+        this.timetableSlotRepository = timetableSlotRepository;
         this.studentService = studentService;
         this.timetableService = timetableService;
         this.userService = userService;
@@ -44,27 +53,27 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
 
     @Override
     @Transactional
-    public ResponseEntity<AttendanceResponse> recordAttendance(AttendanceRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<AttendanceResponse> recordAttendance(AttendanceRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        // Validate student exists and belongs to the school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentService.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
-        // Validate timetable slot if provided - temporarily simplified
-        TimetableSlot timetableSlot = null;
-        if (request.getTimetableSlotId() != null) {
-            // TODO: Add proper TimetableSlotService when available
-            // For now, skipping timetable slot validation
+        // The DTO calls this field optional; the schema does not — attendances.timetable_slot_id is
+        // NOT NULL, so the code that read the id and then dropped it could never write the row.
+        if (request.getTimetableSlotId() == null) {
+            return ResponseEntity.badRequest().build();
         }
+        TimetableSlot timetableSlot = timetableSlotRepository
+                .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
+                .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
+                        "Timetable slot not found for the current school"));
 
         // Check if attendance already exists for this student on this date
-        List<Attendance> existingAttendance = attendanceRepository.findByStudent_IdAndDateBetween(
+        List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
                 request.getStudentId(), request.getDate(), request.getDate());
         
         if (!existingAttendance.isEmpty()) {
@@ -73,6 +82,7 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
 
         // Create attendance record
         Attendance attendance = new Attendance();
+        attendance.setSchool(schoolRepository.getReferenceById(TenantContext.schoolId()));
         attendance.setStudent(student);
         attendance.setTimetableSlot(timetableSlot);
         attendance.setDate(request.getDate());
@@ -80,7 +90,7 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
         attendance.setRemarks(request.getRemarks());
         
         // Set creator/updated by
-        User creator = userService.findByEmployee_Id(empId)
+        User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
         attendance.setCreatedBy(creator);
         attendance.setUpdatedBy(creator);
@@ -91,38 +101,42 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
 
     @Override
     @Transactional
-    public ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
-        // Temporarily simplified - TimetableSlot operations need proper service
-        // TimetableSlot timetableSlot = timetableSlotRepository.findById(request.getTimetableSlotId())
-        //         .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND", "Timetable slot not found"));
+        // One slot for the whole class register, read with the tenant in the query.
+        TimetableSlot timetableSlot = timetableSlotRepository
+                .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
+                .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
+                        "Timetable slot not found for the current school"));
+
+        School school = schoolRepository.getReferenceById(TenantContext.schoolId());
 
         for (var item : request.getAttendance()) {
             Student student = studentService.findById(item.getStudentId())
                     .orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND", "Student not found"));
 
-            // Simplified validation - skipping timetable slot validation for now
-            // if (!student.getClassroomId().equals(timetableSlot.getTimetable().getClassroom().getId())) {
-            //     return ResponseEntity.badRequest().build();
-            // }
+            if (!student.getClassroomId().equals(timetableSlot.getTimetable().getClassroom().getId())) {
+                return ResponseEntity.badRequest().build();
+            }
 
             // Check if attendance already exists for this student on this date
-            List<Attendance> existingAttendance = attendanceRepository.findByStudent_IdAndDateBetween(
+            List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
                     item.getStudentId(), request.getDate(), request.getDate());
             
             if (existingAttendance.isEmpty()) {
                 Attendance attendance = new Attendance();
+                attendance.setSchool(school);
                 attendance.setStudent(student);
-                // attendance.setTimetableSlot(timetableSlot); // Commented until proper service available
+                attendance.setTimetableSlot(timetableSlot);
                 attendance.setDate(request.getDate());
                 attendance.setStatus(item.getStatus());
                 attendance.setRemarks(item.getRemarks());
                 
                 // Set creator/updated by
-                User creator = userService.findByEmployee_Id(empId)
+                User creator = userService.findByEmployee_Id()
                         .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
                 attendance.setCreatedBy(creator);
                 attendance.setUpdatedBy(creator);
@@ -136,41 +150,36 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
 
     @Override
     @Transactional
-    public ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
-        
-        if (!attendance.getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
-        // Validate student exists and belongs to the school
+        // The load is scoped to the caller's school, so a foreign id yields nothing
         Student student = studentService.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
-        if (!student.getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
-        // Validate timetable slot if provided - temporarily skipped due to missing service
-        TimetableSlot timetableSlot = null;
+        // The register already has a slot, and the column is NOT NULL, so an update that does not name
+        // a new one keeps the existing one rather than writing a null over it.
         if (request.getTimetableSlotId() != null) {
-            // TODO: Add proper TimetableSlotService when available
-            // For now, skipping timetable slot validation
+            TimetableSlot timetableSlot = timetableSlotRepository
+                    .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
+                    .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
+                            "Timetable slot not found for the current school"));
+            attendance.setTimetableSlot(timetableSlot);
         }
 
         // Update attendance record
         attendance.setStudent(student);
-        attendance.setTimetableSlot(timetableSlot);
         attendance.setDate(request.getDate());
         attendance.setStatus(request.getStatus());
         attendance.setRemarks(request.getRemarks());
         
         // Set updated by
-        User updater = userService.findByEmployee_Id(empId)
+        User updater = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
         attendance.setUpdatedBy(updater);
 
@@ -180,17 +189,13 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
 
     @Override
     @Transactional
-    public ResponseEntity<?> deleteAttendance(Integer attendanceId, Integer empId, Integer schoolId) {
-        if (empId == null || schoolId == null) {
+    public ResponseEntity<?> deleteAttendance(Integer attendanceId) {
+        if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
 
         Attendance attendance = attendanceRepository.findById(attendanceId)
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
-        
-        if (!attendance.getStudent().getSchoolId().equals(schoolId)) {
-            return ResponseEntity.status(403).build();
-        }
 
         attendanceRepository.delete(attendance);
         return ResponseEntity.ok().build();
@@ -199,28 +204,29 @@ public class AttendanceServiceImpl extends AbstractCRUDService<Attendance, Integ
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceForStudent(Integer studentId, LocalDate from, LocalDate to) {
-        List<Attendance> attendances = attendanceRepository.findByStudent_IdAndDateBetween(studentId, from, to);
+        List<Attendance> attendances = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(), studentId, from, to);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceForClassroom(Integer classroomId, LocalDate date) {
-        List<Attendance> attendances = attendanceRepository.findByTimetableSlot_Timetable_Classroom_IdAndDate(classroomId, date);
+        List<Attendance> attendances = attendanceRepository.findByTimetableSlot_Timetable_Classroom_School_IdAndTimetableSlot_Timetable_Classroom_IdAndDate(
+                TenantContext.schoolId(), classroomId, date);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
     
     @Override
     @Transactional(readOnly = true)
-    public List<AttendanceResponse> getAttendanceByDateRange(Integer schoolId, LocalDate startDate, LocalDate endDate) {
-        List<Attendance> attendances = attendanceRepository.findBySchoolIdAndDateBetween(schoolId, startDate, endDate);
+    public List<AttendanceResponse> getAttendanceByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<Attendance> attendances = attendanceRepository.findBySchoolIdAndDateBetween(TenantContext.schoolId(), startDate, endDate);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
     
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceByStudentAndDateRange(Integer studentId, LocalDate startDate, LocalDate endDate) {
-        List<Attendance> attendances = attendanceRepository.findByStudent_IdAndDateBetween(studentId, startDate, endDate);
+        List<Attendance> attendances = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(), studentId, startDate, endDate);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }
 

@@ -1,8 +1,8 @@
 package com.gms.controller;
 
 import com.gms.model.request.StudentAdmissionRequest;
+import com.gms.security.TenantContext;
 import com.gms.service.StudentAdmissionService;
-import com.gms.util.SecurityUtil;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -17,19 +17,20 @@ public class StudentAdmissionController {
     private StudentAdmissionService studentAdmissionService;
     
     @PostMapping("/apply")
+    @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> applyForAdmission(@RequestBody StudentAdmissionRequest studentAdmissionRequest) {
-        return studentAdmissionService.applyForAdmission(studentAdmissionRequest, SecurityUtil.getSchoolIdFromToken());
+        return studentAdmissionService.applyForAdmission(studentAdmissionRequest);
     }
 
     @PutMapping("/{admissionId}/approve")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> approveAdmission(@PathVariable Integer admissionId) {
-        return studentAdmissionService.approveAdmission(admissionId, SecurityUtil.getSchoolIdFromToken());
+        return studentAdmissionService.approveAdmission(admissionId);
     }
 
     @PutMapping("/{admissionId}/reject")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> rejectAdmission(@PathVariable Integer admissionId) {
-        return studentAdmissionService.rejectAdmission(admissionId, SecurityUtil.getSchoolIdFromToken());
+        return studentAdmissionService.rejectAdmission(admissionId);
     }
 }

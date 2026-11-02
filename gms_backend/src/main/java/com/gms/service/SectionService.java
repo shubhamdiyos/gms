@@ -9,15 +9,15 @@ import java.util.List;
 
 public interface SectionService {
 
-    ResponseEntity<SectionResponse> createSection(SectionRequest sectionRequest, Integer schoolId, Integer empId);
+    ResponseEntity<SectionResponse> createSection(SectionRequest sectionRequest);
 
-    ResponseEntity<SectionResponse> updateSection(Integer id, SectionRequest sectionRequest, Integer schoolId, Integer empId);
+    ResponseEntity<SectionResponse> updateSection(Integer id, SectionRequest sectionRequest);
 
-    ResponseEntity<?> deleteSection(Integer id, Integer schoolId, Integer empId);
+    ResponseEntity<?> deleteSection(Integer id);
 
-    ResponseEntity<List<Section>> getAllSections(Integer schoolId);
+    ResponseEntity<List<Section>> getAllSections();
 
-    ResponseEntity<Section> getSectionById(Integer id, Integer schoolId);
+    ResponseEntity<Section> getSectionById(Integer id);
     
     // Service-to-service communication method
     java.util.Optional<Section> findById(Integer id);

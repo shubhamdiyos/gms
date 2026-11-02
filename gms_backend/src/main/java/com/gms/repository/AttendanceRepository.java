@@ -11,12 +11,19 @@ import java.time.LocalDate;
 import java.util.List;
 
 @Repository
-public interface AttendanceRepository extends JpaRepository<Attendance, Integer> {
+public interface AttendanceRepository extends TenantScopedRepository<Attendance> {
 
-    List<Attendance> findByStudent_IdAndDateBetween(Integer studentId, LocalDate startDate, LocalDate endDate);
+    /**
+     * Attendance of one student, inside one school. {@code attendances} has no {@code school_id}
+     * column yet ({@code C-7}), so the tenant is reached through the student — and it has to be
+     * reached, because student 4 of school 2 and student 4 of school 7 are both addressed by {@code 4}.
+     */
+    List<Attendance> findByStudent_School_IdAndStudent_IdAndDateBetween(Integer schoolId, Integer studentId,
+                                                                        LocalDate startDate, LocalDate endDate);
 
-    List<Attendance> findByTimetableSlot_Timetable_Classroom_IdAndDate(Integer classroomId, LocalDate date);
-    
+    List<Attendance> findByTimetableSlot_Timetable_Classroom_School_IdAndTimetableSlot_Timetable_Classroom_IdAndDate(
+            Integer schoolId, Integer classroomId, LocalDate date);
+
     @Query("SELECT a FROM Attendance a WHERE a.student.school.id = :schoolId AND a.date BETWEEN :startDate AND :endDate")
     List<Attendance> findBySchoolIdAndDateBetween(@Param("schoolId") Integer schoolId, 
                                                   @Param("startDate") LocalDate startDate, 

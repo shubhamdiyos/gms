@@ -8,6 +8,7 @@ import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotNull;
 import lombok.Getter;
 import lombok.Setter;
+import org.hibernate.Hibernate;
 
 /**
  * Designation Entity - Defines job roles and hierarchy within schools
@@ -25,7 +26,7 @@ import lombok.Setter;
     @UniqueConstraint(columnNames = {"designation_id"}),
     @UniqueConstraint(columnNames = {"school_id", "title"})
 })
-public class Designation extends BaseAuditEntity {
+public class Designation extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
@@ -94,17 +95,17 @@ public class Designation extends BaseAuditEntity {
 
     @JsonProperty("school_name")
     public String getSchoolName() {
-        return school != null ? school.getSchoolName() : null;
+        return school != null && Hibernate.isInitialized(school) ? school.getSchoolName() : null;
     }
 
     @JsonProperty("department_code")
     public String getDepartmentCode() {
-        return department != null ? department.getCode() : null;
+        return department != null && Hibernate.isInitialized(department) ? department.getCode() : null;
     }
 
     @JsonProperty("department_name")
     public String getDepartmentName() {
-        return department != null ? department.getDescription() : null;
+        return department != null && Hibernate.isInitialized(department) ? department.getDescription() : null;
     }
 
     @JsonProperty("available_positions")

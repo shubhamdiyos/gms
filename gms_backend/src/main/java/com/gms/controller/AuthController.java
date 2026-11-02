@@ -1,5 +1,6 @@
 package com.gms.controller;
 
+import com.gms.enums.RoleEnum;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.User;
 import com.gms.model.request.LoginRequest;
@@ -7,15 +8,16 @@ import com.gms.model.request.ChangePasswordRequest;
 import com.gms.model.request.SelfRegisterRequest;
 import com.gms.model.response.AuthTokenResponse;
 import com.gms.security.JwtTokenProvider;
+import com.gms.security.TenantContext;
 import com.gms.service.EmployeeService;
 import com.gms.service.LoginAttemptService;
 import com.gms.service.UserService;
 import com.gms.util.Constants;
-import com.gms.util.SecurityUtil;
 import com.gms.util.PasswordValidator;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
@@ -29,7 +31,6 @@ import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
-import java.util.HashSet;
 import java.util.Set;
 import java.util.Optional;
 
@@ -83,6 +84,11 @@ public class AuthController {
             loginAttemptService.onSuccess(domainUser);
 
             UserDetails principal = (UserDetails) auth.getPrincipal();
+            // The authorities come back as bare role codes (CustomUserDetailsService grants them with
+            // no ROLE_ prefix); the replace is defensive for a principal loaded any other way. The
+            // set's iteration order is unspecified, so the token's role order is fixed where the claim
+            // is written — JwtTokenProvider.rolesClaim sorts them into the array (Stage 3 C-6), which
+            // is what lets a client read the claim as data instead of guessing a precedence.
             Set<String> roles = principal.getAuthorities().stream()
                     .map(authority -> authority.getAuthority().replace("ROLE_", ""))
                     .collect(java.util.stream.Collectors.toSet());
@@ -90,7 +96,8 @@ public class AuthController {
             Integer schoolId = (domainUser.getSchool() != null) ? domainUser.getSchool().getId() : null;
             // For superadmin and other special users, use user ID as employee ID if no employee is associated
             Integer empId = (domainUser.getEmployee() != null) ? domainUser.getEmployee().getId() : domainUser.getId();
-            String token = tokenProvider.createToken(domainUser.getUsername(), roles, schoolId, empId);
+            String token = tokenProvider.createToken(domainUser.getUsername(), roles, schoolId, empId,
+                    domainUser.getId());
 
             AuthTokenResponse payload = new AuthTokenResponse(token,
                     (int) tokenProvider.getValiditySeconds(), domainUser.isRequirePasswordChange());
@@ -103,8 +110,9 @@ public class AuthController {
     }
 
     @PostMapping("/change-password")
+    @PreAuthorize("isAuthenticated()")
     public ResponseEntity<Void> changePassword(@Valid @RequestBody ChangePasswordRequest request) {
-        String username = SecurityUtil.getUsernameFromToken();
+        String username = TenantContext.username();
         if (username == null) {
             return ResponseEntity.status(401).build();
         }
@@ -128,6 +136,7 @@ public class AuthController {
     }
 
     @PostMapping("/self-register")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<Void> selfRegister(@Valid @RequestBody SelfRegisterRequest request) {
         // Validate employee exists and belongs to provided school
         Optional<Employee> employeeOptional = employeeService.findById(request.getEmpId());
@@ -141,7 +150,7 @@ public class AuthController {
         if (userService.existsByUsername(request.getUsername())) {
             return ResponseEntity.status(409).build();
         }
-        if (userService.findByEmployee_Id(employee.getId()).isPresent()) {
+        if (userService.existsByEmployee_Id(employee.getId())) {
             return ResponseEntity.status(409).build();
         }
 
@@ -159,9 +168,23 @@ public class AuthController {
         user.setPassword(passwordEncoder.encode(request.getPassword()));
         user.setEnabled(true);
         user.setRequirePasswordChange(false);
-        Set<String> roles = new HashSet<>();
-        roles.add("EMPLOYEE");
-        user.setRoles(roles);
+        // TEACHER, deliberately and narrowly (Stage 3 C-6, SEC-17's EMPLOYEE half).
+        //
+        // This endpoint registers a login for an Employee row that already exists — school staff. The
+        // request DTO (SelfRegisterRequest) carries no role field, so the role is the server's choice
+        // and must be the least-privilege one in RoleEnum that still describes staff: TEACHER.
+        //   * ADMIN / SUPERADMIN / ACCOUNTANT would be an escalation handed out by a form with no role
+        //     input, and ACCOUNTANT is the money surface this very card made issuable through
+        //     /users/create, where an administrator chooses it knowingly.
+        //   * STUDENT / PARENT are wrong in kind: their self-service routes resolve through the
+        //     student_id / parent_id pointers on User, which this account does not have.
+        //
+        // The literal "EMPLOYEE" this used to write is gone: no guard names it, so the account could
+        // reach nothing while still burning the username and the existsByEmployee_Id slot that a
+        // correctly provisioned account for the same employee needs. The code is routed through the
+        // same validator /users/create uses, so anything outside RoleEnum now answers 400 before the
+        // username is taken rather than minting another unreachable login.
+        user.setRoles(userService.authoriseRoles(Set.of(RoleEnum.TEACHER.getCode())));
 
         userService.save(user);
         return ResponseEntity.ok().build();

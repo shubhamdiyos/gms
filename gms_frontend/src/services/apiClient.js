@@ -41,6 +41,17 @@ apiClient.interceptors.response.use(
     return response;
   },
   (error) => {
+    // A 401 that answers a login attempt is not an expired session. AuthController replies to a
+    // bad credential with a bare 401 and no body (`AuthController.java:76` and `:108`), so the
+    // branch below would clear storage, hard-reload the very page the user is typing on — losing
+    // the username — and say "Session expired" to someone who was never signed in, while
+    // useAuth.login's own catch (`useAuth.js:69-73`) toasts the real reason. One call, one voice.
+    const config = error.config ?? {};
+    const isLoginAttempt = config.method === 'post' && /\/auth\/login\/?$/.test(config.url ?? '');
+    if (isLoginAttempt) {
+      return Promise.reject(error);
+    }
+
     if (error.response?.status === 401) {
       // Token expired or invalid
       localStorage.removeItem('gms_token');

@@ -30,31 +30,26 @@ import {
   useCreateSchoolMutation,
   useUpdateSchoolMutation,
   useToggleSchoolMutation,
-  useGetSchoolByIdQuery,
 } from '../../store/api/apiSlice';
 import { toast } from 'react-toastify';
 
-const schema = yup.object({
-  schoolName: yup.string().required('School name is required'),
-  schoolCode: yup.string().required('School code is required'),
-  principalName: yup.string().required('Principal name is required'),
-  phone: yup.string().required('Phone is required'),
-  email: yup.string().email('Invalid email').required('Email is required'),
-  address: yup.string().required('Address is required'),
-  establishedYear: yup.number().required('Established year is required'),
-  boardAffiliation: yup.string().required('Board affiliation is required'),
-  // Required for school creation (admin bootstrap)
-  adminFullName: yup.string().when('isEdit', {
-    is: false,
-    then: (schema) => schema.required('Admin full name is required'),
-    otherwise: (schema) => schema.notRequired(),
-  }),
-  adminEmail: yup.string().email('Invalid email').when('isEdit', {
-    is: false,
-    then: (schema) => schema.required('Admin email is required'),
-    otherwise: (schema) => schema.notRequired(),
-  }),
-});
+const buildSchema = (isEdit) =>
+  yup.object({
+    schoolName: yup.string().required('School name is required'),
+    schoolCode: yup.string().required('School code is required'),
+    principalName: yup.string().required('Principal name is required'),
+    phone: yup.string().required('Phone is required'),
+    email: yup.string().email('Invalid email').required('Email is required'),
+    address: yup.string().required('Address is required'),
+    establishedYear: yup.number().required('Established year is required'),
+    boardAffiliation: yup.string().required('Board affiliation is required'),
+    adminFullName: isEdit
+      ? yup.string().notRequired()
+      : yup.string().required('Admin full name is required'),
+    adminEmail: isEdit
+      ? yup.string().email('Invalid email').notRequired()
+      : yup.string().email('Invalid email').required('Admin email is required'),
+  });
 
 const SchoolsPage = () => {
   const [open, setOpen] = useState(false);
@@ -71,17 +66,24 @@ const SchoolsPage = () => {
     register,
     handleSubmit,
     reset,
-    setValue,
     formState: { errors },
   } = useForm({
-    resolver: yupResolver(schema),
-    context: { isEdit: !!editingSchool },
+    resolver: yupResolver(buildSchema(!!editingSchool)),
   });
 
   const handleOpen = (school = null) => {
     setEditingSchool(school);
     if (school) {
-      reset(school);
+      reset({
+        schoolName: school.schoolName,
+        schoolCode: school.schoolCode,
+        address: school.address,
+        phone: school.phone,
+        email: school.email,
+        principalName: school.principalName,
+        establishedYear: school.establishedYear,
+        boardAffiliation: school.boardAffiliation,
+      });
     } else {
       reset();
     }

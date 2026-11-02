@@ -14,12 +14,21 @@ RUN mvn clean package -DskipTests
 FROM eclipse-temurin:21-jre-alpine
 WORKDIR /app
 
+# Not root. The application can read exactly one file and write nothing it needs; a container
+# that escapes for any reason should land in an account with no ownership of the host's uid 0.
+# Created before the COPY, because --chown resolves the name in the layer it appears in.
+RUN addgroup -S spring && adduser -S spring -G spring
+
 # Copy the built JAR from build stage
-COPY --from=build /app/target/*.jar app.jar
+COPY --from=build --chown=spring:spring /app/target/*.jar app.jar
+
+USER spring:spring
 
 # Expose port
 EXPOSE 8080
 
-# Run the application
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# -XX:MaxRAMPercentage, because the container limit is the only memory figure that is true here:
+# a JVM that does not read cgroups sizes its heap against the host and is OOM-killed by the kernel
+# at a number the operator never chose. `java -jar` inherits that decision.
+ENTRYPOINT ["java", "-XX:MaxRAMPercentage=75.0", "-jar", "app.jar"]
 

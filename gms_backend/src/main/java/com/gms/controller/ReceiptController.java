@@ -3,8 +3,8 @@ package com.gms.controller;
 import com.gms.model.entity.Receipt;
 import com.gms.model.request.ReceiptRequest;
 import com.gms.model.response.ReceiptResponse;
+import com.gms.security.TenantContext;
 import com.gms.service.ReceiptService;
-import com.gms.util.SecurityUtil;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -28,40 +28,32 @@ public class ReceiptController {
     @PostMapping
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<ReceiptResponse> createReceipt(@Valid @RequestBody ReceiptRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return receiptService.createReceipt(request, schoolId, empId);
+        return receiptService.createReceipt(request);
     }
 
     @PutMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<ReceiptResponse> updateReceipt(@PathVariable Integer id,
                                                        @Valid @RequestBody ReceiptRequest request) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return receiptService.updateReceipt(id, request, schoolId, empId);
+        return receiptService.updateReceipt(id, request);
     }
 
     @DeleteMapping("/{id}")
     @PreAuthorize("hasAuthority('ADMIN')")
     public ResponseEntity<?> deleteReceipt(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        Integer empId = SecurityUtil.getEmpIdFromToken();
-        return receiptService.deleteReceipt(id, schoolId, empId);
+        return receiptService.deleteReceipt(id);
     }
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Receipt>> getAllReceipts() {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return receiptService.getAllReceipts(schoolId);
+        return receiptService.getAllReceipts();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Receipt> getReceiptById(@PathVariable Integer id) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return receiptService.getReceiptById(id, schoolId);
+        return receiptService.getReceiptById(id);
     }
 
     @GetMapping("/date-range")
@@ -69,14 +61,12 @@ public class ReceiptController {
     public ResponseEntity<List<Receipt>> getReceiptsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return receiptService.getReceiptsByDateRange(schoolId, startDate, endDate);
+        return receiptService.getReceiptsByDateRange(startDate, endDate);
     }
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
     public ResponseEntity<List<Receipt>> getReceiptsByStudent(@PathVariable Integer studentId) {
-        Integer schoolId = SecurityUtil.getSchoolIdFromToken();
-        return receiptService.getReceiptsByStudent(studentId, schoolId);
+        return receiptService.getReceiptsByStudent(studentId);
     }
 }

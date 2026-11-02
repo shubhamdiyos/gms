@@ -11,12 +11,17 @@ import java.math.BigDecimal;
 @Setter
 @Entity
 @Table(name = "results")
-public class Result extends BaseAuditEntity {
+public class Result extends BaseAuditEntity implements TenantOwned {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     @Column(name = "id", nullable = false)
     private Integer id;
+
+    @JsonIgnore
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "school_id", nullable = false)
+    private School school;
 
     @JsonIgnore
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
