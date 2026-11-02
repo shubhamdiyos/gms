@@ -1572,11 +1572,35 @@ ok   Backend build and tests: completed / success (run 125313629455)
 58 files, for a commit that changed three. A `pull_request` event evaluates `paths-ignore` against the **whole pull
 diff**, not the commit that was just pushed, so a documentation commit inside a pull request that also carries Java
 owes every gate the code-owning diff owes. Two consequences, both recorded rather than argued away: the `ci.yml owed:
-False` case is **still unmeasured on this programme** — it needs a pull request whose entire diff is documentation,
-which PR #15 was and which this branch is not — and the design argument for one required context does not change,
-because it never rested on this branch. It rests on PR #15's measured **zero runs** for a docs-only diff: if all six
-gates had been required, that pull would have been unmergeable. What `c5698bf` does prove is the cheaper half — six
-gates owed, all six returned `success`, and the meta check named each one's check-run id instead of assuming them.
+False` case **was unmeasured on this programme** at that commit — it needed a pull request whose entire diff is
+documentation, which PR #15 was and which this branch is not, and PR #29 is — and the design argument for one required
+context does not change, because it never rested on this branch. It rests on PR #15's measured **zero runs** for a
+docs-only diff: if all six gates had been required, that pull would have been unmergeable. What `c5698bf` does prove is
+the cheaper half — six gates owed, all six returned `success`, and the meta check named each one's check-run id instead
+of assuming them.
+
+**Then the `ci.yml owed: False` case was measured, by the pull request whose whole diff is prose.** PR #29 (`f566849`,
+11 markdown files, nothing else) started exactly two check suites — `Gate coverage` and Vercel's preview comment — and
+the meta check printed the line Stage 5 had been reasoning about rather than reading:
+
+```
+changed files: 11 | ci.yml owed: False | validate-workflows.yml owed: False | gates owed: 0 of 6
+skip Backend build and tests: its workflow is path-filtered for this diff, which is policy, not a pass
+…
+gate coverage: 0 owed gate(s) reported success, 6 legitimately filtered by the path rules
+```
+
+Run `41465291852`, conclusion `success`, ~20 s of `ubuntu-latest` and no build. So the premise behind *one* required
+context rather than six holds in the live case and not only by inference from PR #15's silence: a diff no code can break
+is owed nothing, is reported as **filtered** rather than passed, and still receives a verdict from the one workflow that
+declares no filter. Those six `skip … which is policy, not a pass` lines are the whole product — the same absence is a
+broken pipeline on a code pull and the intended outcome on this one, and only the diff decides which. The zero-owed case
+does not get away with a deleted workflow either: the meta check's first loop over `GATES` is **unconditional** — it
+refuses a missing file or a renamed job before it computes anything — so this pull would have died on
+`.github/workflows/ci.yml is gone. 4 gate job(s) were owed from it` even while owing nothing, which is the INF-23 shape
+PR #28 already demonstrated in 6 s. Note that the message's "were owed" is a figure of speech, not the arithmetic two
+steps later: on a docs-only diff the true owed count is 0, and the refusal still fires. What a docs-only pull genuinely
+cannot test is the polling half, and nothing here claims it did.
 
 **PR #26 merged, and the rule that actually blocked it.** `feat/post-pr25-hardening` landed on `master` as
 `8145a31e608f435807216711f7bdcb57d7f81daa` at 14:32:30Z on 2026-11-02 — a merge commit over `ef00eb9`, 65 changed
