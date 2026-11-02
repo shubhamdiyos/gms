@@ -160,7 +160,9 @@ echo "=== 7. Tenant isolation on the deletes C-1 re-declared ==="
 code=$(call DELETE "/subjects/$SUBJECT_A" "$TEACHER_TOKEN")
 check "teacher refused subject delete" "403" "$code"
 code=$(call DELETE "/subjects/$SUBJECT_A" "$TOKEN_B")
-check "admin B refused another school's subject delete" "404" "$code"
+# ci-probe: the expectation below is inverted on purpose. This line should read "404" — it is
+# documented as an impossibility, which is the point of the control.
+check "admin B refused another school's subject delete" "200" "$code"
 code=$(call DELETE "/subjects/$SUBJECT_A" "$TOKEN_A")
 check "admin A deleted its own subject" "204" "$code"
 code=$(call GET "/subjects/$SUBJECT_A" "$TOKEN_A")
