@@ -26,3 +26,6 @@ logs/
 
 # Compiled artifacts (a stray .class under src/ once shipped the default admin password)
 *.class
+
+# Editor/agent scratch: .qoder/worktrees holds throwaway checkouts, never a project artefact
+.qoder/
