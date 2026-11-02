@@ -105,19 +105,9 @@ class AuthService {
     }
   }
 
-  // Check if user has required role
-  static hasRole(requiredRoles) {
-    const user = this.getUser();
-    if (!user || !user.roles) return false;
-    
-    return requiredRoles.some(role => user.roles.includes(role));
-  }
-
-  // Get user's primary role
-  static getUserRole() {
-    const user = this.getUser();
-    return user?.roles?.[0] || null;
-  }
+  // Role questions are answered by useAuth.hasRole and useAuth.getPrimaryRole, which test
+  // membership. Nothing here reads `roles[0]`: the JWT claim is sorted alphabetically
+  // (JwtTokenProvider.rolesClaim), so index 0 is the first role name, not the senior one.
 }
 
 export default AuthService;

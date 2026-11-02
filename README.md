@@ -168,6 +168,12 @@ npm run dev
 
 Frontend will start on `http://localhost:5173`
 
+**One flag to know about before a demo.** `VITE_MOCK_AUTH=true` (read at build time by
+`src/services/authService.js:13` and `src/store/api/apiSlice.js:16`) routes every request to in-memory fixtures and
+makes the login form accept any password, so a stale local `.env` silently turns the whole application into fake data.
+It is unset here — `gms_frontend/` carries only `.env.production`, and the committed `dist/` bundle contains no
+mock module at all — so both `npm run dev` and the built site talk to the real backend.
+
 ## 🔑 Initial SuperAdmin
 
 The first SuperAdmin is created at startup by the bootstrap runner. Its username and
