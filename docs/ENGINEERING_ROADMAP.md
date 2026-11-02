@@ -899,8 +899,9 @@ database that exists for the length of one job and is thrown away. The boot step
 missing is the harness's first assertion: `StartupSecurityValidator` must pass and the Flyway chain must
 satisfy `ddl-auto=validate` before any suite runs. What remains of the honesty is the *display name*:
 `Live tenancy suites`, with no `if:` in front of it, and its name in `gate-coverage.yml`'s `GATES` map
-and `validate-workflows.yml`'s required-context list, so a red here refuses the merge. See Stage 5 for
-the measurement it produced and the four controls that prove it can say no.
+and `validate-workflows.yml`'s required-context list, so a red here refuses the merge. See Stage 5 for the
+measurement it produced on both machines, the five controls that prove it can say no, and the run on the real platform
+where it actually did (`41485021174` red, `41488389433` green).
 
 **A defect the P1 fixture surfaced, recorded rather than quietly fixed.**
 `TimetableServiceImpl.createOrUpdateTimetable` calls `timetable.getSlots().clear()` and then re-adds the
@@ -1625,11 +1626,21 @@ Eight suites carry `0|` (no ceiling, no reason, no skip tolerated); c4 carries 1
 A non-numeric ceiling, or a nonzero ceiling with an empty reason, is a `FATAL` before the boot. Above the ceiling,
 the verdict is `SKIP` and the gate is red.
 
-**What it measured — the laptop run, because the runner had not yet seen it.** The command the harness header
-documents, against a database created for the run (`gms_live_220739`, `CREATE DATABASE` on the same container CI
-gets from its `services:` block) on colima at 2 CPU / 4 GiB: application **up in 9 s**, the nine steps in **28 s**,
-**626 assertions passing, 0 failed**, **17 skipped and all seventeen inside c4's ceiling**, exit 0. Per
-step: c1 33, c2 32, c3 25, c4 118, c7 68, mvp-e2e 298, p1-hardening 34, security 18.
+**What it measured, on both machines.** The command the harness header documents, run twice: on colima at 2 CPU /
+4 GiB against a database created for the run (`gms_live_220739`, `CREATE DATABASE` on the same container image CI
+gets from its `services:` block), and on `ubuntu-latest` inside the job itself (run `41488389433`). The verdicts are
+identical; only the clock differs, which is the point of writing the harness once.
+
+| | laptop, colima 2 CPU / 4 GiB | runner, `ubuntu-latest` |
+|---|---|---|
+| application up | 9 s | **18 s** |
+| the nine steps | 28 s | **34 s** |
+| assertions | 626 passed, 0 failed | **626 passed, 0 failed** |
+| skipped | 17, all at c4's ceiling of 17 | **17, all at c4's ceiling of 17** |
+| job wall clock | not applicable — no artifact download, no image pull | **82 s**, including checkout, `download-artifact`, `setup-java`, the `postgres:15` pull and the log upload |
+
+Per step the runner printed: c1 33 in 2 s, c2 32 in 2 s, c3 25 in 2 s, c4 118 in 6 s (+17 skipped), c7 68 in 5 s,
+mvp-e2e 298 in 10 s, p1-fixtures 3 s, p1-hardening 34 in 3 s, security 18 in 1 s.
 
 **The first run found two defects, which is the argument for the harness existing.**
 
@@ -1681,20 +1692,50 @@ answer 403 for a retired row in places the reads now answer 404 — the asymmetr
 The green path re-measured after the wiring edits: **626 / 0 failed / 17 skipped at ceiling / exit 0**, and all 15
 structure guards in `validate-workflows.yml` executed locally against this tree, all green.
 
+**Then the runner ran it, and it was the runner that found the bugs.** The first Linux execution — CI run
+`41485021174`, 2026-11-02 — went red in three jobs, and two of the three were defects no laptop, and no local
+control, had been able to produce:
+
+| red on the first runner run | what it actually was | what changed |
+|---|---|---|
+| `Live tenancy suites`, exit 1 at 87 s | `p1_fixtures.sh:224` computed the attendance fixture's candidate date with `date -v-${DAY_OFFSET}d +%F`. That is a BSD flag. The runner's `date` answered `error: unexpected argument '-v' found` and wrote **nothing to stdout**; the empty string went into `… AND date = ''`, Postgres refused it (`ERROR: invalid input syntax for type date: ""`), `ON_ERROR_STOP` left `USED` empty, so the loop never broke, spent all 31 offsets and died at `FATAL: no free date for the attendance fixture` — **before** writing `$GMS_P1_FIXTURE_ENV`, which took `verify-p1-hardening.sh:33` down on `${GMS_ADMIN_USERNAME:?…}` as well. Seven of the nine steps were already green by then, mvp-e2e at 298/0/0. | the date is read from `current_date` on the same server that stores the column: `sql "SELECT to_char(current_date - $DAY_OFFSET, 'YYYY-MM-DD')"` |
+| `Lint every workflow`, exit 1 at 43 s | `actionlint`/shellcheck on `ci.yml`'s `Where the jar landed` step: `SC2006 … Use $(…) notation instead of legacy backticks` and `SC2211 … This is a glob used as a command name`. Not a style complaint — the backticks sat inside a **double-quoted `echo`**, so the shell would have run `gms_backend/target/*.jar` as a command and printed its own FATAL message with the path substituted away. | the backticks are gone from that string |
+| `Gate coverage`, exit 1 at 190 s | **Not a defect.** Two owed gates were red, so it refused — which is the product. The pipeline that `gate-coverage.yml` was written to catch (a green PR whose gate never ran) is indistinguishable from this one from the outside, and this is the second time it has been observed refusing on the real platform. | nothing to fix; see the row above for what made the gates red |
+
+The second run — CI `41488389433`, same branch, head `b48d234` — is **green end to end**: `Live tenancy suites` 82 s,
+`Backend build and tests` 78 s, `Frontend lint and build` 23 s, `Infrastructure definitions` 21 s, `Verify scripts
+syntax and presence` 17 s, `Lint every workflow` 31 s, `Check trigger sets and permissions` 17 s, `Gate coverage`
+175 s. **444 runner-seconds over eight jobs = 7.4 runner-minutes per push, $0** — the repository is public, so
+Linux minutes are not billed, and the estimate this stage carried ("roughly three minutes for the backend job, one
+runner minute for a boot-and-suite job") is replaced by those numbers rather than by a hope. `Gate coverage` spends
+175 s of the 444 *waiting*, not working: that is the price of a watcher that can distinguish "filtered by policy"
+from "gone", and it finished a full 2100 s before the deadline it is armed with and 25 minutes before its own job
+timeout.
+
+A read-only sweep of every script the job executes (all twelve, end to end) looked for the next `date -v` — `sed -i`,
+`grep -oP`, `stat -f`, `base64 -d`, padded `wc`, gawk-only `match()`, `find -printf`, the Homebrew-Postgres
+assumption — and found none: the only remaining host-dependent path is the `psql`-on-the-host branch in
+`verify-mvp-e2e.sh:240` and `verify-perf-50k.sh:180`, which is dead code on CI because nothing sets `GMS_PG_HOST`
+there. That is a *searched-and-clear* claim about a snapshot, not a proof about the future; the runner itself
+remains the test.
+
 **The arithmetic the deadline now carries.** `gate-coverage.yml` waits for the slowest gate rather than doing work,
-so adding a gate that boots the application changes its ceiling. `backend` runs 20 min max, `live-tenancy` now 15 (measured
-on a laptop: 9 s boot + 28 s of suites, against an artifact download and an image pull), and 20 + 15 = **2100 s** is
+so adding a gate that boots the application changes its ceiling. `backend` runs 20 min max, `live-tenancy` 15 — a
+ceiling, now, rather than a guess: it measured **82 s** on the runner, of which 18 s was the boot, so the timeout
+leaves ten minutes of headroom for a cold `postgres:15` pull or a slow artifact download. 20 + 15 = **2100 s** is
 exactly `DEADLINE_SECONDS` — so a gate that finishes inside its own timeout always finishes inside the watch, and a
 "no verdict" refusal can only mean a queue or a hang. The watcher's own `timeout-minutes` went 30 → 40 so it prints
-that refusal instead of being killed mid-poll.
+that refusal instead of being killed mid-poll. Both figures were set before the first runner minute; neither needed
+moving after it.
 
-**Status, in the mandate's buckets.** *Implemented and locally verified:* the harness, the nine-step list, the
-ceiling policy, the two defect fixes, the five controls, the gate wiring in both enforcement lists. *Not yet
-verified:* the job on a GitHub runner — the pull request that carries it **is** its first CI run, and the
-runner-minute figures it prints replace the estimates here. *Deliberately not run by CI:* `verify-perf-50k.sh`
-(needs the 1.84M-row load; it runs where it has always run, and Stage 5 holds its numbers) and `verify-schema.sh`
-(creates and drops probe databases — destructive by design, and the chain it validates is validated by the boot
-above, which dies if Flyway and `ddl-auto=validate` disagree).
+**Status, in the mandate's buckets.** *Verified:* the harness, the nine-step list, the ceiling policy, the two
+defect fixes, the five controls, the gate wiring in both enforcement lists — and now **the job on a GitHub runner**,
+green on run `41488389433` at 82 s with 626 assertions, 0 failures and 17 skips at ceiling, after the earlier run
+`41485021174` proved the same gate red on two real defects and refused to let the PR go green. *Deliberately not run
+by CI:* `verify-perf-50k.sh` (needs the 1.84M-row load; it runs where it has always run, and Stage 5 holds its
+numbers) and `verify-schema.sh` (creates and drops probe databases — destructive by design, and the chain it
+validates is validated by the boot above, which dies if Flyway and `ddl-auto=validate` disagree). *Open, and not a
+CI question:* PR #30 still needs the owner's review; nothing here has been merged.
 
 ### Stage 6 — Deployment preparation (Oracle enters)
 
@@ -1773,9 +1814,10 @@ system, the remaining `DOC-*`).
 | 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**: V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated twice** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see); **5 met on minutes, partly on the job split** — **302 runner-seconds** over seven executed jobs, **112 s wall**, **$0**, with `ci.yml`'s own four jobs at 99 s → 154 s. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (nothing here ran on 17; the 16.15 attribution is withdrawn), the live-tenancy CI job — a stub on the day this row was written and a **gate** the same day, wired through
-`scripts/ci-live-tenancy.sh`, measured at 626 assertions / 17 skips at ceiling / exit 0 on the laptop and seen red
-by five controls, with its first runner minute belonging to the pull request that carries it (see the Stage 5
-section above), and the integration-job split in criterion 5's wording | $0 (runner minutes only; the DoD-4 probe spent one extra pipeline run, also $0) | No |
+`scripts/ci-live-tenancy.sh`, measured at **626 assertions / 17 skips at ceiling / exit 0** on both the laptop and
+the runner (run `41485021174` red on two host-portability defects, run `41488389433` green with the job at 82 s),
+seen red by five local controls and once by the real platform, still awaiting the owner's review, and the
+integration-job split in criterion 5's wording | $0 — 906 runner-seconds (15.1 runner-minutes) for the two pipelines this branch has run, on a **public repository where Linux minutes are not billed** | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 

@@ -665,7 +665,9 @@ backend classes are architecture tests that fail the build on exactly the refact
 coverage threshold, and the tenancy scripts still need a live backend (`ci.yml`'s `live-tenancy` job is disabled).
 *Corrected the same day:* the last parenthesis is false now. `live-tenancy` boots the `backend` job's jar against a
 `postgres:15` service on the runner and runs the nine live suites through `scripts/ci-live-tenancy.sh` as a gate —
-626 assertions, 17 skips inside one documented ceiling, no repository secret read. The residue this row names is
+626 assertions, 17 skips inside one documented ceiling, no repository secret read, and **green on the runner itself**
+(job 82 s, run `41488389433`) after the run before it came back red on two defects only a real runner can surface: a
+BSD `date -v` in the fixture seeder and backticks inside a double-quoted `echo` in the job's own jar-path message. The residue this row names is
 otherwise unchanged: no coverage threshold, no Playwright journey, no Testcontainers.
 
 **OPS-15 (P2) — `.gitignore` gaps.** `.env`, `.env.local`, `.env.*.local` are covered and no real `.env` ever entered history (verified `git log --diff-filter=A`), but `.env.production` / `.env.prod*` are **not** ignored (one is tracked), and there are no `*.class`, `*.pem`, `*.key`, `secrets/` rules — which is how `PasswordVerificationTest.class` got committed.

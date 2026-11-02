@@ -310,7 +310,9 @@ in the README rather than only in the roadmap:
   PROVED**. It drives a *running* backend, and since 2026-11-02 CI runs it: the `live-tenancy` job boots the jar
   the `backend` job built against a throwaway `postgres:15` on the runner's loopback and executes nine live steps
   through `scripts/ci-live-tenancy.sh` — the same command an operator types. The job that used to declare itself
-  `skipping`, blocked on twelve secret names the repository does not have, now reads no secret at all.
+  `skipping`, blocked on twelve secret names the repository does not have, now reads no secret at all. It has run
+  there: **82 s, 626 assertions, 0 failed, 17 skips at their documented ceiling** (run `41488389433`), after the
+  run before it came back red on two defects only a real runner could find.
 
 What is still genuinely missing for safe refactoring is coverage **thresholds**, a Playwright browser journey, and
 Testcontainers (the DB-backed tests use a real server, not a containerised-per-class one). Until those land, the
