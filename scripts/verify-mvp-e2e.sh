@@ -45,6 +45,9 @@
 #       first run of verify-c1 got it wrong). Unset → the least-privilege refusals
 #       SKIP; the ADMIN and SUPERADMIN refusals are still asserted.
 #   GMS_BASE_URL GMS_VERIFY_DB GMS_PG_CONTAINER GMS_PG_USER GMS_PG_PASSWORD_ENV
+#   GMS_PG_HOST (and GMS_PG_PORT, default 5432) to reach the database over TCP
+#   instead of through the container — set GMS_PG_HOST=127.0.0.1 for a host-side
+#   PostgreSQL, which is what this machine has had since Stage 2 retired Compose.
 #   GMS_SCHOOL_A_CODE GMS_SCHOOL_B_CODE GMS_SEARCH_SURNAME GMS_REQUIRE_DB
 #
 # The administrators' initial password is not a secret this script invented. It is
@@ -91,6 +94,12 @@ PG_CONTAINER=${GMS_PG_CONTAINER:-gms-postgres}
 PG_USER=${GMS_PG_USER:-gms_user}
 PG_PASSWORD_ENV=${GMS_PG_PASSWORD_ENV:-DB_PASSWORD}
 REQUIRE_DB=${GMS_REQUIRE_DB:-}
+
+# Empty by default, which keeps the container transport. Set it (e.g. 127.0.0.1) to reach the same
+# database over TCP instead — the Compose stack publishes postgres on 5433 and has been dead on this
+# machine since Stage 2, which silently turned the SQL half of features 3, 6, 9 and 11 into SKIPs.
+PG_HOST=${GMS_PG_HOST:-}
+PG_PORT=${GMS_PG_PORT:-5432}
 
 failures=0
 checks=0
@@ -227,8 +236,13 @@ claim() { # claim <token> <jq filter over the payload>
 }
 
 sql() { # sql <statement> — SELECT only
-  docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$VERIFY_DB" \
-    -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  if [[ -n "$PG_HOST" ]]; then
+    PGPASSWORD="${!PG_PASSWORD_ENV}" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$VERIFY_DB" \
+      -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  else
+    docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$VERIFY_DB" \
+      -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  fi
 }
 
 sqlv() { # sqlv <statement> — one scalar, whitespace removed
@@ -275,7 +289,7 @@ if [[ -n "$REQUIRE_DB" && "$REQUIRE_DB" != "0" ]] && ! have_db; then
   echo "       or unset GMS_REQUIRE_DB to accept SKIP on features 3, 6, 9 and 11."
   exit 1
 fi
-have_db && fnote "the SQL half will run against $VERIFY_DB in $PG_CONTAINER" \
+have_db && fnote "the SQL half will run against $VERIFY_DB $( [[ -n "$PG_HOST" ]] && echo "over TCP at $PG_HOST:$PG_PORT" || echo "in container $PG_CONTAINER" )" \
          || fnote "no GMS_VERIFY_DB: the SQL half of features 3, 6, 9 and 11 will SKIP"
 
 # ─────────────────────────────────────────────────────────────────────────────
