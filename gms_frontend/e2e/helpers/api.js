@@ -209,3 +209,101 @@ export async function searchStudents(request, token, query) {
   });
   return { status: response.status(), payload: await response.json().catch(() => null) };
 }
+
+/**
+ * The username the server will derive from a first name and last name.
+ *
+ * `UsernameGenerator.generateUsername` takes the first character of the first name, appends the
+ * whole last name, lowercases everything, and strips anything outside `[a-z0-9]`. If the result
+ * already exists, it suffixes a counter — but for the first account with a given name the bare
+ * base is what the server writes, and the tests rely on matching that derivation to log in.
+ */
+export function generatedUsername(firstName, lastName) {
+  return (firstName.charAt(0) + lastName).toLowerCase().replace(/[^a-z0-9]/g, '');
+}
+
+/** One claim out of the access token, without a JWT library (re-exported for test convenience). */
+export { claimOf };
+
+/**
+ * Creates a student and its auto-provisioned user account in one step.
+ *
+ * The server's `StudentServiceImpl.createUserForStudent` mints a login whose username is
+ * `generatedUsername(firstName, lastName)` and whose password is the literal `welcome123`
+ * (satisfies `PasswordValidator`: upper, lower, digit, special). The account is flagged
+ * `requirePasswordChange`, so the browser journey will click through the rotation screen
+ * before it reaches any dashboard.
+ */
+export async function createStudentAccount(request, adminToken, studentData) {
+  const response = await request.post(`${API_ROOT}/students/create`, {
+    data: studentData,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+  });
+  const payload = await response.json().catch(() => null);
+  return { status: response.status(), payload };
+}
+
+/**
+ * Creates a parent linked to one or more students, and the auto-provisioned user account.
+ *
+ * `ParentServiceImpl.createParent` resolves the student ids through the school-scoped query,
+ * then `createUserForParent` mints a login the same way the student path does — generated
+ * username, `welcome123` password, `requirePasswordChange` set. The `studentIds` field on
+ * `ParentRequest` is what builds the `parent_student` link rows the backend later consults
+ * to decide whether a parent may read a child's attendance, results, and fees (F-3).
+ */
+export async function createParentAccount(request, adminToken, parentData) {
+  const response = await request.post(`${API_ROOT}/parents/create`, {
+    data: parentData,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+  });
+  const payload = await response.json().catch(() => null);
+  return { status: response.status(), payload };
+}
+
+/**
+ * Creates a teacher employee and registers a login for it.
+ *
+ * Two calls because the domain splits them: `POST /employees/create` writes the staff row,
+ * then `POST /auth/self-register` mints the user account linked to that employee. The
+ * self-register endpoint hard-codes the role to TEACHER and sets `requirePasswordChange` to
+ * false — a teacher account created this way can sign in and go straight to the dashboard
+ * without the rotation step that student and parent accounts demand.
+ */
+export async function createTeacherAccount(request, adminToken, employeeData, schoolId, username, password) {
+  const empResponse = await request.post(`${API_ROOT}/employees/create`, {
+    data: employeeData,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+  });
+  const empPayload = await empResponse.json().catch(() => null);
+  if (empResponse.status() !== 200 || !empPayload?.id) {
+    return { status: empResponse.status(), payload: empPayload, empId: null, username };
+  }
+
+  const regResponse = await request.post(`${API_ROOT}/auth/self-register`, {
+    data: { empId: empPayload.id, schoolId, username, password },
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+  });
+  const regPayload = await regResponse.json().catch(() => null);
+  return { status: regResponse.status(), payload: regPayload, empId: empPayload.id, username };
+}
+
+/** Creates a subject the teacher can be assigned to teach. */
+export async function createSubject(request, adminToken, subjectData) {
+  const response = await request.post(`${API_ROOT}/subjects/create`, {
+    data: subjectData,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+  });
+  const payload = await response.json().catch(() => null);
+  return { status: response.status(), payload };
+}
+
+/** Assigns a teacher to a classroom/subject pair for an academic year. */
+export async function createTeacherAssignment(request, adminToken, assignmentData) {
+  const response = await request.post(`${API_ROOT}/teacher-assignments`, {
+    data: assignmentData,
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
+  });
+  const payload = await response.json().catch(() => null);
+  return { status: response.status(), payload };
+}
