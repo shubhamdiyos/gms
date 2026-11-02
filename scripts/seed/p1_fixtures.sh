@@ -221,7 +221,14 @@ if [[ -z "$(sql "SELECT id FROM attendances WHERE school_id = $SCHOOL_A AND dele
   # picks the first date of the last month that this pupil has no record for.
   DAY_OFFSET=0
   while [[ $DAY_OFFSET -le 30 ]]; do
-    CANDIDATE_DATE=$(date -v-${DAY_OFFSET}d +%F)
+    # The date comes from the database, not from the host's `date`. The two operating systems this
+    # script now runs on disagree about the flag: macOS wants `date -v-3d`, and the runner's `date`
+    # answers `error: unexpected argument '-v' found` and writes nothing to stdout. That empty string
+    # is the whole failure — the probe below asked Postgres for `date = ''`, which is not a date,
+    # `ON_ERROR_STOP` made the query yield no output at all, so `USED` never equalled `0`, the loop
+    # spent all 31 offsets, and this fixture died at "no free date" three lines below. Reading the
+    # calendar from the same server that stores it also means the two can never disagree.
+    CANDIDATE_DATE=$(sql "SELECT to_char(current_date - $DAY_OFFSET, 'YYYY-MM-DD')")
     USED=$(sql "SELECT count(*) FROM attendances WHERE student_id = $PUPIL_A1 AND timetable_slot_id = $SLOT_ID AND date = '$CANDIDATE_DATE'")
     [[ "$USED" == "0" ]] && break
     DAY_OFFSET=$((DAY_OFFSET + 1))

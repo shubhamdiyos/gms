@@ -765,7 +765,7 @@ jobs:
           jars=(live-tenancy-jar/*.jar)
           if [[ ${#jars[@]} -ne 1 ]]; then
             echo "FATAL: expected exactly one jar in live-tenancy-jar/, found ${#jars[@]}."
-            echo "       The backend job uploads `gms_backend/target/*.jar`; more than one means the"
+            echo "       The backend job uploads gms_backend/target/*.jar; more than one means the"
             echo "       build now produces two artifacts and this gate cannot say which it booted."
             exit 1
           fi
