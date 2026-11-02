@@ -12,7 +12,7 @@ A comprehensive School Management System built with Spring Boot and React, featu
 > sequence and the definition of done are [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md); the frozen
 > product scope is [docs/PRODUCT_REQUIREMENTS.md](docs/PRODUCT_REQUIREMENTS.md); module boundaries, the tenancy
 > mechanism and the index design are [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). **Nothing in GMS has been
-> deployed**, and no stage past Stage 1 has started. Setup commands below are real; the state of testing is stated
+> deployed**; Stages 2 and 3 have landed on `master` and Stage 4 onward is open, so the §8 board of [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md) is the authority for what is done. Setup commands below are real; the state of testing is stated
 > honestly in [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md).
 
 ## 🚀 Features
@@ -132,11 +132,13 @@ Two caveats that are real today, not aspirational:
   `Fatal error compiling: … TypeTag :: UNKNOWN` (a Lombok/javac incompatibility). Nothing in the repository pins this
   yet: there is no `.mvn/jvm.config`, no `maven-enforcer` rule and no `.java-version`, and `pom.xml:109`'s
   `<source>${java.version}</source>` constrains the language level, not the compiler that reads it.
-* **The schema comes from Flyway, and only from Flyway.** `db/migration/` holds `V1` through `V7`,
+* **The schema comes from Flyway, and only from Flyway.** `db/migration/` holds `V1` through `V9`,
   `spring.flyway.enabled=${FLYWAY_ENABLED:true}` (`application.properties:43`) is on by default, and
   `spring.jpa.hibernate.ddl-auto=validate` is a literal in all three profiles. An empty database is therefore built
-  during boot — the log shows `Migrating schema "public" to version` seven times, ending at
-  `"7 - record who wrote the pupil"` — and Hibernate never writes it. The `--spring.jpa.hibernate.ddl-auto=update`
+  during boot. Measured on the merged tree (`8145a31`) against an empty schema: `flyway_schema_history` holds nine
+  rows — `1 - baseline current schema` through `9 - soft delete attendance and assignment` — every one `success=true`.
+  Hibernate never writes it. (`SqlStatementCountPerRequestTest`, which is the boot CI performs, runs at
+  `logging.level.root=WARN`, so a green CI run is evidence the chain applied without saying so in as many lines.) The `--spring.jpa.hibernate.ddl-auto=update`
   workaround this section used to recommend is gone from the repository: ADR-022 removed the `${JPA_DDL_AUTO:…}`
   indirection, so there is no environment variable left that can reach `update` in any profile.
 
@@ -284,18 +286,12 @@ original claim that the repository had none is no longer true, and it is correct
 
 | Command | What actually happens today |
 | --- | --- |
-| `mvn -B verify` | runs `gms_backend/src/test` — **18 test classes, 121 tests**, measured at `8a83d37` in CI and on this machine with the same counts — and writes `target/site/jacoco/index.html`. **Locally it needs a database and two environment variables:** with
-`DB_USERNAME`/`DB_PASSWORD` unset the run reports `Tests run: 113` plus one error in `SqlStatementCountPerRequestTest`
-(`FATAL: role "gms_user" does not exist`) and **BUILD FAILURE**; with them exported against the operator's Homebrew
-PostgreSQL 15.8 on `127.0.0.1:5432` it is `Tests run: 121, Failures: 0, Errors: 0` and BUILD SUCCESS (both measured on
-this machine on 2026-11-02). The refusal is deliberate — the class does not skip when the database is missing, because
-a skipped guard reads as a passing one — and CI supplies the same three inputs through its `postgres:15` service
-container. This list used to name six classes; the **twelve** that arrived since are the tenancy and authorization guards (`RepositoryTenantScopeArchTest`, `TenantScopedReadArchTest`, `TenantParameterArchTest`, `EndpointInheritanceTest`, `EntityTenantColumnArchTest`, `EntityLazyAccessorArchTest`, `DenyByDefaultAuthorizationArchTest`, `TenantContextTest`, `TenantContextAuditorAwarePrincipalAttributionTest`, `NotificationRecipientMatchTest`) plus the two contract guards (`EmptyCollectionContractTest`, `SqlStatementCountPerRequestTest`) |
+| `mvn -B verify` | runs `gms_backend/src/test` — **18 test classes, 121 tests**, measured at `8a83d37` in CI and on this machine with the same counts — and writes `target/site/jacoco/index.html`. **Locally it needs a database and two environment variables:** with `DB_USERNAME`/`DB_PASSWORD` unset the run reports `Tests run: 113` plus one error in `SqlStatementCountPerRequestTest` (`FATAL: role "gms_user" does not exist`) and **BUILD FAILURE**; with them exported against the operator's Homebrew PostgreSQL 15.8 on `127.0.0.1:5432` it is `Tests run: 121, Failures: 0, Errors: 0` and BUILD SUCCESS (both measured on this machine on 2026-11-02). The refusal is deliberate — the class does not skip when the database is missing, because a skipped guard reads as a passing one — and CI supplies the same three inputs through its `postgres:15` service container. This list used to name six classes; the **twelve** that arrived since are the tenancy and authorization guards (`RepositoryTenantScopeArchTest`, `TenantScopedReadArchTest`, `TenantParameterArchTest`, `EndpointInheritanceTest`, `EntityTenantColumnArchTest`, `EntityLazyAccessorArchTest`, `DenyByDefaultAuthorizationArchTest`, `TenantContextTest`, `TenantContextAuditorAwarePrincipalAttributionTest`, `NotificationRecipientMatchTest`) plus the two contract guards (`EmptyCollectionContractTest`, `SqlStatementCountPerRequestTest`) |
 | `mvn -DskipTests` | still the command the production image build uses (`gms_backend/Dockerfile:11`), so the shipped jar is not built from a tested compile — see INF-09 |
 | `npm test` | **runs.** `gms_frontend/package.json` declares `"test": "vitest run"` and there are two suites — `ErrorBoundary.test.jsx` (4) and `ProtectedRoute.test.jsx` (5) — **9 tests, 2 files, green**. In CI the step is blocking and refuses two things it used to tolerate: a missing `test` script, and a script with no `src/**/*.test.*` file behind it (measured on `8a83d37`: `Test Files 2 passed (2)`, `Tests 9 passed (9)`). `--run` is passed explicitly so no future edit to the script can put a watcher on a runner |
 | `npm run lint` | runs, and reports **16 errors across 7 files** plus 1 warning — measured from CI's own summary line at `8a83d37`, not from this table's memory; it used to say 47 errors across 22 files, a count that no longer holds. CI fails the job only on the classes that break at runtime (`no-undef` under `src/`, any fatal parse error): the same run reports **0 in the gated classes**, so the gate is green while the count is recorded, not ignored |
 | JaCoCo | bound to `prepare-agent` + `report` at `verify`, so coverage is measured; there is still no coverage **threshold** that can fail a build |
-| CI | **three** workflows now run on every pull request: `.github/workflows/ci.yml` (four jobs, and the `backend` job boots a `postgres:15` service container so the DB-backed tests really have a database), `.github/workflows/validate-workflows.yml` (actionlint plus fifteen structure guards over the yaml itself) and `.github/workflows/gate-coverage.yml` (a meta check that refuses a pull whose owed gates did not run). **Since 2026-11-02 `master` requires `Gate coverage`**, with `strict` and `enforce_admins` — a red or missing check now blocks a merge even for an administrator, demonstrated once in [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md) Stage 5 criterion 4. The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` still deploys nothing anywhere |
+| CI | **three** workflows are in `.github/workflows/`, one of which runs on every pull request: `.github/workflows/ci.yml` (five jobs — one of them, `Live tenancy suites`, a declared stub that stays `skipped` — and the `backend` job boots a `postgres:15` service container so the DB-backed tests really have a database), `.github/workflows/validate-workflows.yml` (actionlint plus fifteen structure guards over the yaml itself) and `.github/workflows/gate-coverage.yml` (a meta check that refuses a pull whose owed gates did not run). **Since 2026-11-02 `master` requires `Gate coverage`**, with `strict` and `enforce_admins` — a red or missing check now blocks a merge even for an administrator, demonstrated once in [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md) Stage 5 criterion 4. The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` still deploys nothing anywhere |
 | `scripts/verify-security.sh` | 18 executable security assertions against a local boot — see [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md) §13.2 |
 
 What this table's last paragraph used to say — "no integration tests against a real database, no frontend tests, no

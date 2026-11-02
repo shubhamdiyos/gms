@@ -44,15 +44,18 @@ Blast radius = what breaks if the change is done badly, given **zero** existing 
 
 ### Data layer
 
-Stage 2 moved most of this register — **on a branch**. "Closed on branch" below means the SQL exists in
-`gms_backend/src/main/resources/db/migration/` on `feat/stage2-flyway-baseline` and is proved by
-[`scripts/verify-schema.sh`](../../scripts/verify-schema.sh); it does **not** mean `master` is fixed. Re-measure with the
-grep in each row's *Reuse action* against `master` and the finding is still true there. `ENGINEERING_ROADMAP.md` §"Stage 2
-result, measured" holds the numbers.
+Stage 2 moved most of this register — **on a branch**. "Closed on branch" meant, when this was written, that the SQL
+exists in `gms_backend/src/main/resources/db/migration/` on `feat/stage2-flyway-baseline` and is proved by
+[`scripts/verify-schema.sh`](../../scripts/verify-schema.sh), and that it did **not** yet mean `master` was fixed.
+*Corrected 2026-11-02:* that qualifier has expired twice over. PR #25 merged that branch as `ef00eb9` and PR #26 merged
+`feat/post-pr25-hardening` as `8145a31`, so **every row below reading "Closed on branch" is closed on `master` as well**,
+and `git ls-tree -r master -- gms_backend/src/main/resources/db/migration` lists nine files, `V1`–`V9`. The re-measure
+instruction no longer applies to these rows; where a row still claims `master` lacks something, the row is stale and the
+grep wins. `ENGINEERING_ROADMAP.md` §"Stage 2 result, measured" holds the numbers.
 
 | ID | Debt | Severity | Effort | Notes | Reuse action |
 |---|---|---|---|---|---|
-| OPS-07 | No schema in version control; `ddl-auto` conflicts across three files; Flyway enabled but not a dependency | **P0 (ops)** | L | **Closed on branch.** `flyway-core` **and** `flyway-database-postgresql` are now in `pom.xml` (Flyway 10 split the Postgres dialect out of core; without the second artifact boot fails with *"Unsupported Database: PostgreSQL 16.15"*), **seven** migrations exist (`V1`–`V7`; `C-8` has since landed `V7__record_who_wrote_the_pupil.sql` for the audit pair — that reservation is why `C-7` shipped its column as `V6` rather than where its card said it would), and all three profiles say the literal `validate` with the `${JPA_DDL_AUTO:…}` default deleted so no environment variable can restore `update`. Still open: no CI job runs the chain, and `application-prod.properties:15` (`spring.flyway.enabled=true`) still migrates on boot rather than as a deployment step — `C-9` | add `flyway-core` + baseline from an authorised schema export; then delete the `update` override in compose — **done**, `ADR-022` carries the verification record |
+| OPS-07 | No schema in version control; `ddl-auto` conflicts across three files; Flyway enabled but not a dependency | **P0 (ops)** | L | **Closed, on `master` at `8145a31`.** `flyway-core` **and** `flyway-database-postgresql` are now in `pom.xml` (Flyway 10 split the Postgres dialect out of core; without the second artifact boot fails with *"Unsupported Database: PostgreSQL 16.15"*), **seven** migrations exist (`V1`–`V7`; `C-8` has since landed `V7__record_who_wrote_the_pupil.sql` for the audit pair — that reservation is why `C-7` shipped its column as `V6` rather than where its card said it would), and all three profiles say the literal `validate` with the `${JPA_DDL_AUTO:…}` default deleted so no environment variable can restore `update`. Corrected 2026-11-02: a CI job does run the chain — `SqlStatementCountPerRequestTest` creates an empty `gms_n_plus_1` beside a `postgres:15` sidecar and boots the context with `spring.flyway.enabled=true` and `ddl-auto=validate`, so a migration that will not apply fails the required check; measured on `master` at `8145a31` (run `41462933910`: `Tests run: 121, Failures: 0, Errors: 0, Skipped: 0` / BUILD SUCCESS). What `verify-schema.sh` proves — the determinism diff and the two negative controls — is still hand-run. Still open: `application-prod.properties:15` (`spring.flyway.enabled=true`) still migrates on boot rather than as a deployment step — `C-9` | add `flyway-core` + baseline from an authorised schema export; then delete the `update` override in compose — **done**, `ADR-022` carries the verification record |
 | DB-01 | `validate` against a schema that exists only in Neon | P1 | – | **Closed on branch.** `V1` is the baseline, captured from a disposable Postgres 16.15 server and reviewed; a Flyway-migrated database now passes Hibernate `validate` on boot (`Successfully validated 5 migrations`) | same fix |
 | DB-02 | Missing unique constraints: `employees.email`, `students.email`, `classrooms(name,grade,section)`, `attendance(student,slot,date)`, `timetable_slots(day,period)` | P1 | M | **Closed on branch** — all five, in `V3`. `students.email` needed a partial index (`WHERE email IS NOT NULL AND email <> ''`) because the column is nullable and blank means "no mailbox", not "shared mailbox"; `employees.email` is `nullable = false`, so it takes a plain key. Duplicates were not cleaned because the migrated database has no rows to clean — on a live schema this migration **will** fail on existing duplicates, which is the intended behaviour, not a defect | add via migration with a duplicate-cleanup step; constraints, not more `existsBy` checks — **done**, 35 named uniques measured |
 | DB-03 | No indexes despite `school_id + status + date` patterns | P2 | S | **Closed on branch.** `V4` creates them and `V4`/`V5` assert two invariants in SQL: every tenant-keyed table has an index leading on `school_id` (**I-1**), every navigated FK is indexed on its first column (**I-2**, amended by measurement — 62 `created_by`/`updated_by` references are exempt, by name and with a reason, because no entity navigates them). Measured: 87 secondary indexes on 38 tables, from 0 | composite `(school_id, …)` indexes in migrations — **done** |
@@ -215,8 +218,8 @@ turned out not to be an owner action: `Gate coverage` is required on `master` wi
 `BaseAuditEntity`, `TenantOwned`, `AuthorshipEntity`), 37 repository files (36 interfaces plus `TenantScopedRepository`),
 35 service impls; **18** backend test classes under `src/test/java/com/gms/` and **121** tests under them (`mvn -B
 verify` — `No tests to run` is long gone), plus **2** frontend test files and **9** Vitest tests, which the CI step now
-has to run or refuse over; **9** `.sql` migrations, `V1`–`V9` — `V1`–`V7` are on `master`, `V8`–`V9` are on
-`feat/post-pr25-hardening` — with `flyway-core` at `gms_backend/pom.xml:54`; the schema facts, as
+has to run or refuse over; **9** `.sql` migrations, `V1`–`V9`, **all nine on `master`** since PR #26 landed as
+`8145a31` — with `flyway-core` at `gms_backend/pom.xml:54`; the schema facts, as
 re-measured on the migrated database **at `V6` and *before* `V7`**, are in REPOSITORY_AUDIT §4 (**39** tables, 35
 carrying the integer `school_id`, 141 FKs of which 18 are same-school pairs, **0** tables left without a tenant column
 except `parents` and `user_roles`) — `C-8`'s `V7__record_who_wrote_the_pupil.sql` adds 8 audit FKs to that FK total

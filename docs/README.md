@@ -136,14 +136,17 @@ the testing strategy and evidence log · the operational database and migration 
 feature matrix* is now [PRODUCT_REQUIREMENTS.md](PRODUCT_REQUIREMENTS.md) §7–§8, and the *database* half is designed
 in [ARCHITECTURE.md](ARCHITECTURE.md) §4–§5 and §9 — which is a design, not the operations guide that can only be
 written against a database that exists. The *architecture* and *ADRs* and *roadmap* halves of debt package 13
-(`TECHNICAL_DEBT.md §2`) are therefore also discharged. Nothing else on this list is written, and Stage 2 does not
-begin until a reviewer has read the three new documents.
+(`TECHNICAL_DEBT.md §2`) are therefore also discharged. Nothing else on this list is written. *Corrected 2026-11-02:*
+the last clause was a gate, not a prophecy — Stage 2 has since been reviewed, merged as `ef00eb9`, and followed by
+Stage 3 and the post-#25 batches; `ENGINEERING_ROADMAP.md` §8 is the record of what landed where.
 
 **What Stage 1 did not do, stated so the gap is visible:** it changed no application code, ran no test that had not
 run before, and proved no defect. Every quantitative claim in the three documents is a `grep`/`find`/`ls` over
 `master` at `bcbb71c` on 2026-11-01, and `ARCHITECTURE.md §1` lists the command shape per row precisely so the next
-reader can re-run rather than trust. `§5`'s design **became migrations** in Stage 2 — `V1`–`V5` on
-`feat/stage2-flyway-baseline`, executed against a real baseline and asserted by `scripts/verify-schema.sh` — while
-`§4`'s tenancy mechanism remains proposed until Stage 3 writes the Java that uses it. `implemented` ≠ `tested` ≠
+reader can re-run rather than trust. `§5`'s design **became migrations** in Stage 2 — five on
+`feat/stage2-flyway-baseline` when this was written, executed against a real baseline and asserted by
+`scripts/verify-schema.sh` — and that branch is now `master` (`ef00eb9`), nine migrations deep (`V1`–`V9`, the last
+two landed at `8145a31`). `§4`'s tenancy mechanism is **no longer only proposed**: `C-2`…`C-4` and `C-7` wrote the Java
+that uses it and merged it, though the session-filter half (`TEN-06`, RLS) is still design. `implemented` ≠ `tested` ≠
 `verified` applies to a document as much as to a patch, and the branch state of *one* of those two halves is exactly
 the distinction this paragraph exists to keep honest.

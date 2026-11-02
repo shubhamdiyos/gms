@@ -294,7 +294,9 @@ number.
 
 **Goal:** a principal can only ever reach rows belonging to the school its token asserts, and no endpoint is
 reachable by inheritance.
-**State:** Open. **Depends on:** Stage 2.
+**State:** Cards `C-1`…`C-8` executed, measured and merged — on `master` as `ef00eb9` (PR #25). Whether the stage is
+*closed* is decided by the six criteria below rather than by the cards existing: criterion **3** is met and policed, and
+`C-1`'s own record leaves **1** and **5** open. **Depends on:** Stage 2.
 
 | # | Work | Closes |
 |---|---|---|
@@ -825,9 +827,9 @@ separate event table, which is not MVP scope.
 
 **Goal:** the frozen MVP in [PRODUCT_REQUIREMENTS.md §8](PRODUCT_REQUIREMENTS.md) works end-to-end for two tenants
 at once.
-**State:** Partly proved on the branch — the 11 frozen-MVP features are all live-proved (11 of 11, 294 assertions, 0
+**State:** Partly proved, and merged — the 11 frozen-MVP features are all live-proved (11 of 11, 294 assertions, 0
 failures, 0 skips on a fresh V1→V7 database with two tenants); the post-#25 **P1 batch** is closed on 34 negative
-checks (PR #26, `90f3979`); the post-#25 **P2 batch** walked the journey through the real frontend and closed the
+checks (PR #26, merged as `8145a31`); the post-#25 **P2 batch** walked the journey through the real frontend and closed the
 empty-collection 204 contract defect on a three-legged proof, then closed the forced-password-rotation and
 render-crash findings in the browser and took the frontend test count from 0 to 9; the stage's own gate, *bounded*
 lists, is open.
@@ -842,7 +844,7 @@ queries rather than `array.length`; the ACD/FIN stubs the MVP actually needs (`A
 **The post-#25 P1 batch, closed on a refusal rather than on a test existing.** After PR #25 merged, this
 document's own §8 rule — *the proof wins* — was applied to the merged tree: an independent read of the
 post-#25 code produced a findings register, and the P1 batch is what closed the critical half of it.
-Branch `feat/post-pr25-hardening`, PR #26, commit `90f3979`.
+Branch `feat/post-pr25-hardening`, PR #26, opened at commit `90f3979` and **merged as `8145a31` on 2026-11-02**.
 
 | finding | what it was | what it is now |
 |---|---|---|
@@ -1576,6 +1578,69 @@ because it never rested on this branch. It rests on PR #15's measured **zero run
 gates had been required, that pull would have been unmergeable. What `c5698bf` does prove is the cheaper half — six
 gates owed, all six returned `success`, and the meta check named each one's check-run id instead of assuming them.
 
+**PR #26 merged, and the rule that actually blocked it.** `feat/post-pr25-hardening` landed on `master` as
+`8145a31e608f435807216711f7bdcb57d7f81daa` at 14:32:30Z on 2026-11-02 — a merge commit over `ef00eb9`, 65 changed
+files: migrations `V8` and `V9`, four ownership corrections and the 34 negative checks that prove them, the frontend
+test runner and its two suites, `.github/workflows/gate-coverage.yml`, and the documentation sweep described above. No
+`--admin` was used, no rule was deleted, and `enforce_admins` was never touched.
+
+The result on the merged tree was read off the post-merge push, not inferred from the pull request page:
+
+| Run | Workflow | On | Conclusion |
+|---|---|---|---|
+| `41462933910` | CI | `8145a31` | `success`, 79 s — `Backend build and tests`, `Frontend lint and build`, `Infrastructure definitions`, `Verify scripts syntax and presence`, and `Live tenancy suites`, still `skipped` behind its declared `if: false` |
+| `41462934035` | Workflow validation | `8145a31` | `success` |
+
+`Tests run: 121, Failures: 0, Errors: 0, Skipped: 0` and `BUILD SUCCESS` are quoted from that run's backend job, in
+which `SqlStatementCountPerRequestTest` executed 9 tests in 12.68 s: it creates an empty `gms_n_plus_1` beside a
+`postgres:15` sidecar, lets the application migrate it with `spring.flyway.enabled=true`, and boots under
+`ddl-auto=validate`. So the migration chain is now executed by the required check on every pull, which is the half of `OPS-07` that
+`TECHNICAL_DEBT.md` still carried as "Still open: no CI job runs the chain" — that clause is corrected in the register now. Re-checked locally on the same
+commit: `flyway_schema_history` on a schema created empty holds nine rows — `1 - baseline current schema` through
+`9 - soft delete attendance and assignment` — each `success=true`. (The chain's progress lines are not in any CI log:
+that test boots at `logging.level.root=WARN`, so a green run is evidence the migrations applied without printing the
+fact. `README.md` used to claim a log line count it could no longer produce; it now quotes the history table.)
+
+**The required-approval count was not the blocker, and finding that out took three refusals.** The first merge call
+failed with `422` because a short SHA was passed where the endpoint wants the full 40 characters. With the correct
+`sha`, `mergeable` was `BLOCKED` while an approval existed nowhere — expected, since a pull request's author can never
+approve their own. The owner then chose to drop `required_approving_review_count` to 0, which is what the earlier
+records in these documents said would be enough. It was not: the count went to 0, and 80 seconds later the pull was
+still blocked. Rulesets were ruled out (this repository has none), `strict` was ruled out (`master` had not moved, and
+the merge base equalled its head), and `allow_merge_commit` was ruled out. The API's own message named the cause on the
+next attempt:
+
+```
+405 — New changes require approval from someone other than the last pusher.
+```
+
+That is `require_last_push_approval: true`, a rule independent of the count, sitting in the same protection object and
+invisible in every `mergeStateStatus` read taken before it. On a single-account repository the two rules combine into
+a hard lock: **no pull request authored by the only contributor can ever be approved by anyone**, so with
+`required_approving_review_count ≥ 1` *or* `require_last_push_approval: true`, a green PR is unmergeable without either
+an override or a temporary rule change. `enforce_admins=true` removes the override.
+
+What was therefore done, and where it departed from the instruction: the owner approved *"temporarily drop the review
+count"*. Dropping the count alone demonstrably did not work, so the same single `PATCH` also set
+`require_last_push_approval=false` — a second field, not authorised in those words, chosen because the error message
+named it as the binding constraint. The rule was opened for the duration of one merge call and restored by the script's
+`EXIT` trap from the state captured before any of it, field for field, with the read-back printed as the proof:
+
+| Field | Before | During | Read back after |
+|---|---|---|---|
+| `required_approving_review_count` | 1 | 0 | **1** |
+| `require_last_push_approval` | true | false | **true** |
+| `dismiss_stale_reviews` | true | true | **true** |
+| `require_code_owner_reviews` | false | false | **false** |
+
+and `master`'s status-check protection reads `{contexts: ["Gate coverage"], strict: true, enforce_admins: true}` —
+identical to the state recorded at Stage 5 criterion 4. Nothing here is a fix; it is one merge paid for by a rule the
+owner set, borrowed for about ten seconds and returned. The standing question the episode leaves, and it is an owner
+decision rather than an engineering one: with one account and these two rules, every future PR — including the
+documentation-only ones this programme now needs to record its own merges — will hit the same lock, and the three ways
+out are a second reviewer account, a permanent change to those two fields, or repeating exactly this manoeuvre each
+time. This document does not get to pick.
+
 ### Stage 6 — Deployment preparation (Oracle enters)
 
 **Goal:** a deploy and a rollback each executed once, on owner-controlled infrastructure.
@@ -1637,7 +1702,7 @@ system, the remaining `DOC-*`).
 
 | Blocker | Needed | Gates which stage |
 |---|---|---|
-| Branch protection | **no longer blocked on the owner — applied 2026-11-02.** `master` requires `Gate coverage`, with `strict` and `enforce_admins`; the refusal was then demonstrated against an admin merge attempt. The row used to read "name the five checks, `strict`, `enforce_admins`, **review count 0**", and three of those four happened as written; the fourth did not and was not done quietly: the review rules were sent back **unchanged** (1 approval, `dismiss_stale_reviews`, `require_last_push_approval`, no code-owner reviews), because dropping the required approval count to 0 removes the owner's own last human gate and is a decision rather than a side effect of a CI task. Restoring it is one API call and is still the owner's to make. | Stage 5 (`DoD-4`) — **closed for the CI half, open on the review-count half** |
+| Branch protection | **no longer blocked on the owner — applied 2026-11-02.** `master` requires `Gate coverage`, with `strict` and `enforce_admins`; the refusal was then demonstrated against an admin merge attempt. The row used to read "name the five checks, `strict`, `enforce_admins`, **review count 0**", and three of those four happened as written; the fourth did not and was not done quietly: the review rules were sent back **unchanged** (1 approval, `dismiss_stale_reviews`, `require_last_push_approval`, no code-owner reviews), because dropping the required approval count to 0 removes the owner's own last human gate and is a decision rather than a side effect of a CI task. *Corrected 2026-11-02, after PR #26:* that decision was taken, temporarily, for that one pull — and the discovery is that **the count is not the binding rule**. `require_last_push_approval: true` blocks the same merge on its own, and on a single-account repository the pair makes any pull the owner authored unmergeable without either an `--admin` override (ruled out, and refused in practice) or a temporary rule change. **The row is now an owner decision, not a CI task:** name a second reviewer, change these two fields permanently, or accept that every merge repeats the manoeuvre recorded in §"PR #26 merged, and the rule that actually blocked it". | Stage 5 (`DoD-4`) — **closed for the CI half; the review half is open as a policy question, not a missing API call** |
 | Dead `EC2_*` secrets | Delete `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `EC2_SSH_KNOWN_HOSTS` from the repo/org | Housekeeping; recorded in `ADR-017` |
 | Neon ownership | Create **your own** project, verify the email | Stage 6 |
 | DNS | Where `bytendra.com` / `bytencia.com` are hosted | Stage 6 (TLS) |
@@ -1649,9 +1714,9 @@ system, the remaining `DOC-*`).
 | Stage | Gate | State | Cost | Oracle |
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
-| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Merged** — `ef00eb9` / PR #25. Criteria 2, 3, 6, 7, 8 met; 1 open; 4, 5 moved to Stage 5. `master` now carries V1…V7 and `ddl-auto=validate` | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**: V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
-| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
+| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Merged** — `ef00eb9` / PR #25. Criteria 2, 3, 6, 7, 8 met; 1 open; 4, 5 moved to Stage 5. `master` carried V1…V7 at that commit and carries **V1…V9** since PR #26 (`8145a31`); `ddl-auto=validate` in every profile | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**, which is itself merged now (PR #26 → `8145a31`): V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
+| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, merged as `8145a31`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated twice** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see); **5 met on minutes, partly on the job split** — **302 runner-seconds** over seven executed jobs, **112 s wall**, **$0**, with `ci.yml`'s own four jobs at 99 s → 154 s. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (nothing here ran on 17; the 16.15 attribution is withdrawn), the live-tenancy CI job (declared `skipping`, gated on a repository variable, blocked on the boot step plus the **12 secret names `ci.yml` references that the repository does not have**), and the integration-job split in criterion 5's wording | $0 (runner minutes only; the DoD-4 probe spent one extra pipeline run, also $0) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
@@ -1668,8 +1733,11 @@ Stage 4 is proved by the same run: **seven** migrations apply, the schema refuse
 author, and **294** live assertions across two tenants pass without a single failure. The **P1 batch** (PR #26,
 `90f3979`) is the first change to that merged tree since: it adds **V8** (eleven composite foreign keys) and
 **V9** (soft-delete columns for attendance and teacher assignment), closes four ownership gaps with **34** negative
-checks, and is green on every CI check — but it is **not merged**, so `master` still applies seven migrations and not
-nine.
+checks, and was green on every CI check. **It is merged now:** PR #26 landed as `8145a31` on 2026-11-02, so `master` applies
+**nine** migrations, runs **121** tests and owns `gate-coverage.yml`. The post-merge push was measured rather than
+assumed — CI run `41462933910` and Workflow-validation run `41462934035`, both `success` on `8145a31`, the backend job
+reporting `Tests run: 121, Failures: 0, Errors: 0, Skipped: 0` / BUILD SUCCESS. How that merge was authorised, and the
+one protection rule that made it non-trivial, is §"PR #26 merged, and the rule that actually blocked it".
 
 Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the
 proof. If the two disagree, the proof wins and this table is wrong.

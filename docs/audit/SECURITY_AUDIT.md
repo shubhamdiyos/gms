@@ -42,7 +42,7 @@ Root cause: **SEC-02** plus the fact that tenancy travels in the token rather th
 
 Same entry point reaches `PUT /api/v1/users/update`, which sets another user's password from the request body (`UserServiceImpl.java:117-122` with an explicit `password` value) — account takeover of any administrator in the caller's school without knowing their password.
 
-> **Closed on branch (security-M1, then Stage 3 `C-5`).** `UserController` now carries 7 `@PreAuthorize` guards for
+> **Closed (security-M1, then Stage 3 `C-5`), and closed on `master` since `ef00eb9`.** `UserController` now carries 7 `@PreAuthorize` guards for
 > its 7 handlers, `POST /users/create` and `PUT /users/update` are `ADMIN`/`SUPERADMIN`-gated and matched by
 > `PLATFORM_MANAGEMENT` (`SecurityConfig.java:55-58`, applied at `:141`), a caller-supplied role list is no longer
 > persisted verbatim — an unknown role and a `SUPERADMIN` grant from a caller who does not hold it both throw, which
@@ -258,7 +258,7 @@ Two things this audit must not let the reader conclude:
 
 ### 5.2 Status after Stage 3 `C-1` (2026-11-01, `feat/stage2-flyway-baseline`)
 
-**SEC-05 is closed on the branch** and **AP-3 is closed with it**. The mechanism the finding named — an inherited,
+**SEC-05 is closed** — on `master`, since PR #25 merged as `ef00eb9` — **and AP-3 is closed with it**. The mechanism the finding named — an inherited,
 unguarded, tenant-blind `DELETE /{id}` reachable by any administrator — no longer exists in the code at all:
 `AbstractCRUDController` and `AbstractCRUDService` are deleted, `grep -rl "extends AbstractCRUDController"
 controller/` returns nothing, and every delete the frontend actually calls (`DELETE /api/v1/subjects/{id}`,

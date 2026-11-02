@@ -12,11 +12,11 @@
 >
 > * **§5, §9** — "CI contains only a deploy workflow", "**1** GitHub Actions workflow, with no test or build gate
 >   before it". `deploy-backend.yml` was retired in `5f6a55a`; `master` carries `ci.yml` and `validate-workflows.yml`
->   and this branch adds `gate-coverage.yml`. `ci.yml`'s `backend` job runs `mvn -B clean verify` over **18 test
+>   and `master` has carried `gate-coverage.yml` since PR #26 merged as `8145a31`. `ci.yml`'s `backend` job runs `mvn -B clean verify` over **18 test
 >   classes / 121 tests** against a `postgres:15` service container.
 > * **§6, §7** — "no migration tool exists", "hardcoded `update`", Compose "even hardcodes
->   `SPRING_JPA_HIBERNATE_DDL_AUTO: update`". Flyway is a dependency, **nine** migrations `V1`–`V9` exist (`V1`–`V7`
->   merged to `master` at `ef00eb9`), `ddl-auto=validate` is a literal in all three profiles, and
+>   `SPRING_JPA_HIBERNATE_DDL_AUTO: update`". Flyway is a dependency, **nine** migrations `V1`–`V9` exist and all nine are on `master`
+>   (`V1`–`V7` at `ef00eb9`, `V8`–`V9` at `8145a31`), `ddl-auto=validate` is a literal in all three profiles, and
 >   `grep DDL_AUTO docker-compose.yml` now returns nothing.
 > * **§8** — "Playwright / Vitest / Testcontainers runs: no such tooling exists". Vitest exists (`"test":
 >   "vitest run"`, 2 files, 9 tests) and since `8a83d37` the CI step refuses a missing script or an empty suite;
@@ -240,8 +240,8 @@ Walking the repository's own instructions from a clean clone:
 **There is today no path from a clean clone to a running system that does not touch production data.** That is the
 baseline this project starts from.
 
-**Re-measured on `feat/stage2-flyway-baseline` (2026-11-01, unmerged) — two rows of this table change, and one gains a
-new failure.**
+**Re-measured on `feat/stage2-flyway-baseline` (2026-11-01; unmerged when this was written — it merged as `ef00eb9`
+on 2026-11-02) — two rows of this table change, and one gains a new failure.**
 
 | Step | Now, on that branch |
 | --- | --- |
@@ -1373,7 +1373,7 @@ a school**, so the columns are evidence available to the database and not yet to
 
 ### 18.6 The whole-build measurement
 
-Taken on the branch after all four cards, against a fresh disposable database:
+Taken on that branch (`feat/stage2-flyway-baseline`, now `master`) after all four cards, against a fresh disposable database:
 
 | Measurement | Result |
 |---|---|
@@ -1484,7 +1484,7 @@ throwaway copies of `.github/workflows/`, since deleted.
 
 **The live result.** Run `41391320709` on `0471c66`: `Lint every workflow` success, `Check trigger sets and
 permissions` success. `check-runs` on that commit now lists seven checks plus the skipped live-tenancy job — the two
-validation contexts present for the first time on this branch.
+validation contexts present for the first time on that branch, which is `master` since `ef00eb9`.
 
 **What this did not close, and now does.** (1) `INF-10` was the real answer, and it closed on 2026-11-02 with
 `.github/workflows/gate-coverage.yml`: its job `Gate coverage` is the required context, it declares no path filter, and
