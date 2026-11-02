@@ -11,8 +11,9 @@ name: Gate coverage
 # So this is the one workflow in the repository that declares NO path filter, on purpose: it runs on
 # every pull request, always, and it computes the verdict the platform cannot — which of the seven gate
 # jobs this commit was obliged to run, and whether each of them actually said success. It is a
-# measurement of the other files, not a build: no toolchain, no database, ~20 seconds of
-# `ubuntu-latest` of its own and then the wait for the gates it is watching.
+# measurement of the other files, not a build: no toolchain, no database, seconds of arithmetic and
+# then the wait for the gates it is watching — 175 s of job wall clock on run 41488389300, which is
+# the price of a verdict the platform cannot produce.
 #
 # What it refuses, in order of the mistake it was written for:
 #   1. a gate job that is owed by this diff and never reports — deleted job, renamed display name,
@@ -32,11 +33,11 @@ name: Gate coverage
 # `validate-workflows.yml`, and this one — all on `ubuntu-latest`, pinned actions only, no cloud
 # services and no artifacts beyond the build outputs. See `Every job runs on a GitHub-hosted
 # ubuntu-latest` in `validate-workflows.yml`, which refuses anything else before a PR can bill for it.
-# Measured on the last master push before `live-tenancy` became a gate (run 41462933910): the whole
-# `ci.yml` run is 79 s of wall clock — backend 75 s, frontend 34 s, infrastructure 22 s, scripts 5 s —
-# and this job waits out the slowest gate rather than doing work, so the honest figure for a PR is
-# "roughly the backend job plus the live-tenancy boot", both on free Linux minutes for a public
-# repository.
+# Measured rather than estimated, on the first push where `live-tenancy` was a gate (head `b48d234`,
+# runs 41488389433 / 41488389779 / 41488389300): **444 runner-seconds over all eight jobs — 7.4
+# runner-minutes per push** — live-tenancy 82 s, backend 78 s, this watcher 175 s, frontend 23 s, lint
+# 31 s, and the two guard jobs 17 s each. The repository is public, where GitHub-hosted Linux minutes
+# are not charged, so the figure is a duty to report, not a bill.
 
 on:
   pull_request:
@@ -81,11 +82,12 @@ jobs:
           # `Backend build and tests` — the slowest gate until this job added one — ran 75 s, the whole
           # `ci.yml` run 79 s, and this job's own wait was 96 s (run 41459455037). From `live-tenancy`
           # onward the slowest gate is the boot: the backend job plus checkout, artifact download,
-          # setup-java, a `postgres:15` pull, the Flyway chain and nine suites, which the laptop harness
-          # puts at 9 s up and 27 s of suites and the runner has never yet timed. 2100 s is that
-          # estimate with an order of magnitude of runner-queue room. It is also exactly the sum of the
-          # two ceilings that stand behind it — `backend` at 20 min, `live-tenancy` at 15 — so a gate
-          # that finishes inside its own timeout always finishes inside this wait; and the job's own
+          # setup-java, a `postgres:15` pull, the Flyway chain and nine suites. That is no longer an
+          # estimate — run 41488389433 measured the whole job at 82 s, boot included, which makes it the
+          # slowest of the seven gates by four seconds and puts the true critical path at 78 + 82 = 160 s.
+          # 2100 s is therefore thirteen times what this branch has actually needed, and it is exactly the
+          # sum of the two ceilings that stand behind it — `backend` at 20 min, `live-tenancy` at 15 — so a
+          # gate that finishes inside its own timeout always finishes inside this wait; and the job's own
           # `timeout-minutes` is 40, five minutes past that sum, so the watcher gets to print a
           # verdict rather than being killed mid-poll. Past the deadline, "absent" and "slow" are
           # indistinguishable, and the honest answer is red.

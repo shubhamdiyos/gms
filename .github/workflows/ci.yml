@@ -673,17 +673,22 @@ jobs:
   # protection edit — `Gate coverage` is the single context protection requires, and it
   # refuses any pull request whose owed gate is missing or red.
   #
-  # What it measured on the commit that wired it — and the measurement is a laptop one, because
-  # this job had never run on a runner when these lines were written: the pull request that adds
-  # the job is its first CI run, and the numbers it prints go into docs/ENGINEERING_ROADMAP.md
-  # as the CI-side evidence. Same machine, colima at 2 CPU / 4 GiB, one boot, fresh database:
-  # application up in 9 s, the nine steps in 27 s of wall clock, 626 assertions passing, 17
-  # skipped and all seventeen inside `verify-c4-owned-reads.sh`'s documented ceiling. The first
-  # run of the harness this job wraps, against a jar built from the merged master (`8145a31`),
-  # found two real defects — which is the argument for it existing: a retired row answered 403
-  # where its own school expected 404 (`RetiredRowReadContractTest`), and two suites located
-  # their tenants by "the lowest school ids", which silently pointed them at another card's
-  # tenants once the nine steps shared one database.
+  # What it has measured. Same command on both machines, and the verdicts agree while the clocks do not:
+  # on colima at 2 CPU / 4 GiB the application is up in 9 s and the nine steps take 27 s; on this runner
+  # (run `41488389433`, the green one) it is 18 s and 34 s, inside a job that spends 82 s end to end
+  # including checkout, the artifact download, setup-java and the `postgres:15` pull. Both runs: 626
+  # assertions passing, 0 failed, 17 skipped and all seventeen inside `verify-c4-owned-reads.sh`'s
+  # documented ceiling. The run before this one (`41485021174`) was red, and the runner is what made it
+  # red — two defects a macOS laptop cannot see. This job died at 87 s because `p1_fixtures.sh` asked
+  # `date -v-3d` for a date, a BSD flag the runner answers with an empty stdout, which became
+  # `date = ''` in SQL and killed the fixture and the suite that reads its handoff file. `Lint every
+  # workflow` died at 43 s because this job's jar-path message used backticks inside a double-quoted
+  # echo, which shellcheck correctly read as command substitution — and `Gate coverage` died with them,
+  # refusing rather than passing, which is the behaviour it was written for. The first run of the
+  # harness this job wraps, against a jar built from the merged master (`8145a31`), had already found
+  # two more defects on the laptop — a retired row answering 403 where its own school expected 404
+  # (`RetiredRowReadContractTest`), and two suites locating their tenants by "the lowest school ids",
+  # which silently pointed them at another card's tenants once the nine steps shared one database.
   #
   # No repository secret is read here, and none is needed: the database is an empty cluster
   # that exists for the length of the job on the runner's loopback, the tenants are invented
@@ -695,11 +700,13 @@ jobs:
     name: Live tenancy suites
     needs: [backend, verification_scripts]
     runs-on: ubuntu-latest
-    # Fifteen minutes for a job that measured 9 s of boot plus 27 s of suites on a 2-CPU laptop
-    # container, and whose remaining work is one artifact download and one `postgres:15` pull. The
-    # number is also a promise to `gate-coverage.yml`: `backend`'s 20-minute ceiling plus this one is
-    # exactly its 2100-second wait, so a gate that finishes inside its own timeout always finishes
-    # inside the watch, and a "no verdict" refusal can only mean a queue or a hang.
+    # Fifteen minutes for a job that measured 18 s of boot plus 34 s of suites on the runner itself
+    # (82 s end to end, run 41488389433) and 9 s plus 27 s on a 2-CPU laptop container. The ceiling is
+    # therefore ten times the measurement: it is room for a cold `postgres:15` pull and a slow artifact
+    # download, not a guess about the suites. The number is also a promise to `gate-coverage.yml`:
+    # `backend`'s 20-minute ceiling plus this one is exactly its 2100-second wait, so a gate that
+    # finishes inside its own timeout always finishes inside the watch, and a "no verdict" refusal can
+    # only mean a queue or a hang.
     timeout-minutes: 15
     services:
       # `postgres:15` is the major the operator's own server runs, and the same one the
