@@ -160,7 +160,7 @@ class SqlStatementCountPerRequestTest {
 
     /**
      * Creates {@value #DISPOSABLE_DATABASE} if it is not there, before the context boots, so Flyway's own
-     * V1..V7 chain runs against an empty schema and finds no foreign objects. A static initialiser is the
+     * chain runs against an empty schema and finds no foreign objects. A static initialiser is the
      * only hook that is guaranteed to precede the {@code ApplicationContext}: every server this talks to —
      * the operator's own on 5432 and CI's sidecar — is published on loopback only, so an unreachable
      * database here means nothing is listening locally.

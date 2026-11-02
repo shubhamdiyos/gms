@@ -1533,6 +1533,29 @@ distinguish that from "an administrator merged it anyway" either.
    cases share the `backend` job with the other 112 rather than forming a second job, and that is recorded as a
    wording gap rather than argued away.
 
+**Then the other documents were re-read against the tree.** Stage 5 is the first point in this programme where the
+evidence had been gathered faster than the prose was corrected, and the audit documents had accumulated sentences that
+were true on the day they were written and false now — "Zero tests", "no test runner", "`contexts=[]` today", "the
+frontend gates are **advisory**", "`ci.yml` has two jobs", "`master` still has no migrations at all". Corrected
+2026-11-02 across [TECHNICAL_DEBT.md](audit/TECHNICAL_DEBT.md), [BASELINE_STATUS.md](audit/BASELINE_STATUS.md),
+[REPOSITORY_AUDIT.md](audit/REPOSITORY_AUDIT.md), [INFRASTRUCTURE_AUDIT.md](infrastructure/INFRASTRUCTURE_AUDIT.md)
+and [INFRASTRUCTURE_DECISIONS.md](infrastructure/INFRASTRUCTURE_DECISIONS.md): 32 replacements (34 diff hunks), plus a
+standing
+correction notice at the top of `BASELINE_STATUS.md` — that file is the Milestone-0 record at `256b8e4`, so its
+baseline tables were **not** rewritten; the four statements that no longer describe the tree are corrected in a block
+above them instead, because a baseline that quietly updates itself is not a baseline. Findings whose body was written
+in the present tense got dated `*Corrected 2026-11-02:*` clauses appended rather than substitutions, so the register
+still shows what was found. Two claims were retired by this pass rather than merely dated: OPS-01's "production deploys
+with no test gate", because `deploy-backend.yml` was deleted in `5f6a55a` and there is no SSH path to gate, and
+"403-vs-404 for cross-tenant reads" as an outstanding owner decision, because `C-4` shipped 404. What was checked
+afterwards, with the check itself as evidence: all 15 structure guards pass, a column-count walk over every table in
+the nine touched documents reports **0** mismatches, all three workflows still parse, and the local suite re-ran to
+`Tests run: 121, Failures: 0, Errors: 0` / BUILD SUCCESS — after a first attempt that came back **113 tests and one
+error**, because that shell had no `DB_USERNAME`/`DB_PASSWORD` exported and `SqlStatementCountPerRequestTest` refuses
+to skip when it cannot reach a database. The gap between 113 and 121 is the nine cases in that one class, so a missing
+local database costs 8 counted tests and a red build, which is the intended shape; it is now in `README.md`'s command
+table rather than left for the next person to rediscover.
+
 ### Stage 6 — Deployment preparation (Oracle enters)
 
 **Goal:** a deploy and a rollback each executed once, on owner-controlled infrastructure.
@@ -1572,9 +1595,11 @@ system, the remaining `DOC-*`).
 ## 6. Standing constraints — every stage, no exceptions
 
 - **Never push directly to `master`.** One feature branch per stage-package, PR, then merge.
-- **Never bypass repository protection or required checks** without the owner naming the bypass. Every merge so far
-  has needed `--admin` because protection is not yet switched on (that is Stage 5's `DoD-4`, and it is an owner
-  action, not a code action).
+- **Never bypass repository protection or required checks** without the owner naming the bypass. Every merge *up to
+  Stage 5* needed `--admin` because protection was not switched on; that is no longer the state — `Gate coverage` is
+  required with `strict` and `enforce_admins` since 2026-11-02 — and `--admin` is now both unavailable in practice and
+  ruled out by the owner, so a protected merge is an approval, not a privilege. The one merge attempt that tested this
+  (`gh pr merge 27 --admin --merge`) was refused and is recorded under Stage 5 criterion 4.
 - **Zero unexpected cost.** GitHub-hosted `ubuntu-latest` only; no paid runners, no managed services, no billable
   feature started without asking. Docker on the runner is free; Testcontainers is Docker. Estimated and actual
   Actions minutes are reported for every package.

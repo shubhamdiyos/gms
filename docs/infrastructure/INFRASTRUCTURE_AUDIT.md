@@ -47,6 +47,12 @@ Where a claim could not be tested, it is in [§8](#8-what-could-not-be-tested-an
 
 Three buildable units, one compose file, one network, no proxy, no TLS term, no IaC.
 
+**This tree is the Infra-M0 snapshot and is kept as drawn.** Three things outside it are now true: `deploy-backend.yml`
+was retired in `5f6a55a`, so the ssh line has no file behind it; `ci.yml`'s steps are no longer `[advisory only]` —
+`validate-workflows.yml` refuses `continue-on-error: true`, and the `backend` job runs a `postgres:15` service
+container; and `gate-coverage.yml` (2026-11-02) is the required context that watches the other two, which is the half of
+INF-10 this section could only describe as missing.
+
 ```
 github.com/shubhamdiyos/gms  (PUBLIC repo, default branch `master`)
 │
@@ -377,7 +383,11 @@ than repeated. *Tense note: `deploy-backend.yml` is deleted by PR #13, so the se
 sentence describes `master` until #13 merges — and its deletion is what let the new gate's `permissions:` guard pass
 instead of failing.*
 
-**Impact.** A green `ci.yml` is not what stops a merge; a maintainer with push access can merge unverified code,
+**Status: CLOSED 2026-11-02.** `master` requires the context `Gate coverage` with `strict: true` and
+`enforce_admins: true`; the proofs are a refused `gh pr merge 27 --admin --merge` and a 6-second red on throwaway PR
+#28, whose only change was deleting `validate-workflows.yml`. Everything below is the record of how the gate stood
+while OPEN and is kept unedited. **Impact.** A green `ci.yml` is not what stops a merge; a maintainer with push access
+can merge unverified code,
 and merging to `master` immediately and automatically SSHes to production with no approval, no artefact
 verification and no build step (OPS-01). The two environments are decoration, not gates.
 
@@ -414,9 +424,11 @@ should be tried:
 3. **Required checks with `strict: false`** and the filters left in place, accepting that a docs-only PR merges on
    Vercel's word alone. Weakest: it makes the gate bind only the PRs that already look risky.
 
-**This needs the owner's settings change either way** — `contexts=[]` today, so none of the three is configured and
-nothing has ever stalled. It is recorded here so the choice is made with the measurement in hand rather than
-discovered when a documentation PR hangs.
+**This needed the owner's settings change either way** — `contexts=[]` when this was written, so none of the three was
+configured and nothing had ever stalled. It is recorded here so the choice is made with the measurement in hand rather
+than discovered when a documentation PR hangs. **Closed 2026-11-02**, and option 1 is the one taken: one filter-free
+context (`Gate coverage`) that watches the others, rather than naming every job — because a docs-only PR starts
+`ci.yml` not at all (PR #15 measured zero runs) and requiring six names would make that PR unmergeable.
 
 ---
 
@@ -571,9 +583,12 @@ where a path filter would not have triggered it — the filter is evaluated afte
 impact by one case. It does not close it: a **valid** edit that silently removes a trigger or widens `paths-ignore`
 produced nothing before this gate and produces red now, which is the failure mode INF-23 was filed for.
 
-**Still open inside INF-23.** The gate is advisory until its two jobs are named as required status checks, which is
-INF-10 — a repository-settings change. A workflow cannot detect its own deletion, and a deleted workflow reports the
-absence of a check, not a failure. That limit is written into the file itself.
+**Was open inside INF-23; closed 2026-11-02.** The gate was advisory until a required status check named it, and
+that check now exists — `Gate coverage`, required with `strict` and `enforce_admins`. The self-deletion limit is real
+and was answered structurally rather than by hoping: `gate-coverage.yml` declares no path filter, reads the workflow
+files themselves, and refuses a file that has gone missing or a job that has been renamed *before* it polls for
+verdicts. Measured on throwaway PR #28, which deleted `validate-workflows.yml` outright: `2 gate job(s) were owed from
+it`, exit 1 in 6 seconds, merge refused for an administrator.
 
 One platform behaviour measured rather than assumed, and it matters for INF-10: a docs-only commit
 (`a190c44`, no `.github/**` file touched) **still started the gate** — run 41283615154. For `pull_request`, GitHub
@@ -692,7 +707,7 @@ filesystem scan of the built image; measured build context drops from hundreds o
 ### INF-18 · MEDIUM — Nothing scans dependencies, images, secrets or licences
 
 **Evidence.** `git ls-files` contains no `.github/dependabot.yml`, no `CODEOWNERS`, no Trivy/grype/Snyk/Docker
-Bench Security step, no SBOM generator, no secret-scanning workflow; `ci.yml` has two jobs (backend, frontend) and
+Bench Security step, no SBOM generator, no secret-scanning workflow; `ci.yml` has five jobs (`Backend build and tests`, `Frontend lint and build`, `Verify scripts syntax and presence`, `Infrastructure definitions`, and the disabled `Live tenancy suites`) across three workflows, and
 no security stage. The repository's own history is the evidence that secret scanning is not enforced: a bcrypt
 hash and a live signing key were committed earlier and are recorded as SEC-01/SEC-02.
 
@@ -960,8 +975,12 @@ Not evidence of safety. Mandate §14 requires these rows to be `BLOCKED`, not `P
 4. **TLS renewal** cannot be observed because no certificate exists anywhere.
 5. **Owner actions outstanding, unchanged from the security programme:** rotate the exposed Neon credential
    (SEC-01); set `EC2_SSH_KNOWN_HOSTS`, `SECURITY_JWT_SECRET`, `APP_SUPERADMIN_*` as repository secrets;
-   turn the CI checks into required checks and enable `enforce_admins`; restore or formally retire the EC2 host;
-   authorise a prod schema export for the Flyway baseline; decide 403-vs-404 for cross-tenant reads; approve or
+   turn the CI checks into required checks and enable `enforce_admins` — **done 2026-11-02**, and not through the
+   Settings UI: `Gate coverage` is required with `strict` and `enforce_admins` via `gh api`, which is why this item did
+   not need an owner; the EC2 host is **formally retired** (`5f6a55a`), so the known-hosts secret has nothing to
+   authorise; authorise a prod schema export for the Flyway baseline — `V1` is that baseline and `V1`–`V7` are on
+   `master`; ~~decide 403-vs-404 for cross-tenant reads~~ — decided and shipped as **404** through
+   `TenantScopedRepository.findByIdOwnedBy` (`C-4`), with the negative tests to hold it; approve or
    reject the domain and off-host-backup costs in §5.
 6. **The Vercel preview-deployment policy is unverified.** A Vercel GitHub App is attached to this repository and
    builds a preview for each pull request (§7). Whether those preview URLs are unlisted, password-protected or
@@ -1020,7 +1039,7 @@ re-checked against the working tree or a live measurement on 2026-11-01, in the 
 | Vercel routed API calls to the retired EC2 host over HTTP | **RETIRED (by deletion)** | `gms_frontend/vercel.json` deleted on this branch. Before deleting it, the target was probed: DNS still resolves to `65.0.109.47`, TCP connect to `:8080` times out after 8 s — the rewrite could not carry traffic, so removing it breaks no working path |
 | Old EC2 SSH deployment workflow | **RETIRED (by deletion)** | `.github/workflows/deploy-backend.yml` deleted; `gh run list` confirms its last attempt (41245769175) never reached the host |
 | CI does not validate its own workflow files | **FIXED (capability) — enforcement still INF-10** | the defect was measured, not inferred: `6198d86` edited `ci.yml` and started no run anywhere. `validate-workflows.yml` is on `master` as `13bc2ed` and validated that very commit on push (41283981839, both jobs green); its acceptance test was executed on the PR, red on a deliberately broken trigger (41283176919) and green on the revert (41283277168) |
-| Lint and test checks advisory rather than enforced | **OPEN** | `required_status_checks.contexts=[]`, `enforce_admins=false`, lint step `continue-on-error: true` (INF-10) |
+| Lint and test checks advisory rather than enforced | **CLOSED 2026-11-02** | `Gate coverage` is required with `strict` and `enforce_admins`, and no workflow keeps `continue-on-error`. `required_status_checks.contexts=[]`, `enforce_admins=false` and the lint step's `continue-on-error: true` were the measured state while OPEN; none of the three is the state now (INF-10) |
 | No Flyway migration foundation | **FIXED ON BRANCH** | `feat/stage2-flyway-baseline` carries both Flyway 10 artifacts and `V1`–`V5`; `scripts/verify-schema.sh` is the re-runnable proof. On `master` the row reads **OPEN** unchanged — the dependency is absent there, so every `spring.flyway.*` property is still inert (OPS-07) |
 | No independently verified off-host backup/restore | **OPEN** | zero dumps and zero restores exist anywhere; now re-targeted at managed Neon (ADR-009) |
 | No verified production health check | **SUPERSEDED** | there is no production to check — the only target that ever had one is closed. Re-states itself as a Phase 6 gate: external HTTPS + health verification against the OCI origin |

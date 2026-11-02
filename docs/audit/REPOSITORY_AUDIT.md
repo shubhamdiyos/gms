@@ -605,10 +605,17 @@ they now reach guarded, school-scoped endpoints rather than the inherited unguar
 **advisory** steps (`continue-on-error: true`) while `npm ci` and `npm run build` remain blocking. That is a decision
 with a cost — a lint regression can reach `master` — taken deliberately instead of silencing 47 errors with
 `eslint-disable` comments or skipping the step, and it is reversed by the frontend contract package (§2 row 11).
+*Corrected 2026-11-02:* the `test` script now exists — `package.json` declares `"test": "vitest run"`, with Vitest 5,
+Testing Library and jsdom in `devDependencies` and 2 test files / 9 passing tests — and the advisory half is gone:
+`validate-workflows.yml` refuses `continue-on-error: true` in any workflow, and `ci.yml`'s `Frontend unit tests` step
+fails if the script or a `src/**/*.test.*` file is missing, so it cannot report green while testing nothing. The lint
+count is also no longer 47: **16 errors / 1 warning across 7 files**, still non-zero, still blocking.
 
 ## 11. Infrastructure, CI/CD and operations findings
 
 **OPS-01 (P0) — Production deploys with no test gate.** `.github/workflows/deploy-backend.yml` contains no `mvn` or `npm` step at all: push to `master` touching `gms_backend/**` → SSH → run `~/deploy_backend.sh`. There is no build job, no `needs:` chain, no `environment:` protection (`deploy-backend.yml:14-17`), so no approval gate exists.
+*Corrected 2026-11-02:* the file is gone — the EC2 path was retired in `5f6a55a` — so OPS-01's deploy half closes by
+removal rather than by gating, and its "CI is not required" half closes through `Gate coverage`.
 
 **OPS-02 (P0) — Deploy script is outside version control.** `:60` executes `test -f ~/deploy_backend.sh && bash …` — image builds, environment variables, DDL strategy and restart behaviour are unauditable and unreproducible, violating mandate §14 "do not execute an unaudited remote deployment script".
 
@@ -642,11 +649,19 @@ open until the branch merges.**
 
 **OPS-11 (P1) — Debug logging by default in every profile.** `application.properties:42-43` set `com.gms` and both bootstrap classes to `DEBUG`, so with SEC-07's `System.out` statements the log stream contains hashes and tenant provisioning detail.
 
-**OPS-12 (P2) — JaCoCo is decorative.** `pom.xml:118-122` declares 0.8.10 with no `<executions>` → it never instruments, never reports, never gates coverage, while CI never runs tests anyway (OPS-01).
+**OPS-12 (P2) — JaCoCo is decorative.** `pom.xml:118-122` declares 0.8.10 with no `<executions>` → it never instruments, never reports, never gates coverage, while CI never runs tests anyway (OPS-01). *Corrected 2026-11-02:* `pom.xml`
+now binds `prepare-agent` and `report` executions and CI runs `mvn -B clean verify`; what is still missing is a
+threshold — no coverage number gates a merge.
 
-**OPS-13 (P2) — No Spring profiles exist.** Only `application.properties`; no `application-dev`/`-prod`, no `spring.profiles.active`. Dev/prod separation rests entirely on env interpolation plus an untracked remote script. `spring.servlet.multipart.enabled=false` (`:39`) means no file upload is possible anywhere, which contradicts `announcements.attachment_urls`.
+**OPS-13 (P2) — No Spring profiles exist.** Only `application.properties`; no `application-dev`/`-prod`, no `spring.profiles.active`. *Corrected 2026-11-02:* all three exist and each pins `ddl-auto=validate` as a literal. Dev/prod separation rests entirely on env interpolation plus an untracked remote script. `spring.servlet.multipart.enabled=false` (`:39`) means no file upload is possible anywhere, which contradicts `announcements.attachment_urls`.
 
-**OPS-14 (P1) — Zero automated tests.** No `gms_backend/src/test` directory exists (0 classes, 0 methods); `mvn test` passes by running nothing. Frontend has no test files and no runner. `spring-boot-starter-test` is declared but unused. The only verification in the project is 45 Postman requests against ~230 mappings (~19%), and both collections ship `"auth": {}` with unset `{{school_id}}`/`{{user_id}}`, so none run without manual token pasting. **Any refactor of the 36 controllers / 40 entities is currently unguarded.**
+**OPS-14 (P1) — Zero automated tests.** No `gms_backend/src/test` directory exists (0 classes, 0 methods); `mvn test` passes by running nothing. Frontend has no test files and no runner. `spring-boot-starter-test` is declared but unused. The only verification in the project is 45 Postman requests against ~230 mappings (~19%), and both collections ship `"auth": {}` with unset `{{school_id}}`/`{{user_id}}`, so none run without manual token pasting. **Any refactor of the 36 controllers / 40 entities is currently unguarded.** *Corrected 2026-11-02:* this row's
+core claim is false now. `gms_backend/src/test/java/com/gms/` holds **18 test classes and 121 tests** under
+`mvn -B verify`, and the frontend has **2 files / 9 Vitest tests** that a CI step is required to run. Four of the
+backend classes are architecture tests that fail the build on exactly the refactors this row said would go unnoticed —
+`DenyByDefaultAuthorizationArchTest`, `RepositoryTenantScopeArchTest`, `EntityLazyAccessorArchTest`,
+`TenantScopedReadArchTest`. The honest residue is the *behavioural* half: no Playwright journey, no Testcontainers, no
+coverage threshold, and the tenancy scripts still need a live backend (`ci.yml`'s `live-tenancy` job is disabled).
 
 **OPS-15 (P2) — `.gitignore` gaps.** `.env`, `.env.local`, `.env.*.local` are covered and no real `.env` ever entered history (verified `git log --diff-filter=A`), but `.env.production` / `.env.prod*` are **not** ignored (one is tracked), and there are no `*.class`, `*.pem`, `*.key`, `secrets/` rules — which is how `PasswordVerificationTest.class` got committed.
 
@@ -865,7 +880,7 @@ coordinate is where the described code actually sat.
 | `NotificationRepository.java` | `:21-22` (§5 TEN-03) | *nowhere* | the `LIKE %:userId%` query is deleted; §16.1 carries the replacement |
 | `ci.yml` | `:11-22` (INF-23 evidence) | `:14-28` | both `paths-ignore` lists |
 | `ci.yml` | `:51-56` / `:58-65` (INF-16) | `:57-62` / `:64-71` | the two `upload-artifact` steps |
-| `ci.yml` | `:94` (INF-17 lint flag) | `:99` | `continue-on-error: true` |
+| `ci.yml` | `:94` (INF-17 lint flag) | *nowhere* | the key is gone from every workflow — `validate-workflows.yml` refuses `continue-on-error: true`, so the lint step blocks |
 | `ci.yml` | `:32` (INF-10, readiness matrix) | `:34-35` | `permissions: {contents: read}` — **`:32` was never this**, in any revision |
 
 `gms_frontend/vercel.json` and `deploy-backend.yml` are also cited in the infrastructure audit and were *deleted* by
@@ -887,9 +902,12 @@ classes, `gms_frontend/vercel.json` and twelve files under `infra/oci/`.
    commit re-ran green in 50 s — so `mvn -B verify` against JDK 21 and `npm ci`/`npm run build` are proven on a
    clean runner, not just on this machine. The deploy workflow also ran and was stopped by its own host-key guard
    (§16), so the accurate statement is: **the pipeline that SSHes into production has never reached the host.**
-   What remains unestablished: the CI checks are advisory (`required_status_checks: []`, `enforce_admins: false`,
-   re-fetched in Infra-M0), the two frontend steps configured as `continue-on-error` did not have to prove anything,
+   What remains unestablished, as re-fetched in Infra-M0: the CI checks were advisory (`required_status_checks: []`,
+   `enforce_admins: false`), the two frontend steps configured as `continue-on-error` did not have to prove anything,
    and neither workflow's `environment:` gate exists even though `Production` and `Preview` environments do.
+   **Two of those three are closed as of 2026-11-02:** `Gate coverage` is required on `master` with `strict` and
+   `enforce_admins` (an administrator's `gh pr merge --admin` was refused), and no workflow contains
+   `continue-on-error` any more. The `environment:` half is still exactly as written.
    `EC2_HOST`/`EC2_USER`/`EC2_SSH_KEY` are provisioned; `EC2_SSH_KNOWN_HOSTS`, `SECURITY_JWT_SECRET` and
    `APP_SUPERADMIN_*` are not (`gh secret list`).
 3. **Prod profile never booted.** `application-prod.properties` (`ddl-auto=validate`, Flyway enabled,

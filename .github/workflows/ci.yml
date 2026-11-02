@@ -699,9 +699,10 @@ jobs:
   #      → Repository variables. That comparison is the job's whole `if:`, so this is the
   #      only switch, and it is the owner's to throw rather than a line in a diff.
   #   1. `services:` with a PostgreSQL (loopback on the runner, published to nothing) plus the
-  #      `gms_user` role and `gms_db` from docker-compose.yml, applied by Flyway V1..V7 during the
-  #      application's own boot — never by ddl-auto. `backend` above now declares exactly such a
-  #      sidecar (`postgres:15`, published to `127.0.0.1`), so the shape exists to copy; it carries a
+  #      `gms_user` role and `gms_db` from docker-compose.yml, applied by the whole chain in
+  #      `src/main/resources/db/migration/` during the application's own boot — never by ddl-auto.
+  #      `backend` above now declares exactly such a sidecar (`postgres:15`, published to
+  #      `127.0.0.1`), so the shape exists to copy; it carries a
   #      different role and database because that job only ever hands the suite `gms_n_plus_1`.
   #   2. `mvn -B clean spring-boot:run -Dspring-boot.run.profiles=dev` in the
   #      background, waited on through /actuator/health rather than a sleep.
