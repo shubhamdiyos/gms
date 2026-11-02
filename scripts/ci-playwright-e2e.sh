@@ -362,17 +362,24 @@ if [[ -z "$ready" ]]; then
   tail -n 60 "$APP_LOG"
   exit 1
 fi
-grep -q "Startup security validation passed" "$APP_LOG" \
+# `grep -m1` into a variable rather than `grep -q`, so the lines can be echoed below as well as
+# refused on their absence. Attached to the job log and the step summary for the same reason the
+# console transcript is attached even on a green test: "this was the hardened boot" is only
+# evidence if a reader can see the line the validator wrote, instead of taking the harness's word
+# for a check it performs and then discards.
+STARTUP_VALIDATION_LINE=$(grep -m1 "Startup security validation passed" "$APP_LOG") \
   || { echo "FATAL: the boot log holds no 'Startup security validation passed' line, so this"; \
        echo "       is not the hardened boot the CORS refusal in test four is measured against."; \
        tail -n 40 "$APP_LOG"; exit 1; }
 # Checked rather than assumed, because the alternative is four tests that each fail at their
 # first login and none of them naming the reason.
-grep -q "SuperAdmin bootstrap completed successfully" "$APP_LOG" \
+SUPERADMIN_BOOTSTRAP_LINE=$(grep -m1 "SuperAdmin bootstrap completed successfully" "$APP_LOG") \
   || { echo "FATAL: no platform account was minted by this boot; every fixture login would 401."; \
        grep -i "SuperAdmin bootstrap" "$APP_LOG" | tail -5; exit 1; }
 BOOT_SECONDS=$waited
 echo "up after ${BOOT_SECONDS}s"
+echo "boot proof, verbatim from the application log:"
+printf '  %s\n' "$STARTUP_VALIDATION_LINE" "$SUPERADMIN_BOOTSTRAP_LINE"
 
 # ── 6. the browser suite ──────────────────────────────────────────────────────
 cd "$FRONTEND_DIR"
@@ -462,6 +469,8 @@ summary=$(
   echo "| --- | --- |"
   echo "| suite verdict | \`$verdict_line\` |"
   echo "| exit code | $e2e_rc |"
+  echo "| startup validation | \`${STARTUP_VALIDATION_LINE#*: }\` |"
+  echo "| platform account | \`${SUPERADMIN_BOOTSTRAP_LINE#*: }\` |"
   echo "| suite transcript | \`$E2E_LOG\` |"
   echo "| backend log | \`$APP_LOG\` |"
   echo "| traces | \`$WORK_DIR/e2e-artifacts\` |"

@@ -8,11 +8,15 @@
  * credentials. What the tests then assert is the part no API script can see: which screen the
  * router lands on, what the grid renders, and whether the console stayed clean while it happened.
  *
- * Nothing here is a secret. `GMS_E2E_PLATFORM_USERNAME` and `GMS_E2E_PLATFORM_PASSWORD` are the
- * same two names the live-tenancy harness already reads, for a platform account that
- * `SuperAdminBootstrapService` mints into a database which exists for one run; and the
- * administrator password this file returns is derived, not invented — see
- * `initialPasswordFor`, which is the server's own rule restated rather than a new one.
+ * Nothing here is a secret. `GMS_E2E_PLATFORM_USERNAME` and `GMS_E2E_PLATFORM_PASSWORD` name the
+ * platform account that `SuperAdminBootstrapService` mints into a database existing for one run;
+ * `scripts/ci-playwright-e2e.sh` exports them from the `GMS_SUPERADMIN_USERNAME` /
+ * `GMS_SUPERADMIN_PASSWORD` pair the live-tenancy harness already requires, and feeds the same
+ * pair to the boot as `APP_SUPERADMIN_*` — the two names application.properties actually bind.
+ * The administrator credential this file returns is derived, not invented: see
+ * `initialPasswordFor`, which restates the server's own rule. That restatement is exactly why
+ * `provisionTenant` decodes the JWT and refuses the run unless the token's `schoolId` is the
+ * school it just created — `ACD-13` records the case where the rule and the stored row diverge.
  */
 
 export const API_ORIGIN = (process.env.GMS_E2E_API_ORIGIN ?? 'http://localhost:8080').replace(/\/$/, '');
