@@ -80,6 +80,52 @@ jobs:
           done
           exit "$unpinned"
 
+      - name: Every GitHub expression is closed
+        # Measured on 2026-11-02: a guard in this very file matched a job display name against the
+        # two-character sequence that opens an expression, written whole inside a shell case
+        # pattern. GitHub's parser read it as a real expression with no end, refused the file, and
+        # the run appeared as `failure` with **zero jobs and zero logs** — and because an
+        # unparsable workflow emits no check at all, both jobs of this gate simply stopped
+        # existing on the pull request. The PR looked green. `check-runs` for the head commit
+        # listed CI's six jobs and nothing from this file: the INF-23 failure mode, reproduced by
+        # the workflow built to prevent INF-23, in the two lines that guard job names.
+        #
+        # GitHub cannot tell us before the push, so this step tells us on the PR: any opener with
+        # no closer after it in the same file makes that file unparsable, and the fix is to
+        # assemble the sequence from its characters rather than write it out.
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import glob, sys
+
+          OPEN = "$" + "{" + "{"
+          CLOSE = "}" + "}"
+
+          bad, scanned = [], 0
+          for path in sorted(glob.glob(".github/workflows/*.y*ml")):
+              with open(path, encoding="utf-8") as fh:
+                  text = fh.read()
+              scanned += 1
+              index = 0
+              while True:
+                  start = text.find(OPEN, index)
+                  if start == -1:
+                      break
+                  end = text.find(CLOSE, start + len(OPEN))
+                  if end == -1:
+                      line = text[:start].count("\n") + 1
+                      bad.append(f"{path}:{line}")
+                      break
+                  index = end + len(CLOSE)
+          for hit in bad:
+              print(f"::error::{hit} opens a GitHub expression that is never closed, so GitHub "
+                    f"cannot parse the file and the workflow reports no check at all — assemble "
+                    f"the sequence from its characters if the step needs to match it as text")
+          if bad:
+              sys.exit(1)
+          print(f"expression balance: {scanned} workflow file(s) scanned, every opener closed")
+          PY
+
       - name: The CI gate still triggers on pull requests
         run: |
           set -euo pipefail
@@ -173,8 +219,12 @@ jobs:
                 missing=1
                 continue
               fi
+              # Assembled at runtime by printf rather than written whole: a literal two-character
+              # opener in this file is read by GitHub as an expression with no end, which stops it
+              # parsing the workflow at all — the failure this file's own guard below refuses.
+              opener=$(printf '%s%s%s' '$' '{' '{')
               case "$line" in
-                *'${{'*)
+                *"$opener"*)
                   echo "::error::$(basename "$f"): job ${id} builds its display name from an expression — a required status check cannot track a name that changes per run"
                   missing=1 ;;
               esac
