@@ -45,6 +45,9 @@
 #       first run of verify-c1 got it wrong). Unset → the least-privilege refusals
 #       SKIP; the ADMIN and SUPERADMIN refusals are still asserted.
 #   GMS_BASE_URL GMS_VERIFY_DB GMS_PG_CONTAINER GMS_PG_USER GMS_PG_PASSWORD_ENV
+#   GMS_PG_HOST (and GMS_PG_PORT, default 5432) to reach the database over TCP
+#   instead of through the container — set GMS_PG_HOST=127.0.0.1 for a host-side
+#   PostgreSQL, which is what this machine has had since Stage 2 retired Compose.
 #   GMS_SCHOOL_A_CODE GMS_SCHOOL_B_CODE GMS_SEARCH_SURNAME GMS_REQUIRE_DB
 #
 # The administrators' initial password is not a secret this script invented. It is
@@ -91,6 +94,12 @@ PG_CONTAINER=${GMS_PG_CONTAINER:-gms-postgres}
 PG_USER=${GMS_PG_USER:-gms_user}
 PG_PASSWORD_ENV=${GMS_PG_PASSWORD_ENV:-DB_PASSWORD}
 REQUIRE_DB=${GMS_REQUIRE_DB:-}
+
+# Empty by default, which keeps the container transport. Set it (e.g. 127.0.0.1) to reach the same
+# database over TCP instead — the Compose stack publishes postgres on 5433 and has been dead on this
+# machine since Stage 2, which silently turned the SQL half of features 3, 6, 9 and 11 into SKIPs.
+PG_HOST=${GMS_PG_HOST:-}
+PG_PORT=${GMS_PG_PORT:-5432}
 
 failures=0
 checks=0
@@ -227,8 +236,13 @@ claim() { # claim <token> <jq filter over the payload>
 }
 
 sql() { # sql <statement> — SELECT only
-  docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$VERIFY_DB" \
-    -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  if [[ -n "$PG_HOST" ]]; then
+    PGPASSWORD="${!PG_PASSWORD_ENV}" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$VERIFY_DB" \
+      -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  else
+    docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$VERIFY_DB" \
+      -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  fi
 }
 
 sqlv() { # sqlv <statement> — one scalar, whitespace removed
@@ -275,7 +289,7 @@ if [[ -n "$REQUIRE_DB" && "$REQUIRE_DB" != "0" ]] && ! have_db; then
   echo "       or unset GMS_REQUIRE_DB to accept SKIP on features 3, 6, 9 and 11."
   exit 1
 fi
-have_db && fnote "the SQL half will run against $VERIFY_DB in $PG_CONTAINER" \
+have_db && fnote "the SQL half will run against $VERIFY_DB $( [[ -n "$PG_HOST" ]] && echo "over TCP at $PG_HOST:$PG_PORT" || echo "in container $PG_CONTAINER" )" \
          || fnote "no GMS_VERIFY_DB: the SQL half of features 3, 6, 9 and 11 will SKIP"
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -792,8 +806,15 @@ code=$(call GET "/students/search?query=ishaan" "$TOKEN_A")
 check "F8 the first name is searched, not only the surname" "1" "$(jq -r '.totalElements' "$body")"
 code=$(jq -r '.content[0].email' "$body")
 code=$(call GET "/students/search?query=ashfordvale&size=100" "$TOKEN_A")
-DOMAIN_MATCH=$(sqlv "SELECT count(*) FROM students WHERE school_id = $SCHOOL_A AND status <> '0' AND position('ashfordvale' in lower(email)) > 0")
-check "F8 and so is the email, across every pupil that shares the school's domain" "$DOMAIN_MATCH" "$(jq -r '.totalElements' "$body")"
+if have_db; then
+  DOMAIN_MATCH=$(sqlv "SELECT count(*) FROM students WHERE school_id = $SCHOOL_A AND status <> '0' AND position('ashfordvale' in lower(email)) > 0")
+  check "F8 and so is the email, across every pupil that shares the school's domain" "$DOMAIN_MATCH" "$(jq -r '.totalElements' "$body")"
+else
+  # Unguarded, this sqlv under `set -u` dies on ${!PG_PASSWORD_ENV} mid-substitution, leaves the
+  # expectation empty and reports a phantom product FAIL — the same failure mode the TOKEN_T guard
+  # below exists to prevent. A missing database handle is a SKIP, never a verdict.
+  skip "F8 and so is the email, across every pupil that shares the school's domain" "GMS_VERIFY_DB or the container password is not set"
+fi
 code=$(call GET "/students/search?query=$STUDENT_A1_SID&size=100" "$TOKEN_A")
 check "F8 and so is the per-school identifier itself" "1" "$(jq -r '.totalElements' "$body")"
 code=$(call GET "/students/search?query=nobodyatall" "$TOKEN_A")
@@ -893,6 +914,17 @@ check "F8 and sorts by the documented default field, lastName" "true" \
 # its own, deliberately named like school A's cohort — which also replaces the weakest count in
 # this file: school B answering zero rows cannot tell a scoped query from an empty one, whereas
 # school B answering exactly one, beside school A's seven, can.
+#
+# This is also the last moment school B holds no rows, which makes it the live arm of the
+# empty-collection contract (FE-P2-01, measured 2026-11-01): these reads used to answer
+# 204 No Content — no body, which the SPA's request layer read as null and crashed the page
+# on. Zero rows is a successful read of an empty array, never a shape the client must guess.
+code=$(call GET "/classrooms" "$TOKEN_B")
+check "F8 school B's empty classroom list answers 200, not a bodyless 204" "200" "$code"
+check "F8 and its body is an array of zero rows the client can map" "0" "$(list_len)"
+code=$(call GET "/subjects" "$TOKEN_B")
+check "F8 and so does school B's empty subject list" "200" "$code"
+check "F8 with the same zero-row array body" "0" "$(list_len)"
 code=$(call POST /classrooms/create "$TOKEN_B" '{"name":"Grade 11","grade":"11","section":"B"}')
 check "F8 setup: school B created a classroom of its own" "200" "$code"
 CLASS_B_SEARCH=$(field '.id')
@@ -917,8 +949,15 @@ else
 fi
 check "F8 and it spans more than one tenant where school A's own search cannot" "yes" \
   "$([[ "$TENANTS" -ge 2 ]] && echo yes || echo no)"
-code=$(call GET "/students/search?size=100" "$TOKEN_T")
-refused "F8 a TEACHER cannot reach the search route at all" "$code"
+if [[ -n "${TOKEN_T:-}" ]]; then
+  code=$(call GET "/students/search?size=100" "$TOKEN_T")
+  refused "F8 a TEACHER cannot reach the search route at all" "$code"
+else
+  # TOKEN_T only exists when GMS_TEACHER_PASSWORD minted the account, exactly as for the F5
+  # teacher checks above. Without it this probe would call with no token and hand `refused` an
+  # empty string — a phantom FAIL that reads like a product verdict. A missing fixture is a SKIP.
+  skip "F8 a TEACHER cannot reach the search route at all" "GMS_TEACHER_PASSWORD is not set; there is no least-privilege token to refuse"
+fi
 
 # ─────────────────────────────────────────────────────────────────────────────
 feature 9

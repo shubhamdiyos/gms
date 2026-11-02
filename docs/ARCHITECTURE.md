@@ -1016,8 +1016,12 @@ duplicates):
 - The `student` and `parent` feature directories overlap (`features/student/*` vs `features/parent/*`, both holding
   child-facing reads) — one of the two will absorb the other in Stage 4 rather than both being kept. Recorded here
   so the duplication is a decision, not an accident.
-- Zero tests today. Vitest + Testing Library are added in Stage 4 as *contract* tests against the envelope in §6,
-  not as a coverage exercise.
+- *"`Zero tests today.`"* — written before Stage 4, and no longer true: **2 files / 9 Vitest + Testing Library
+  tests** (`ErrorBoundary.test.jsx`, `ProtectedRoute.test.jsx`) run in CI as a blocking step since `8a83d37`. What
+  the sentence was really for holds: they are *contract* tests against the envelope in §6 and a crash-containment
+  check, not a coverage exercise, and there is still no coverage **threshold** that can fail a build. The rest of
+  what this list assumed would arrive — the OpenAPI check on `apiSlice.js`, the `student`/`parent` directory
+  merge — has not.
 
 ## 9. Migration sequencing inside Stage 2
 

@@ -12,8 +12,10 @@ import com.gms.repository.ExamRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
+import org.hibernate.Hibernate;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.stream.Collectors;
@@ -86,6 +88,7 @@ public class ExamServiceImpl implements ExamService {
         return ResponseEntity.ok(mapToResponse(savedExam));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<ExamResponse> updateExam(Integer id, ExamRequest examRequest) {
         // Validate exam exists
@@ -109,6 +112,12 @@ public class ExamServiceImpl implements ExamService {
         exam.setPassingMarks(examRequest.getPassingMarks());
         exam.setDurationMinutes(examRequest.getDurationMinutes());
         exam.setUpdatedBy(updater);
+
+        // The response is mapped from the guarded school_name accessor, which answers null for an
+        // uninitialized proxy; inside this transaction the load is a real read, not a silent null.
+        if (exam.getSchool() != null) {
+            Hibernate.initialize(exam.getSchool());
+        }
 
         Exam savedExam = examRepository.save(exam);
 
@@ -141,6 +150,7 @@ public class ExamServiceImpl implements ExamService {
         return ResponseEntity.ok(exams);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public ResponseEntity<Exam> getExamById(Integer id) {
         Exam exam = examRepository.findById(id)
@@ -149,6 +159,13 @@ public class ExamServiceImpl implements ExamService {
         // The scoped findById answered the tenancy question at the point of load: a school caller
         // never reaches here for a foreign id, and the platform owner's cross-tenant branch gets
         // the row it is meant to see.
+        //
+        // The entity is serialized after this transaction ends (open-in-view=false), so the lazy
+        // school must be initialized here — otherwise the guarded school_name accessor answers
+        // null and the client silently loses the exam's school.
+        if (exam.getSchool() != null) {
+            Hibernate.initialize(exam.getSchool());
+        }
         return ResponseEntity.ok(exam);
     }
 

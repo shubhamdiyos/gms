@@ -113,6 +113,21 @@ public class StudentAdmissionServiceImpl implements StudentAdmissionService {
             return ResponseEntity.badRequest().body("Admission is not in APPLIED state");
         }
 
+        // A parent row is global (parents.email is unique across the platform), but this school may
+        // link a pupil only to a family that is empty or already partly its own: attaching a pupil
+        // to a family that lives wholly at another school publishes that child into the other
+        // school's parent portal, and the parent-student assignment route refuses exactly this.
+        // The check runs before any write, so a refusal cannot leave a half-created pupil behind.
+        if (studentAdmission.getParentEmail() != null && !studentAdmission.getParentEmail().isEmpty()) {
+            Optional<Parent> existingFamily = parentRepository.findByEmail(studentAdmission.getParentEmail());
+            boolean foreignFamily = existingFamily.isPresent() && existingFamily.get().getStudents().stream()
+                    .anyMatch(s -> !s.getSchool().getId().equals(TenantContext.schoolId()));
+            if (foreignFamily) {
+                return ResponseEntity.status(409).body(
+                        "Parent email is already linked to a student of another school");
+            }
+        }
+
         // Create student
         Student student = new Student();
         student.setSchool(studentAdmission.getSchool());

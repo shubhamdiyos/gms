@@ -130,6 +130,12 @@ public class SecurityConfig {
                 .requestMatchers(API + "/students/profile", API + "/students/my-*").hasAuthority("STUDENT")
                 .requestMatchers(API + "/parents/profile", API + "/parents/notifications",
                         API + "/parents/children/**").hasAuthority("PARENT")
+                // The administrative parent surface (AUTHZ-00): create/update/list/toggle carry
+                // ADMIN-only method guards but were admitted by no matcher above, so
+                // anyRequest().denyAll() answered 403 to the very handlers that granted them.
+                // Declared after the PARENT self-service matchers, which name disjoint paths.
+                .requestMatchers(API + "/parents", API + "/parents/create", API + "/parents/update",
+                        API + "/parents/toggle").hasAnyAuthority("ADMIN", "SUPERADMIN")
                 .requestMatchers(API + "/teachers/**").hasAuthority("TEACHER")
                 // The student's own timetable: ACADEMIC_OPERATIONS admits ADMIN/SUPERADMIN/TEACHER only,
                 // so with first-match-wins the /timetables/** rule would 403 a STUDENT whose handler

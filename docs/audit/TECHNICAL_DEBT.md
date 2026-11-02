@@ -91,7 +91,7 @@ result, measured" holds the numbers.
 | FE-06/07 | Fabricated metrics; Parent dashboard throws | P1 | S | wire existing endpoints; add the missing `getParentProfile` endpoint to the existing builder |
 | FE-09 | No shared components; 9 duplicated pages; dead View buttons | P2 | L | extract from the copies into `components/common/` (which today holds only `ProtectedRoute.jsx`), migrate all 9, then delete the duplicated markup — the reuse rule's main frontend obligation |
 | FE-10 | 11 local Yup schemas, unused shared constants, `context` vs `when` bug | P2 | M | one `features/*/schemas.js` or a shared module seeded **from** `VALIDATION_MESSAGES`, then remove the locals |
-| FE-12/13/14 | Inline theme, dead `uiSlice`, `persist` whitelist, no test runner, duplicate HTTP stacks | P3 | M | move the existing `createTheme` into a theme module; delete dead slices; add Vitest (net-new) |
+| FE-12/13/14 | Inline theme, dead `uiSlice`, `persist` whitelist, duplicate HTTP stacks | P3 | M | move the existing `createTheme` into a theme module; delete dead slices |
 | FE-15 | A delegated frontend edit introduced a `WC` icon import that does not exist in the installed MUI version; it survived review only because nothing built the frontend in that window | P2 | S | process rule, not a code edit: an agent that edits frontend source runs `npm run build` before reporting, or the main agent builds before committing the edit — a bad import is a build failure, and the build is the only thing that catches it (the frontend counterpart of `OPS-18`/`OPS-19`) |
 
 ### Infrastructure
@@ -104,12 +104,12 @@ result, measured" holds the numbers.
 | OPS-10 | Frontend image cannot reach the API; root containers, no healthcheck, unpinned tags | P2 | M | add the missing `/api` block to the existing `nginx.conf`, or delete the frontend Dockerfile as dead — decide, don't maintain both |
 | OPS-11/12 | DEBUG by default; JaCoCo declared but inert | P2 | S | profile-appropriate levels; give JaCoCo real executions and a CI gate |
 | OPS-13 | No Spring profiles; multipart disabled while attachment columns exist | P1 | M | add `application-dev/prod` (net-new) rather than more env-var guessing |
-| OPS-14 | **Zero tests** | **P0 enabler** | L | net-new: backend integration + tenant matrix, frontend Vitest, Playwright journeys |
+| OPS-14 | Tests exist; the harness is still short of what was planned. Measured 2026-11-02: **18 backend test classes / 121 tests** (`mvn -B verify`), **2 frontend files / 9 Vitest tests** (`npm test`, which now blocks), and CI's `backend` job runs a real `postgres:15` service container rather than no database at all. The row this replaces read **"Zero tests"** — true when the audit ran, false now. Still absent: Playwright journeys, Testcontainers, coverage thresholds, and a tenant matrix that tests behaviour per role rather than architecture rules over the code | **P1** (was **P0 enabler**: the enabler role — "nothing can be claimed without a test" — is discharged; what is left is breadth) | L | net-new: Playwright journeys, Testcontainers, coverage thresholds, per-role tenant behaviour tests |
 | OPS-15/16 | gitignore gaps; no backup procedure | P1/P0 | S | extend `.gitignore`; write the backup scripts (net-new) |
 | OPS-18 | `mvn package` without `clean` ships resources the source no longer has (found 2026-11-01 by renaming a migration and booting the jar: Flyway applied V6 then the ghost V7 and died on `42710 trigger already exists`) | P1 | S | no new mechanism — `clean` belongs in every command that produces a deployable artifact (`Makefile`, `ci.yml`'s packaging step if one is added), plus `unzip -l target/*.jar \| grep db/migration` compared against `ls src/main/resources/db/migration/`. CI is safe today because it runs `mvn -B verify` on a fresh checkout; the local `package` is what lies |
 | OPS-19 | Repackaging under a live JVM: `mvn -o package` while a boot `java -jar` is running from the same artifact overwrites a jar the running JVM still maps, so a subsequent run silently tests a stale build — this session recorded a schema run that "logged no Flyway line at all" for exactly that reason | P1 | S | widen the `OPS-18` rule: `clean` before `package`, and never repackage while a JVM holds the jar — stop the boot process, or build to a distinct artifact, before the next run |
 | OPS-20 | The Colima outage surfaced as an application error: when the container runtime stopped, the live verification scripts reported `Connection refused`, which reads as a backend defect rather than "the database is not running" | P2 | S | before the scripts report a connection error they check that the runtime and the database are each up, and distinguish a dead runtime from a dead database — a false application defect costs more triage than the outage it masks |
-| OPS-21 | **A workflow GitHub cannot parse emits no check at all.** `validate-workflows.yml` — the gate whose whole purpose is to notice a missing run — carried a literal unclosed expression opener inside a shell `case` pattern from `01b7638`, so GitHub refused the file and every push to it reported `failure` with zero jobs and zero logs, while the head commit's `check-runs` listed CI's jobs and nothing from this gate. PR #25 read green with its validation gate absent (found 2026-11-02; §19 of `BASELINE_STATUS.md` carries the measurements, and the same first run produced actionlint's only finding against this branch, `ci.yml:644:9` `if: false`) | **P1** | S | the file now refuses an opener with no closer, which catches this class on the PR that introduces it; the durable answer is still `INF-10` — name every job as a required status check, so an absent check blocks the merge instead of resembling a pass |
+| OPS-21 | **A workflow GitHub cannot parse emits no check at all.** `validate-workflows.yml` — the gate whose whole purpose is to notice a missing run — carried a literal unclosed expression opener inside a shell `case` pattern from `01b7638`, so GitHub refused the file and every push to it reported `failure` with zero jobs and zero logs, while the head commit's `check-runs` listed CI's jobs and nothing from this gate. PR #25 read green with its validation gate absent (found 2026-11-02; §19 of `BASELINE_STATUS.md` carries the measurements, and the same first run produced actionlint's only finding against this branch, `ci.yml:644:9` `if: false`) | **P1** | S | the file now refuses an opener with no closer, which catches this class on the PR that introduces it; the durable answer was `INF-10`, and **`INF-10` closed 2026-11-02**: `.github/workflows/gate-coverage.yml` (job `Gate coverage`) is a required status check on `master` with `strict` and `enforce_admins`, and it refuses a missing workflow file, a renamed job, or an owed gate with no verdict — so this exact failure mode now blocks the merge instead of resembling a pass. It requires **one** context, not every job, because `ci.yml` is path-filtered and a docs-only PR starts it not at all (measured on PR #15); requiring six names would make that PR unmergeable. Both halves of this finding were then exercised as negative tests on throwaway PRs — #27 with a failing assertion, #28 with `validate-workflows.yml` deleted — each refused for an administrator, each closed unmerged |
 
 ## 2. Ranked backlog
 
@@ -151,13 +151,16 @@ M1 was scoped as package 1, package 2 and the low-risk half of package 3. It lan
 | 1 · Fail-closed config, `prod` profile, insecure defaults | **yes**, on the repository side | `StartupSecurityValidator`, the `application-dev`/`application-prod` split, `${…}` placeholders everywhere; owner credential rotation still outstanding |
 | 2 · Credential logging, response leaks, dead packaged utilities | **yes** — SEC-07, SEC-08, BKL-05, BKL-07 | the four `util/Password*` files and the committed `.class` are gone; 36 tests execute; the probe table in BASELINE_STATUS §13.4 |
 | 3 · Escalation/destruction holes | **partial by design** — SEC-04, SEC-09, SEC-13, SEC-16 closed; **SEC-05 and SEC-12 left open** | SEC-05 needs the single ownership guard from package 5: patching six controllers by hand would create six copies of a rule the mandate asks to express once. SEC-12 belongs with the financial package. |
-| 4 · Test harness + CI gate | **started early, not finished** | backend unit tests, `ci.yml` and JaCoCo exist; Testcontainers, Vitest/RTL, Playwright and the Postman repair are M3 |
+| 4 · Test harness + CI gate | **started early, not finished** | backend unit tests, `ci.yml` and JaCoCo exist; Testcontainers, Vitest/RTL, Playwright and the Postman repair are M3. **One clause of that row is now stale: Vitest/RTL landed.** `gms_frontend` has `"test": "vitest run"`, 2 test files and 9 passing tests, and since `8a83d37` the CI step refuses a missing `test` script or a suite that collects nothing — it cannot report green while testing nothing. Testcontainers, Playwright and coverage thresholds are still not there |
 | 5 · Tenant invariant | **not started** | next branch, `fix/gms-tenant-isolation` |
 
 The planning error worth keeping: this backlog assumed the ordering constraint that bites is *between code packages*.
 It is not — it is *between code and owner action*. Nothing in packages 1–3 can be claimed for the live system until the
-credential is rotated, the new secrets are injected on the host, and the CI checks are marked required, and the host
+credential is rotated and the new secrets are injected on the host, and the host
 itself is currently unreachable enough that even the claim "the deployed system is the one we audited" is unproven.
+**The third condition this paragraph used to list — "the CI checks are marked required" — closed on 2026-11-02**, and it
+turned out not to be an owner action: `Gate coverage` is required on `master` with `strict` and `enforce_admins`, and
+`gh pr merge 27 --admin --merge` was refused. That is why the list above is two items and not three.
 
 ## 3. What must not be touched yet
 
@@ -169,10 +172,12 @@ itself is currently unreachable enough that even the claim "the deployed system 
   **Status after M1: this constraint was lifted deliberately, and the reason is recorded here rather than buried in a diff.** M1 added `.github/workflows/ci.yml`
   (backend `mvn verify` + frontend lint/build on every PR and every push to `master`) and narrowed the deploy `paths:` to backend/runtime inputs. That is a gate
   *authored*, and it has now **executed** — the first `ci.yml` run on PR #10 returned `Backend build and tests=success`
-  and `Frontend lint and build=success` on ubuntu-latest — but it is not yet *enforced*: branch protection lists
-  `required_status_checks: []`, so a green CI is not what stops a merge today. What the narrowing does change is one
-  specific real hazard — a documentation-only commit to `master` used to SSH into production. Enforcing the checks is
-  the owner action in BASELINE_STATUS §11 item 5.
+  and `Frontend lint and build=success` on ubuntu-latest — and it is now **enforced**, which is the half this bullet
+  used to mark open. `required_status_checks` was `[]` when that was written; `master` now requires the `Gate coverage`
+  context with `strict` and `enforce_admins` (2026-11-02), so a green-but-absent check no longer resembles a pass and an
+  administrator cannot merge over it. What the narrowing does change is one
+  specific real hazard — a documentation-only commit to `master` used to SSH into production. Enforcing the checks was
+  the owner action in BASELINE_STATUS §11 item 5; that item is closed, and §11 itself still describes it as open.
 * **`EC2_SSH_KNOWN_HOSTS` must stay unset, and the EC2 host must stay unreachable, until Infra-M2 and Infra-M3 land.**
   This is the one item on this list that is a *safety* constraint rather than a sequencing preference: the deploy
   workflow now executes on every `master` push and is stopped only by that missing secret
@@ -208,8 +213,10 @@ itself is currently unreachable enough that even the claim "the deployed system 
 **36** controllers (`AbstractCRUDController`, deleted by `C-1`, is not among them; `DashboardController` is the newest),
 236 handler mappings + 36 class-level `@RequestMapping`; **39** entity-package files (36 `@Table` classes,
 `BaseAuditEntity`, `TenantOwned`, `AuthorshipEntity`), 37 repository files (36 interfaces plus `TenantScopedRepository`),
-35 service impls; **16** backend test classes under `src/test/java/com/gms/` and `mvn test` no longer has "nothing to
-run"; **7** `.sql` migrations, `V1`–`V7`, with `flyway-core` at `gms_backend/pom.xml:54`; the schema facts, as
+35 service impls; **18** backend test classes under `src/test/java/com/gms/` and **121** tests under them (`mvn -B
+verify` — `No tests to run` is long gone), plus **2** frontend test files and **9** Vitest tests, which the CI step now
+has to run or refuse over; **9** `.sql` migrations, `V1`–`V9` — `V1`–`V7` are on `master`, `V8`–`V9` are on
+`feat/post-pr25-hardening` — with `flyway-core` at `gms_backend/pom.xml:54`; the schema facts, as
 re-measured on the migrated database **at `V6` and *before* `V7`**, are in REPOSITORY_AUDIT §4 (**39** tables, 35
 carrying the integer `school_id`, 141 FKs of which 18 are same-school pairs, **0** tables left without a tenant column
 except `parents` and `user_roles`) — `C-8`'s `V7__record_who_wrote_the_pupil.sql` adds 8 audit FKs to that FK total

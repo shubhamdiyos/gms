@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Alert,
   Box,
   Typography,
   Paper,
@@ -68,7 +69,7 @@ const FeesPage = () => {
   const { hasRole } = useAuth();
   const canManageFees = hasRole(ROLES.ADMIN);
 
-  const { data: fees = [], isLoading, refetch } = useGetFeesQuery();
+  const { data: fees = [], isLoading, isError, error, refetch } = useGetFeesQuery();
   const [createFee] = useCreateFeeMutation();
   const [updateFee] = useUpdateFeeMutation();
   const [deleteFee] = useDeleteFeeMutation();
@@ -261,6 +262,21 @@ const FeesPage = () => {
           </Button>
         )}
       </Box>
+
+      {isError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={refetch}>
+              Retry
+            </Button>
+          }
+        >
+          Failed to load fees
+          {error?.status ? ` (HTTP ${error.status})` : ''}: {error?.data?.message || 'unexpected error'}
+        </Alert>
+      )}
 
       {/* Data Grid */}
       <Paper sx={{ height: 600, width: '100%' }}>

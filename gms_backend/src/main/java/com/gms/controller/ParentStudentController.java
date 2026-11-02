@@ -1,8 +1,8 @@
 package com.gms.controller;
 
-import com.gms.model.entity.Parent;
 import com.gms.model.entity.Student;
 import com.gms.model.request.ParentStudentRequest;
+import com.gms.model.response.ParentResponse;
 import com.gms.security.TenantContext;
 import com.gms.service.ParentStudentService;
 import jakarta.validation.Valid;
@@ -41,7 +41,7 @@ public class ParentStudentController {
 
     @GetMapping("/student/{studentId}/parents")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
-    public ResponseEntity<List<Parent>> getParentsForStudent(@PathVariable Integer studentId) {
+    public ResponseEntity<List<ParentResponse>> getParentsForStudent(@PathVariable Integer studentId) {
         return parentStudentService.getParentsForStudent(studentId);
     }
 }

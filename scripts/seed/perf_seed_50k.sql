@@ -7,7 +7,7 @@
 --           composite keys can be MEASURED at real volume, not against a demo fixture.
 --           The clause is PER SCHOOL, so schools 1 and 2 are each seeded with 50,000
 --           students; a cross-table sum that merely clears 50,000 would not satisfy it.
---           The five EXPLAIN (ANALYZE, BUFFERS) probes are listed in the footer.
+--           The six EXPLAIN (ANALYZE, BUFFERS) probes are listed in the footer.
 --
 -- SAFETY  : This file TRUNCATEs and repopulates data. It runs ONLY against the
 --           disposable database `gms_perf_seed`. The guard below aborts if it is
@@ -1036,7 +1036,7 @@ FROM students st GROUP BY st.school_id ORDER BY st.school_id;
 -- ============================================================================
 -- MEASUREMENT PROBES (run after `ANALYZE;`, each with EXPLAIN (ANALYZE, BUFFERS)
 -- prefixed; schools 1 and 2 are the 50,000-pupil volume tenants NFR-01 names, so
--- probes P1..P5 measure a tenant the clause actually describes):
+-- probes P1..P6 measure a tenant the clause actually describes):
 --
 --  P1  deep page of the roster. OFFSET 40000 is 40,000 rows into school 1's 47,369
 --      active pupils -- a real deep walk, not a page past the end, and the same
@@ -1057,4 +1057,19 @@ FROM students st GROUP BY st.school_id ORDER BY st.school_id;
 --  P5  a tenant's users with their roles (roles live in user_roles, not on users)
 --      SELECT u.id, u.username, ur.role FROM users u JOIN user_roles ur ON ur.user_id = u.id
 --       WHERE u.school_id = 1 AND ur.role = 'TEACHER';
+--  P6  the two dashboard fee sums, in both shapes, because comparing them is the point. The
+--      `old` row is the statement as the JPQL wrote it before Stage 5 — tenant reached by joining
+--      through the roll; the `new` row is what StudentFeeRepository now sends. They select the same
+--      rows: `fk_student_fee_student_same_school` ties (student_id, school_id) to
+--      students(id, school_id), so no tenant can leak through the shorter predicate. Run each shape
+--      twice and read the second: the first run of the joined shape took 186.3 ms because 2,447 of
+--      its 7,894 blocks came from disk, and the same statement warm took 88.9 ms.
+--      old  SELECT SUM(sf.amount_paid) FROM student_fees sf JOIN students st ON st.id = sf.student_id
+--            WHERE st.school_id = 1 AND sf.status IN ('PAID','PARTIAL');
+--      new  SELECT SUM(sf.amount_paid) FROM student_fees sf
+--            WHERE sf.school_id = 1 AND sf.status IN ('PAID','PARTIAL');
+--      old  SELECT SUM(sf.balance_amount) FROM student_fees sf JOIN students st ON st.id = sf.student_id
+--            WHERE st.school_id = 1 AND sf.status IN ('PENDING','PARTIAL','OVERDUE');
+--      new  SELECT SUM(sf.balance_amount) FROM student_fees sf
+--            WHERE sf.school_id = 1 AND sf.status IN ('PENDING','PARTIAL','OVERDUE');
 -- ============================================================================

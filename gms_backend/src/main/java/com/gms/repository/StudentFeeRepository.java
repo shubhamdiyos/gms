@@ -21,9 +21,13 @@ public interface StudentFeeRepository extends TenantScopedRepository<StudentFee>
 
     List<StudentFee> findByStudent_School_IdAndFee_AcademicYearAndStatus(Integer schoolId, String academicYear, String status);
 
-    @Query("SELECT SUM(sf.amountPaid) FROM StudentFee sf WHERE sf.student.school.id = :schoolId AND sf.status IN ('PAID', 'PARTIAL')")
+    // Both sums filter on the tenant column student_fees itself carries rather than on
+    // student.school.id: `fk_student_fee_student_same_school` ties (student_id, school_id) to
+    // students(id, school_id), so the two predicates select the same rows, and dropping the join lets
+    // PostgreSQL use idx_student_fee_school instead of hash-joining 509,000 fee rows to 101,800 pupils.
+    @Query("SELECT SUM(sf.amountPaid) FROM StudentFee sf WHERE sf.school.id = :schoolId AND sf.status IN ('PAID', 'PARTIAL')")
     BigDecimal getTotalCollectedFeesBySchoolId(@Param("schoolId") Integer schoolId);
 
-    @Query("SELECT SUM(sf.balanceAmount) FROM StudentFee sf WHERE sf.student.school.id = :schoolId AND sf.status IN ('PENDING', 'PARTIAL', 'OVERDUE')")
+    @Query("SELECT SUM(sf.balanceAmount) FROM StudentFee sf WHERE sf.school.id = :schoolId AND sf.status IN ('PENDING', 'PARTIAL', 'OVERDUE')")
     BigDecimal getTotalOutstandingFeesBySchoolId(@Param("schoolId") Integer schoolId);
 }

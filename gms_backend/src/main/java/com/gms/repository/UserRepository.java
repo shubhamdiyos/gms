@@ -42,14 +42,13 @@ public interface UserRepository extends TenantScopedRepository<User> {
     boolean existsByUsername(String username);
 
     /**
-     * Find users by school with pagination
+     * The school's account list, with the soft-deleted accounts left out: a user deleted by
+     * {@code deleteWithinSchool} keeps its row for the audit trail (enabled=false,
+     * userStatus='0') and does not belong in the list.
      */
-    Page<User> findAllBySchool_Id(Integer schoolId, Pageable pageable);
+    Page<User> findAllBySchool_IdAndEnabledTrue(Integer schoolId, Pageable pageable);
 
-    /**
-     * Find all users by school
-     */
-    List<User> findBySchool_Id(Integer schoolId);
+    List<User> findBySchool_IdAndEnabledTrue(Integer schoolId);
 
     /**
      * Find users by school and status

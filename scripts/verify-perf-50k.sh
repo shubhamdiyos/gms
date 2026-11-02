@@ -55,9 +55,10 @@
 #     or `pg_dropcache` step between probes, so these numbers are the steady
 #     state, not the first-hit state;
 #   * multi-instance or load-balanced behaviour: one backend process is measured;
-#   * connection-pool saturation: the calls are strictly sequential (one
-#     in-flight request at a time), so HikariCP never queues — concurrent-load
-#     behaviour is a Stage 6 question and no number here speaks to it;
+#   * connection-pool saturation and concurrent load: sections 1-4 are strictly
+#     sequential (one in-flight request at a time, so HikariCP never queues) —
+#     section 4b is the concurrent leg, eight clients in flight per endpoint, and
+#     its budget is the same NFR-02 pair, unmodified;
 #   * p99 with statistical strength (20 samples, see above) and percentiles of
 #     the SQL layer (owned by the seed's EXPLAIN probes, not this script).
 #
@@ -113,6 +114,19 @@ PG_USER=${GMS_PG_USER:-gms_user}
 PG_PASSWORD_ENV=${GMS_PG_PASSWORD_ENV:-DB_PASSWORD}
 RUNS=${GMS_PERF_RUNS:-20}
 
+# Empty by default, which keeps the container transport. Set it (e.g. 127.0.0.1)
+# to reach the same database over TCP instead — see sql().
+PG_HOST=${GMS_PG_HOST:-}
+PG_PORT=${GMS_PG_PORT:-5432}
+
+# Concurrent-load leg (see section 4b). 8 clients is the smallest number that
+# can saturate Spring Boot's default 10-connection HikariCP pool once a request
+# holds more than one, and 0 turns the leg off for an operator who only wants
+# the historical sequential run.
+CONCURRENCY=${GMS_PERF_CONCURRENCY:-8}
+CONC_REQUESTS=${GMS_PERF_CONC_REQUESTS:-$((CONCURRENCY * 10))}
+CONC_TIMEOUT=${GMS_PERF_CONC_TIMEOUT:-10}
+
 # The published budgets (PRD §9 NFR-02), quoted above. Not tuned per endpoint.
 BUDGET_P95=300
 BUDGET_P99=800
@@ -154,8 +168,21 @@ call() { # call <method> <path> [token] [json]
 field() { jq -r "$1 // empty" "$body"; }
 
 sql() { # sql <statement> — SELECT only, per the header
-  docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$PERF_DB" \
-    -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  # Two transports, one contract. The container path is the one this harness has
+  # always used; the TCP path exists because a measurement taken through
+  # `docker exec` is unavailable on any host whose container runtime is down,
+  # and the harness's own rule is that no DB handle means no measurement — not
+  # a skipped run that still prints PASS lines. GMS_PG_HOST selects the TCP
+  # path; leaving it unset keeps every existing invocation on Docker, byte for
+  # byte. The password is read from the same named variable either way and is
+  # never echoed.
+  if [[ -n "$PG_HOST" ]]; then
+    PGPASSWORD="${!PG_PASSWORD_ENV}" psql -h "$PG_HOST" -p "$PG_PORT" -U "$PG_USER" -d "$PERF_DB" \
+      -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  else
+    docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$PERF_DB" \
+      -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+  fi
 }
 
 # ── 1. Prove we are standing on the right database ───────────────────────────
@@ -488,6 +515,111 @@ else
        'GMS_SCHOOL_ADMIN_USERNAME/PASSWORD not set (seeded password hashes are placeholders)'
 fi
 
+# ── 4b. Concurrent load ──────────────────────────────────────────────────────
+# WHY THIS SECTION EXISTS. The header's own honesty list says this harness
+# measures "strictly sequential (one in-flight request at a time), so HikariCP
+# never queues". That is a true statement about the section above and a gap in
+# the clause DoD-2 is really about: a SaaS portal does not serve one user at a
+# time, and an endpoint can clear p95 alone and still fall over when ten of it
+# run together — which is where a connection pool, a servlet thread pool and a
+# per-request row count all become visible at once. Sequential latency says the
+# query is fast; concurrent latency says the system is fast. Only the second one
+# is what a school experiences.
+#
+# THE BUDGET IS NOT MOVED. NFR-02 says "p95 < 300 ms and p99 < 800 ms for the
+# ten hottest endpoints at volume". It says at volume; it does not say one
+# request at a time. So the same two numbers are applied here unmodified. What
+# is added is not a stricter budget but a stricter condition: every request must
+# come back 2xx, and a request that never completes within --max-time counts as
+# a failure rather than as a slow sample, because a timeout is how saturation
+# actually presents to a user.
+#
+# WHAT IS ALSO RECORDED, because p95 alone will not say *why* it moved:
+#   * throughput (requests/second) over the whole closed set, so a rising p95
+#     with flat throughput is a different story from a rising p95 with rising
+#     latency and a queue;
+#   * the peak number of ACTIVE backends this database saw during the run,
+#     sampled from pg_stat_activity while the load was in flight. A pool ceiling
+#     shows up as that count plateauing while client-side latency keeps climbing
+#     — it is the difference between "the database is slow" and "the database was
+#     never asked", and nothing in the sequential half can tell them apart.
+#     The sampler holds one connection of its own, so read every peak as +1.
+echo
+if [[ "$CONCURRENCY" -le 0 ]]; then
+  skip 'concurrent load (section 4b)' 'GMS_PERF_CONCURRENCY=0 — the leg was turned off for this run'
+elif ! command -v xargs >/dev/null 2>&1 || ! xargs -P 1 -I @@X@@ true @@X@@ 2>/dev/null; then
+  skip 'concurrent load (section 4b)' 'this platform has no xargs -P/-I parallel form'
+elif ! command -v python3 >/dev/null 2>&1; then
+  skip 'concurrent load (section 4b)' 'python3 is needed for a wall clock with sub-second resolution'
+else
+  echo "=== 4b. Concurrent load — $CONCURRENCY clients in flight, $CONC_REQUESTS requests per endpoint ==="
+  cfile=$(mktemp); cflag=$(mktemp); csample=$(mktemp)
+  trap 'rm -f "$body" "$results" "$cfile" "$cflag" "$csample"' EXIT
+
+  conc_measure() { # conc_measure <label> <route> <token>
+    local label=$1 route=$2 token=$3
+    local url wall start end ok peak thr stats mn p50 p95 mx verdict codes
+    : > "$cfile"; : > "$csample"; : > "$cflag"
+
+    ( while [[ -e "$cflag" ]]; do
+        sql "SELECT count(*) FROM pg_stat_activity WHERE datname = current_database() AND state = 'active'" \
+          >> "$csample" 2>/dev/null
+        sleep 0.1
+      done ) &
+    local sampler=$!
+
+    start=$(python3 -c 'import time; print("%.3f" % time.time())')
+    for i in $(seq 1 "$CONC_REQUESTS"); do printf '%s%s\n' "$API" "$route"; done \
+      | xargs -P "$CONCURRENCY" -I @@GMSURL@@ curl -s -o /dev/null --max-time "$CONC_TIMEOUT" \
+              -w '%{time_total} %{http_code}\n' -H "Authorization: Bearer $token" "@@GMSURL@@" >> "$cfile" 2>&1
+    end=$(python3 -c 'import time; print("%.3f" % time.time())')
+
+    rm -f "$cflag"; wait "$sampler" 2>/dev/null
+
+    wall=$(awk -v a="$start" -v b="$end" 'BEGIN{ d = b - a; if (d <= 0) d = 0.001; printf "%.3f", d }')
+    ok=$(awk '$2 ~ /^2/ {c++} END{print c+0}' "$cfile")
+    peak=$(sort -n "$csample" | tail -1)
+    [[ -n "$peak" ]] || peak=0
+    thr=$(awk -v n="$CONC_REQUESTS" -v w="$wall" 'BEGIN{printf "%.1f", n / w}')
+
+    stats=$(cut -d' ' -f1 "$cfile" | sort -n | awk '
+      function ceil(x) { return (x == int(x)) ? x : int(x) + 1 }
+      { v[NR] = $1 + 0 }
+      END {
+        if (NR == 0) { print "0 0 0 0"; exit }
+        printf "%.1f %.1f %.1f %.1f", v[1]*1000, v[ceil(0.50*NR)]*1000, v[ceil(0.95*NR)]*1000, v[NR]*1000
+      }')
+    mn=${stats%% *}; local rest=${stats#* }; p50=${rest%% *}; rest=${rest#* }
+    p95=${rest%% *}; mx=${rest#* }
+    codes=$(cut -d' ' -f2 "$cfile" | sort | uniq -c | tr '\n' ' ' | sed 's/^ *//')
+
+    verdict=ok
+    [[ "$ok" == "$CONC_REQUESTS" ]] || verdict="NOT-2XX($ok/$CONC_REQUESTS)"
+    if [[ "$verdict" == ok ]]; then
+      verdict=$(awk -v p95="$p95" -v mx="$mx" -v b95="$BUDGET_P95" -v b99="$BUDGET_P99" \
+        'BEGIN{ if (p95+0 >= b95+0) print "P95-OVER"; else if (mx+0 >= b99+0) print "P99-OVER"; else print "ok" }')
+    fi
+    check "$label: $CONC_REQUESTS requests at $CONCURRENCY-wide — all 2xx, p95 < ${BUDGET_P95}ms, worst < ${BUDGET_P99}ms" \
+      "ok" "$verdict"
+    printf '%-28s %3d %6d %8s %8s %8s %8s %8s %7s   %-16s %s\n' \
+      "$label" "$CONCURRENCY" "$ok" "$mn" "$p50" "$p95" "$mx" "${thr}/s" "peak=${peak}" "$codes" >> "$conc_results"
+  }
+
+  conc_results=$(mktemp)
+  conc_measure 'search?query=<selective>'   "/students/search?query=student52000@&page=0&size=20" "$PLATFORM_TOKEN"
+  conc_measure 'search?query=<matches-all>' "/students/search?query=er&size=20"                   "$PLATFORM_TOKEN"
+  conc_measure 'search?page=4000 (deep)'    "/students/search?page=4000&size=20"                 "$PLATFORM_TOKEN"
+  conc_measure 'GET /students (default)'    "/students"                                           "$PLATFORM_TOKEN"
+  conc_measure 'GET /students/{id}'         "/students/${STUDENT_ID}"                             "$PLATFORM_TOKEN"
+  conc_measure 'GET /dashboard/school'      "/dashboard/school"                                   "$PLATFORM_TOKEN"
+
+  echo
+  printf '%-28s %3s %6s %8s %8s %8s %8s %8s %7s   %s\n' \
+    'CONCURRENCY' 'W' 'ok' 'min' 'p50' 'p95' 'max' 'rps' 'dbpeak' 'codes'
+  cat "$conc_results"
+  rm -f "$cfile" "$cflag" "$csample" "$conc_results"
+fi
+
 # ── 5. The table ─────────────────────────────────────────────────────────────
 echo
 echo "p95 budget = ${BUDGET_P95}ms, worst-run/p99 budget = ${BUDGET_P99}ms — both quoted from"
@@ -499,7 +631,7 @@ printf '%-28s %4s %4s %8s %8s %8s %8s %14s   %s\n' \
 cat "$results"
 echo
 echo "Not measured here (the roadmap must repeat this, not just the numbers):"
-echo "  cold cache, multiple instances, connection-pool saturation, concurrent load."
+echo "  cold cache, multiple instances. Concurrent load is measured — see section 4b above."
 echo
 echo "What this run decides about volume, stated at the size of the claim: NFR-01's floor"
 echo "is met PER SCHOOL (schools 1 and 2 hold 50,000 pupils each, asserted above), the"

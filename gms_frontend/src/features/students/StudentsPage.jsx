@@ -47,7 +47,14 @@ const schema = yup.object({
   lastName: yup.string().required('Last name is required'),
   email: yup.string().email('Invalid email').required('Email is required'),
   phoneNumber: yup.string().required('Phone number is required'),
-  dateOfBirth: yup.date().required('Date of birth is required'),
+  // A string in yyyy-MM-dd, not a Date: the <TextField type="date"> below yields exactly that
+  // string, and the backend's StudentRequest.dateOfBirth is a LocalDate whose Jackson parser
+  // rejects an ISO timestamp — yup.date() cast the value to a Date and the create/update calls
+  // failed 400 on every submit.
+  dateOfBirth: yup
+    .string()
+    .matches(/^\d{4}-\d{2}-\d{2}$/, 'Date of birth must be a valid date')
+    .required('Date of birth is required'),
   gender: yup.string().required('Gender is required'),
   classId: yup.number().required('Classroom is required'),
   sectionId: yup

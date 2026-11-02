@@ -62,9 +62,10 @@ public class ClassroomController {
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Classroom> list = classroomService.findBySchool();
-        if (list.isEmpty()) return ResponseEntity.noContent().build();
-        return ResponseEntity.ok(list);
+        // Never 204 for an empty collection: a 204 has no body, the SPA's request layer turns that into
+        // `null`, and `data: classrooms = []` only fires on `undefined` — so an empty school crashed
+        // every page that mapped this list. "No rows" is a successful read of an empty array.
+        return ResponseEntity.ok(classroomService.findBySchool());
     }
 
     @GetMapping("/{id}")
@@ -121,9 +122,6 @@ public class ClassroomController {
     @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<List<ClassroomResponse>> getAssignedClassroomsForTeacher() {
         List<ClassroomResponse> classrooms = classroomService.findClassroomsForAuthenticatedTeacher();
-        if (classrooms.isEmpty()) {
-            return ResponseEntity.noContent().build();
-        }
         return ResponseEntity.ok(classrooms);
     }
 }

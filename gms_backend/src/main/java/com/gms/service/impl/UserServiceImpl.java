@@ -140,6 +140,21 @@ public class UserServiceImpl implements UserService {
         return TenantContext.roles().contains(role.getCode());
     }
 
+    /**
+     * A user carrying the SUPERADMIN role may only be written by a caller who holds it. The
+     * bootstrapped platform owner's row lives in the system school, so a SUPERADMIN-minted ADMIN
+     * whose own tenant is that same school passes every scoped lookup — the ownership check alone
+     * cannot protect this row, and without this guard such an ADMIN could reset the platform
+     * owner's password, rename the account, or delete it outright.
+     */
+    private static void assertCallerMayModifyPlatformOwner(User target) {
+        if (target.getRoles().contains(RoleEnum.SUPERADMIN.getCode())
+                && !TenantContext.roles().contains(RoleEnum.SUPERADMIN.getCode())) {
+            throw new com.gms.exception.TenantAccessDeniedException(
+                    "Only a SUPERADMIN may modify the platform owner's account");
+        }
+    }
+
     @Override
     public ResponseEntity<UserResponse> update(UserRequest request) {
         if (request.getId() == null) {
@@ -148,6 +163,7 @@ public class UserServiceImpl implements UserService {
 
         User user = userRepository.findById(request.getId())
                 .orElseThrow(() -> new EntityNotFoundException("User not found"));
+        assertCallerMayModifyPlatformOwner(user);
 
         User employeeUpdater = this.findByEmployee_Id().orElse(null);
         User updater = TenantContextAuditorAware.currentAuditor(userRepository).orElse(employeeUpdater);
@@ -197,20 +213,27 @@ public class UserServiceImpl implements UserService {
         if (user == null) {
             return false;
         }
-        userRepository.delete(user);
+        assertCallerMayModifyPlatformOwner(user);
+        // Soft delete. The row is the author every created_by / updated_by column points at, so a
+        // hard delete would either break those foreign keys or erase who wrote what; a disabled
+        // account cannot authenticate (CustomUserDetailsService hands enabled to Spring Security),
+        // which is the delete semantic the product actually has.
+        user.setEnabled(false);
+        user.setUserStatus("0");
+        userRepository.save(user);
         return true;
     }
 
     @Override
     @Transactional(readOnly = true)
     public Page<UserResponse> listBySchool(Pageable pageable) {
-        Page<User> users = userRepository.findAllBySchool_Id(TenantContext.schoolId(), pageable);
+        Page<User> users = userRepository.findAllBySchool_IdAndEnabledTrue(TenantContext.schoolId(), pageable);
         return users.map(this::toResponse);
     }
 
     @Override
     public List<User> findBySchool() {
-        return userRepository.findBySchool_Id(TenantContext.schoolId());
+        return userRepository.findBySchool_IdAndEnabledTrue(TenantContext.schoolId());
     }
     
     // Additional methods needed for service-to-service communication

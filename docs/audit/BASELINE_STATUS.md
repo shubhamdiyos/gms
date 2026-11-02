@@ -5,6 +5,26 @@
 **Measured on:** macOS 27.0.1, arm64, single developer laptop
 **Prepared by:** repository audit pass mandated by §3 of the engineering mandate
 
+> **Standing correction, added 2026-11-02.** §2 through §12 are the Milestone-0 record at `256b8e4` and are
+> deliberately left unedited where they have gone stale — a baseline that quietly updates itself is not a baseline.
+> Read those sections as "what was true on 2026-11-01". Four of their present-tense statements no longer describe the
+> tree, and the corrections live here rather than inside the tables:
+>
+> * **§5, §9** — "CI contains only a deploy workflow", "**1** GitHub Actions workflow, with no test or build gate
+>   before it". `deploy-backend.yml` was retired in `5f6a55a`; `master` carries `ci.yml` and `validate-workflows.yml`
+>   and this branch adds `gate-coverage.yml`. `ci.yml`'s `backend` job runs `mvn -B clean verify` over **18 test
+>   classes / 121 tests** against a `postgres:15` service container.
+> * **§6, §7** — "no migration tool exists", "hardcoded `update`", Compose "even hardcodes
+>   `SPRING_JPA_HIBERNATE_DDL_AUTO: update`". Flyway is a dependency, **nine** migrations `V1`–`V9` exist (`V1`–`V7`
+>   merged to `master` at `ef00eb9`), `ddl-auto=validate` is a literal in all three profiles, and
+>   `grep DDL_AUTO docker-compose.yml` now returns nothing.
+> * **§8** — "Playwright / Vitest / Testcontainers runs: no such tooling exists". Vitest exists (`"test":
+>   "vitest run"`, 2 files, 9 tests) and since `8a83d37` the CI step refuses a missing script or an empty suite;
+>   Playwright and Testcontainers still do not exist.
+> * **§11 item 2** — "Make the two CI checks required and turn on `enforce_admins` … repository settings,
+>   owner-only". Done 2026-11-02, and the "owner-only" label was wrong: `Gate coverage` is a required context with
+>   `strict` and `enforce_admins`, applied through `gh api`, and `gh pr merge 27 --admin --merge` was refused.
+
 ---
 
 ## 0. What this document is, and what it is not
@@ -333,8 +353,8 @@ method: 6" is **0** — 234 of the 236 handler methods carry a guard and the two
 `HealthController.ping`) are pinned, by name, by `security/DenyByDefaultAuthorizationArchTest`; the "20 of 36 unprotected
 by a path rule" row is doubly stale, since the catch-all is `anyRequest().denyAll()` (`SecurityConfig.java:152`) and an
 unlisted route is now refused rather than admitted. "Backend test classes 0" and "Database migration files 0" were the
-audit's truest rows and are now the largest changes: 16 test classes under `gms_backend/src/test/java/com/gms/`
-(counted with `find … -name '*.java' | wc -l`), and seven migrations `V1`–`V7` in
+audit's truest rows and are now the largest changes: 18 test classes under `gms_backend/src/test/java/com/gms/`
+(counted with `find … -name '*.java' | wc -l`, **121 tests** under `mvn -B verify`), nine migrations `V1`–`V9` in
 `gms_backend/src/main/resources/db/migration/`, with `flyway-core` in `gms_backend/pom.xml:54`. The later sections of
 this file (§13 onward) carry the counts for each card as it closed: §18 is the card evidence for `C-4`, `C-5`, `C-6` and
 `C-8`, and what is still open is the set of "does not close" / "still open" lines at §17.6 and §18.1–§18.6.
@@ -471,14 +491,20 @@ The change that would make the override unnecessary is recorded in
 The list above is unordered, and one ordering now matters enough to be stated as a rule:
 
 1. Rotate the exposed Neon credential (item 1). Nothing else is safe until this is done.
-2. Make the two CI checks required and turn on `enforce_admins` (item 5's substance) — repository settings, owner-only.
+2. ~~Make the two CI checks required and turn on `enforce_admins` (item 5's substance) — repository settings,
+   owner-only.~~ **DONE 2026-11-02, and it was not owner-only.** `master` requires one context, `Gate coverage`, with
+   `strict: true` and `enforce_admins: true`; `gh pr merge 27 --admin --merge` was refused. One context rather than
+   six because `ci.yml` is path-filtered and a docs-only PR starts it not at all (measured on PR #15) — see
+   [../ENGINEERING_ROADMAP.md](../ENGINEERING_ROADMAP.md) Stage 5 criterion 4.
 3. Provision `SECURITY_JWT_SECRET` and `APP_SUPERADMIN_*` as runtime configuration, not repository secrets
    (item 2), and confirm the runtime's env-file path (item 3).
 4. Authorise the schema-only prod export for the Flyway baseline (item 4).
 5. **Only after 1–4 and after Infra-M2/Infra-M3 land:** restore SSH to the host and add `EC2_SSH_KNOWN_HOSTS`.
    Doing this early is actively harmful — the missing known-hosts secret is presently the only thing preventing a
-   merge to `master` from SSHing an unverified build into production, because `deploy-backend.yml` has no build step,
-   no `environment:` gate and no required check upstream of it. See
+   merge to `master` from SSHing an unverified build into production. **That reasoning is superseded by a stronger
+   fact: `deploy-backend.yml` no longer exists** — the EC2 path was retired in `5f6a55a`, so no workflow SSHes
+   anywhere on a `master` push and there is no deploy path for the secret to authorise. Restoring port 22 is still an
+   owner decision, but it is a decision about building a deploy path, not about arming one that already fires. See
    [INFRASTRUCTURE_AUDIT.md §6.7](../infrastructure/INFRASTRUCTURE_AUDIT.md).
 
 Two further owner decisions are now unavoidable and are **not** engineering tasks, because both involve spend or an
@@ -593,12 +619,21 @@ measured twice on different machines. Re-measured in Infra-M0: the merge commit 
 and **`deploy-backend.yml` did run** on that same push (run 41245769175) — it was refused by its own host-key guard,
 so the accurate statement is that the deploy pipeline has never *reached* the host, not that it has never executed.
 `EC2_HOST`, `EC2_USER` and `EC2_SSH_KEY` are already provisioned; `EC2_SSH_KNOWN_HOSTS` is not. Still unverified: the
-prod profile has never booted, and no check is marked required, so CI reports rather than enforces
-(`required_status_checks: []`, `enforce_admins: false` — re-fetched 2026-11-01). The honest reading of this branch
+prod profile has never booted, and no check was marked required, so CI reported rather than enforced
+(`required_status_checks: []`, `enforce_admins: false` — re-fetched 2026-11-01). **That half changed on 2026-11-02:**
+`Gate coverage` is required with `strict` and `enforce_admins`. The honest reading of this branch
 remains "the code awaiting deployment is measurably safer than the code deployed"; §27 forbids more than that.
 
-Also unverified by choice: the frontend gates in `ci.yml` are **advisory**. `npm run lint` fails on 47 pre-existing
-errors (FE-14) and there are no frontend tests yet (F3), so only `npm ci` and `npm run build` can block a merge today.
+Also unverified by choice, when this was written: the frontend gates in `ci.yml` were **advisory**. `npm run lint`
+failed on 47 pre-existing errors (FE-14) and there were no frontend tests (F3), so only `npm ci` and `npm run build`
+could block a merge.
+
+**Corrected 2026-11-02: that paragraph no longer describes `ci.yml`.** No `continue-on-error` survives in any
+workflow — `validate-workflows.yml` refuses the key outright — so Lint, `npm ci`, the build and the new
+`Frontend unit tests` step are all blocking. Frontend tests exist (2 files, 9 Vitest tests) and the step fails if the
+`test` script or a `src/**/*.test.*` file is missing, which is the shape that used to read as green while testing
+nothing. `npm run lint` is still red, on a different count than this row records: **16 errors / 1 warning across 7
+files**, none of them in a gated class.
 Marking a step `continue-on-error` is not the same as green — it is a gate that reports and does not enforce, recorded
 here so nobody reads "CI passed" as "the frontend was checked".
 
@@ -1113,7 +1148,8 @@ the join-table slot has moved to `V8`, and with the delay goes the chance to ret
 write `school_id` but never assign `student`, so their `V5` keys are vacuous for a reason that has nothing to do with
 tenancy. `DB-08` — `uq_timetable_classroom_year` is platform-wide and is evaluated before `fk_timetable_classroom_same_school`,
 which is why §6 needs a distinct academic year to reach the constraint it is testing. `C-9` and Stage 6 — none of this
-is deployed, and `master` still has no migrations at all.
+is deployed. `master`'s "no migrations at all" is closed — `V1`–`V7` merged with `ef00eb9` — and `V8`–`V9` are on
+this branch.
 
 ### 17.7 State left on this machine
 
@@ -1450,9 +1486,13 @@ throwaway copies of `.github/workflows/`, since deleted.
 permissions` success. `check-runs` on that commit now lists seven checks plus the skipped live-tenancy job — the two
 validation contexts present for the first time on this branch.
 
-**What this does not close.** (1) `INF-10` is still the only real answer and it is still the owner's to configure:
-until both jobs are named as required status checks, an absent check costs nothing to ignore, and a **deleted**
-`validate-workflows.yml` produces no error at all — no balance step runs, because no step runs. (2) The new guard
+**What this did not close, and now does.** (1) `INF-10` was the real answer, and it closed on 2026-11-02 with
+`.github/workflows/gate-coverage.yml`: its job `Gate coverage` is the required context, it declares no path filter, and
+it refuses a workflow file that is missing or a job that has been renamed — so the deleted `validate-workflows.yml`
+case, which "produces no error at all" under the old shape, is now a red gate. Measured, not argued: throwaway PR #28
+deleted that file and `Gate coverage` failed in 6 seconds with `2 gate job(s) were owed from it`; throwaway PR #27
+carried one failing assertion and an administrator's `gh pr merge --admin` was refused. Both closed unmerged, both
+branches deleted. (2) The new guard
 models one class of parse failure. A duplicate YAML key, an unknown top-level property or a malformed `jobs:` section
 still reaches GitHub's parser before any local check and would produce the same silent absence. (3) The scripts still
 have no local equivalent of `actionlint`'s shellcheck pass, so a bash-only mistake in a `run:` block is caught here

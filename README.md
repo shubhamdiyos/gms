@@ -277,23 +277,43 @@ tracked by finding ID.
 
 ## 🧪 Testing
 
-**The backend has tests; the frontend does not.** Measured 2026-11-01 on `mvn -B verify` — 36 tests in 6 classes,
-0 failures — so this section's earlier claim that the repository had none is no longer true, and it is corrected
-rather than left to rot.
+**Both halves have tests now.** The backend measured 36 tests in 6 classes on 2026-11-01 and 121 in 18 classes on
+2026-11-02; the frontend's earlier "no tests at all" is closed too — `npm test` is `vitest run` over 2 files and 9
+tests, and the CI step fails rather than shrugging if the script or a test file goes missing. So this section's
+original claim that the repository had none is no longer true, and it is corrected rather than left to rot.
 
 | Command | What actually happens today |
 | --- | --- |
-| `mvn -B verify` | runs `gms_backend/src/test` — `JwtTokenProviderTest`, `SuperAdminBootstrapPropertiesTest`, `CustomUserDetailsServiceTest`, `LoginAttemptServiceTest`, `UserServiceImplRoleGuardTest`, `GlobalExceptionHandlerTest` — and writes `target/site/jacoco/index.html` |
+| `mvn -B verify` | runs `gms_backend/src/test` — **18 test classes, 121 tests**, measured at `8a83d37` in CI and on this machine with the same counts — and writes `target/site/jacoco/index.html`. **Locally it needs a database and two environment variables:** with
+`DB_USERNAME`/`DB_PASSWORD` unset the run reports `Tests run: 113` plus one error in `SqlStatementCountPerRequestTest`
+(`FATAL: role "gms_user" does not exist`) and **BUILD FAILURE**; with them exported against the operator's Homebrew
+PostgreSQL 15.8 on `127.0.0.1:5432` it is `Tests run: 121, Failures: 0, Errors: 0` and BUILD SUCCESS (both measured on
+this machine on 2026-11-02). The refusal is deliberate — the class does not skip when the database is missing, because
+a skipped guard reads as a passing one — and CI supplies the same three inputs through its `postgres:15` service
+container. This list used to name six classes; the **twelve** that arrived since are the tenancy and authorization guards (`RepositoryTenantScopeArchTest`, `TenantScopedReadArchTest`, `TenantParameterArchTest`, `EndpointInheritanceTest`, `EntityTenantColumnArchTest`, `EntityLazyAccessorArchTest`, `DenyByDefaultAuthorizationArchTest`, `TenantContextTest`, `TenantContextAuditorAwarePrincipalAttributionTest`, `NotificationRecipientMatchTest`) plus the two contract guards (`EmptyCollectionContractTest`, `SqlStatementCountPerRequestTest`) |
 | `mvn -DskipTests` | still the command the production image build uses (`gms_backend/Dockerfile:11`), so the shipped jar is not built from a tested compile — see INF-09 |
-| `npm test` | fails: `gms_frontend/package.json` has no `test` script and no runner is installed. CI's "Unit tests" step runs it with `continue-on-error: true`, so that step always fails and is swallowed — it proves nothing and is labelled as such (`ci.yml`) |
-| `npm run lint` | runs, and currently reports 47 errors across 22 files (FE-14); advisory in CI, with the count recorded there |
+| `npm test` | **runs.** `gms_frontend/package.json` declares `"test": "vitest run"` and there are two suites — `ErrorBoundary.test.jsx` (4) and `ProtectedRoute.test.jsx` (5) — **9 tests, 2 files, green**. In CI the step is blocking and refuses two things it used to tolerate: a missing `test` script, and a script with no `src/**/*.test.*` file behind it (measured on `8a83d37`: `Test Files 2 passed (2)`, `Tests 9 passed (9)`). `--run` is passed explicitly so no future edit to the script can put a watcher on a runner |
+| `npm run lint` | runs, and reports **16 errors across 7 files** plus 1 warning — measured from CI's own summary line at `8a83d37`, not from this table's memory; it used to say 47 errors across 22 files, a count that no longer holds. CI fails the job only on the classes that break at runtime (`no-undef` under `src/`, any fatal parse error): the same run reports **0 in the gated classes**, so the gate is green while the count is recorded, not ignored |
 | JaCoCo | bound to `prepare-agent` + `report` at `verify`, so coverage is measured; there is still no coverage **threshold** that can fail a build |
-| CI | **one** workflow: `.github/workflows/ci.yml` builds and tests on PRs and on `master`. Its checks are still not marked **required** (OPS-01, INF-10). The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` now deploys nothing anywhere |
+| CI | **three** workflows now run on every pull request: `.github/workflows/ci.yml` (four jobs, and the `backend` job boots a `postgres:15` service container so the DB-backed tests really have a database), `.github/workflows/validate-workflows.yml` (actionlint plus fifteen structure guards over the yaml itself) and `.github/workflows/gate-coverage.yml` (a meta check that refuses a pull whose owed gates did not run). **Since 2026-11-02 `master` requires `Gate coverage`**, with `strict` and `enforce_admins` — a red or missing check now blocks a merge even for an administrator, demonstrated once in [docs/ENGINEERING_ROADMAP.md](docs/ENGINEERING_ROADMAP.md) Stage 5 criterion 4. The former `deploy-backend.yml` was **retired on 2026-11-01** — it SSHed to an EC2 host that is permanently closed — so a merge to `master` still deploys nothing anywhere |
 | `scripts/verify-security.sh` | 18 executable security assertions against a local boot — see [docs/audit/BASELINE_STATUS.md](docs/audit/BASELINE_STATUS.md) §13.2 |
 
-What is still missing is the part that makes refactoring safe: no integration tests against a real database, no
-frontend tests, no end-to-end suite. Until those land, the manual verification path is the Postman collection —
-45 requests against roughly 230 endpoint mappings — documented in
+What this table's last paragraph used to say — "no integration tests against a real database, no frontend tests, no
+end-to-end suite" — is no longer true of the first two and only partly true of the third, and the correction belongs
+in the README rather than only in the roadmap:
+- **Against a real database**: `SqlStatementCountPerRequestTest` drives nine real HTTP requests through the full
+  filter chain on a `RANDOM_PORT` against a PostgreSQL and asserts how many statements each prepares; CI runs it
+  against a container, not a mock. It is a per-request detector, not a schema-migration harness.
+- **Frontend**: 9 Vitest + Testing Library tests over the two components that had been failing in the browser.
+- **End-to-end**: `scripts/verify-mvp-e2e.sh` exists and last read **298 checks / 0 failed / 11 of 11 MVP features
+  PROVED**, but it drives a *running* backend and frontend, so it is a manual (or CI-live-job) harness, not a
+  pull-request gate. The live-tenancy job that would run it in CI is declared `skipping` with its reason in its own
+  name, and is blocked on the credentials the repository does not have.
+
+What is still genuinely missing for safe refactoring is coverage **thresholds**, a Playwright browser journey, and
+Testcontainers (the DB-backed tests use a real server, not a containerised-per-class one). Until those land, the
+manual verification path alongside the script above is the Postman collection — 45 requests against roughly 230
+endpoint mappings — documented in
 [docs/WindsurfGMS-Postman-Testing-Guide.md](docs/WindsurfGMS-Postman-Testing-Guide.md). Run it against a disposable
 database only.
 

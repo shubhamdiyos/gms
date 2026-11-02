@@ -85,6 +85,7 @@ public class ResultServiceImpl implements ResultService {
         return ResponseEntity.ok(mapToResponse(savedResult));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<ResultResponse> updateResult(Integer id, ResultRequest request) {
         // Validate result exists

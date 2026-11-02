@@ -39,7 +39,7 @@ has been tested."* Decomposed so each clause can be argued with:
 | # | Clause | The test that decides it | Recorded in |
 |---|---|---|---|
 | DoD-1 | The MVP works end-to-end | A scripted journey — superadmin login → create school → provision admin → admin login → create students at 50k scale → paginated search → dashboard counts → teacher attendance → parent reads one child's result — executed against a database built only by migrations, with the HTTP results and row counts captured | `BASELINE_STATUS.md`, new § |
-| DoD-2 | The agreed performance tests pass | The published budget in [PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) met on ≥50,000 records per school, from `EXPLAIN (ANALYZE, BUFFERS)` and measured endpoint latency, on PostgreSQL 17 (local Docker *and* Testcontainers, which must agree) | evidence section named by DoD-1 |
+| DoD-2 | The agreed performance tests pass | The published budget in [PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) met on ≥50,000 records per school, from `EXPLAIN (ANALYZE, BUFFERS)` and measured endpoint latency, on PostgreSQL 17 (local Docker *and* Testcontainers, which must agree). **The clause's environment is not yet met**: every number in Stage 5 came from Homebrew PostgreSQL **15.8** on the laptop's `127.0.0.1:5432`, no Testcontainers dependency exists, and the "16.15 in Colima on 5433" attribution first recorded with them is withdrawn there | evidence section named by DoD-1 |
 | DoD-3 | Tenant isolation is verified | Automated negative tests that **attempt** cross-tenant reads/writes on every protected resource and assert 403/404, plus one deliberate-failure control: a test that passes when the guard is removed and fails when it is in place | same |
 | DoD-4 | CI/CD works | Every check required in branch protection with `enforce_admins`; one PR that breaks a test proven unmergeable; the pipeline's own yaml validated by a gate that fires on its own edits | `PRODUCTION_READINESS_MATRIX.md` §2.2/2.3 |
 | DoD-5 | Migrations are reproducible | `flyway migrate` from an **empty** PostgreSQL database to head, twice, producing byte-identical schema (`pg_dump --schema-only` diff empty); `ddl-auto=validate` and never `update` in any profile | same |
@@ -122,11 +122,21 @@ two audit-column conventions (`DB-05`).
 ### Stage 2 — A schema someone can own
 
 **Goal:** the database is defined by migrations, on a stack that boots from a clean clone.
-**State:** Executed and evidenced — committed as `231bdab`, opened as **PR #25**, `mergeStateStatus: BLOCKED`
-(`REVIEW_REQUIRED`). CI on that PR is green: run `41310639236`, `Backend build and tests` 52 s, `Frontend lint and
-build` 30 s, `Infrastructure definitions` 20 s, Vercel preview deployed. **Depends on:** Stage 1's index design. This
-stage closes when that PR merges; the migrations existing on a branch is not the same fact, and `master` still boots
-with `ddl-auto=${JPA_DDL_AUTO:update}`. Green checks do not merge a PR — no check is a required check (`INF-10`).
+**State:** **Closed.** Committed as `231bdab`, opened as **PR #25**, CI green on it (run `41310639236`:
+`Backend build and tests` 52 s, `Frontend lint and build` 30 s, `Infrastructure definitions` 20 s, Vercel preview
+deployed), **merged into `master` as `ef00eb9` on 2026-11-02** — which is the event this stage was waiting on, since
+migrations living on a branch is not the same fact. **Depends on:** Stage 1's index design.
+Two clauses that were written while that merge was still pending have been re-read against the tree and are now
+corrected rather than left to rot:
+- *"`master` still boots with `ddl-auto=${JPA_DDL_AUTO:update}`"* — no longer true, and the change was this stage's
+  own commit: `231bdab` set `spring.jpa.hibernate.ddl-auto=validate` in [application.properties:33](../gms_backend/src/main/resources/application.properties),
+  and it is `validate` in all three profiles today (`-dev:26`, `-prod:13`), so Hibernate can no longer be the thing
+  that defines the schema on any profile.
+- *"Green checks do not merge a PR — no check is a required check (`INF-10`)"* — true when written, and closed on
+  2026-11-02: `master` now requires `Gate coverage` with `strict` and `enforce_admins`, and Stage 5 criterion 4
+  holds the refused admin merge that proves it, so a green build is a precondition rather than a decoration. What
+  the sentence's first half still says is unchanged — a green PR needs an approval, because the review rules were
+  deliberately left alone.
 
 | # | Work | Closes | State |
 |---|---|---|---|
@@ -816,7 +826,11 @@ separate event table, which is not MVP scope.
 **Goal:** the frozen MVP in [PRODUCT_REQUIREMENTS.md §8](PRODUCT_REQUIREMENTS.md) works end-to-end for two tenants
 at once.
 **State:** Partly proved on the branch — the 11 frozen-MVP features are all live-proved (11 of 11, 294 assertions, 0
-failures, 0 skips on a fresh V1→V7 database with two tenants); the stage's own gate, *bounded* lists, is open.
+failures, 0 skips on a fresh V1→V7 database with two tenants); the post-#25 **P1 batch** is closed on 34 negative
+checks (PR #26, `90f3979`); the post-#25 **P2 batch** walked the journey through the real frontend and closed the
+empty-collection 204 contract defect on a three-legged proof, then closed the forced-password-rotation and
+render-crash findings in the browser and took the frontend test count from 0 to 9; the stage's own gate, *bounded*
+lists, is open.
 **Depends on:** Stage 3.
 
 Work: server-side pagination, sorting and filtering for every list resource (debt #10, `BKL-03`, `FE-08`); response
@@ -824,6 +838,176 @@ envelope and one error contract (`BKL-01`, `BKL-07`); DTOs instead of entity lea
 generated from code, not typed; the frontend contract repair (`FE-01…08`); dashboards computed from aggregate
 queries rather than `array.length`; the ACD/FIN stubs the MVP actually needs (`ACD-01…04`, `ACD-07`, `ACD-10`,
 `ACD-12`, `FIN-04`, `FIN-06`, and `SubjectServiceImpl.getById:102`).
+
+**The post-#25 P1 batch, closed on a refusal rather than on a test existing.** After PR #25 merged, this
+document's own §8 rule — *the proof wins* — was applied to the merged tree: an independent read of the
+post-#25 code produced a findings register, and the P1 batch is what closed the critical half of it.
+Branch `feat/post-pr25-hardening`, PR #26, commit `90f3979`.
+
+| finding | what it was | what it is now |
+|---|---|---|
+| AUTHZ-00 | `ParentController`'s administrative routes (`GET /parents`, `POST /parents/create`) matched no `SecurityConfig` matcher and so fell through to the catch-all `denyAll()`: a school administrator received **403 on its own surface**, and a create that slipped past the URL guard **500'd** on an unvalidated payload | an explicit matcher plus a role guard — the surface answers its own handlers |
+| AUTHZ-01 | the classroom timetable's URL rule refused `STUDENT` while its handler granted `STUDENT` | the two now agree |
+| TENW-02 | a school administrator in the platform's own system school could `PUT` or `DELETE` the platform owner — reset its password, rename the account, delete it | `UserServiceImpl` refuses to modify a `SUPERADMIN` account from inside a school scope |
+| ISO-01/03 | `ParentStudentService` let a school administrator re-point any parent–student pair, including a family belonging to another school, so a family could be moved between tenants | assignment and removal are checked against the family's own school |
+| ISO-02 | a parent could read another family's students inside the same school | the family and the caller's own account are both checked |
+| AUD-01…05 | five endpoints deleted rows outright — subjects, classrooms, teacher assignments, attendance, users — destroying the audit history a school needs | subjects and classrooms archive their `status`; users are disabled (`enabled = false`, `user_status = '0'`) rather than removed, because the row is the author every `created_by`/`updated_by` column points at; attendance and teacher assignment gain a `deleted` column (**V9**) and are flagged rather than removed |
+| DATA-01…05 | eleven foreign keys pointed at a referenced row's **bare id**, so the pair `(referenced id, school)` was never checked together: a student could point at another school's classroom while keeping its own `school_id`, and every same-school guarantee downstream of the column was vacuous | **V8** closes all eleven as composite keys, and refuses to migrate a database that already holds a straddled row, naming every table it refuses |
+
+**What was measured.** On a fresh database migrated **V1→V9** in one pass, the backend booted against it
+with `ddl-auto=validate` and every number below was read off that run:
+
+```
+scripts/verify-p1-hardening.sh   34 passed, 0 failed, 0 skipped
+verify-mvp-e2e.sh                294 passed, 0 failed, 11 of 11 features PROVED
+verify-c4-owned-reads.sh         118 passed, 0 failed, 17 skipped
+mvn package                      106 tests, 0 failures, BUILD SUCCESS
+```
+
+All 34 are *negative* checks: each asserts that an unauthorized or cross-tenant request is **refused** —
+`403`/`401`/`400` on the HTTP surface, or a named database constraint
+(`fk_students_classroom_same_school`, `fk_users_employee_same_school`) rejecting a straddled row inside a
+transaction the probe rolls back. The suite was red eleven times before it was green, and every one of
+those eleven was a defect in the probe *or in the product* — never a loosened expectation. Two of them
+were product defects, and they are worth naming:
+
+- `Attendance` and `TeacherAssignment` are `@Version`d, and Hibernate binds **id and version** to a
+  `@SQLDelete` statement. The single-placeholder form the entities carried failed at delete time with
+  `column index is out of range: 2`. Both statements now carry the version predicate and bump it.
+- `financial_transactions.invoice_id` was written into **V8** as a twelfth composite key, and the column
+  does not exist — it survives only on a pre-Flyway scratch database, and the entity has no invoice field.
+  The migration refused to apply with `column c.invoice_id does not exist`. V8 was corrected *before it
+  was recorded anywhere*: a migration that has never been applied is edited in place, one that has been
+  applied is not.
+
+**What this batch does not cover, stated as plainly as what it does.** The 34 checks exercise one school
+against another over HTTP and one straddled row at a time. They do not exercise a **transitive** straddle
+(a school-B classroom reached through a school-B student who is attached to a school-A family), concurrent
+writes racing to straddle the same row, or the read path of every archived resource: the suite proves an
+archived row *survives* and keeps its creation stamp, not that every query which reads it *excludes* it.
+The `users` delete path is exercised only as "the row survives". And the live-tenancy CI job remains
+**disabled**, for a reason that changed on this branch: a CI job now *does* start a database — the
+`backend` job's `postgres:15` service, the owner's decision of 2026-11-02 — but these suites need a
+**booted application** pointed at that database plus the twelve secret names `ci.yml` references
+(`DB_PASSWORD`, `SECURITY_JWT_SECRET`, and ten `GMS_*` identity names — three username/password pairs, two
+further passwords, two school codes), and the repository holds none of them: measured again today, `gh api` lists three leftover `EC2_*`
+secrets and zero variables. The gap is the boot step and the credentials, not the engine, and `ci.yml`
+says so in the job's own display name rather than leaving a silent `if: false`.
+
+**A defect the P1 fixture surfaced, recorded rather than quietly fixed.**
+`TimetableServiceImpl.createOrUpdateTimetable` calls `timetable.getSlots().clear()` and then re-adds the
+submitted slots. Because the insert is ordered before the delete flush, that collides with
+`uq_slot_day_period` (a classroom, day and period may hold only one slot) and with the
+`attendances → timetable_slots` foreign key `fktnfhr6lp9sjxuxckwfi5xutku` (a slot that still carries an
+attendance row cannot be dropped). The fixture worked around both — it picks a classroom with no timetable
+and a date with no attendance row — and the workaround lives in the fixture, not in the product. The
+product behaviour is therefore **open**: `POST /timetables` against a classroom that already has a timetable
+for the year is refused by a constraint violation instead of replacing the timetable. It belongs to Stage
+4's list-and-write work, and it is recorded here so it is not lost.
+
+**The post-#25 P2 batch — the eleven features walked through the real frontend.** After the P1 batch, the
+mandate's §4 asked for the journey through the *actual* frontend and backend, not the API alone. Branch
+`feat/post-pr25-hardening`. The production Vite bundle was served same-origin against the backend through the
+SPA proxy, a platform owner created a school from the UI, and that school's administrator walked its own
+tenant: a dashboard of real aggregates, classrooms, subjects, a student registered and searched and archived
+and restored, and `/superadmin/*` refused as `/unauthorized`. The browser console stayed clean on every screen
+of the journey. What the journey produced, with each finding's measured state:
+
+| finding | severity | state |
+|---|---|---|
+| FE-P2-01 empty-collection reads answered 204 and blanked the page | high | **closed** — three-legged proof below |
+| FE-P2-02 create-then-refresh paints seconds late | medium | **withdrawn** — the 5–7 s figures were measured while a polling probe held the main thread; a MutationObserver with no polling paints the new row **180 ms** after the POST begins (measured 2026-11-02, `/admin/academic-years` 0→1). The residual real defect is smaller: every create issues both the tag invalidation and an explicit `refetch()`, a duplicate fetch across nine pages |
+| FE-P2-03 zero frontend tests, no error boundary | medium | **closed** — 0 → 9 Vitest tests green, and a render crash now costs one screen. Counterfactual measured in the browser: with the boundary removed the same crash leaves the page empty. Proof below |
+| SEC-P2-04 the SPA ignores `requirePasswordChange: true` | medium | **closed** — a bootstrapped admin is routed to a rotation screen and refused every other screen until it changes the password; verified end-to-end in the browser against the live backend. Client-side only, and the row below says what that does not cover |
+| FE-P2-05 deactivation is irreversible through the UI | medium | **deferred** — archived rows are excluded from every list by design, and the only toggle lives on a row the UI no longer shows. Measured 2026-11-02: `GET /students/search` takes `query`, `classId`, `page`, `size`, `sort` and **no status dimension**, so restoring is not a missing affordance but a missing query path — it needs a parameter through controller → service → the C-3 scoped read, which is the same code Stage 4's bounded-list gate is about to rewrite. Doing it now would build the filter twice |
+| DATA-P2-06 global `student_id` sequence | low | open — `STD011` leaks platform-wide volume to a tenant; ACD-08's per-school identifier intent is unmet |
+| MAIN-P2-07 33 controllers hardcode `@CrossOrigin` | low | recorded — the central allowlist wins (unlisted origin: 403, no ACAO), so it is latent misconfiguration, not a live hole |
+| A11Y-P2-08 `aria-hidden` warning when a dialog closes on its focused trigger | low | recorded — a warning; no console error anywhere on the journey |
+| ERRMAP-P2-09 `GET /students/` (empty id) answers 500, not 404/400 | low | open |
+| DATA-P2-10 `academic_years` carries no `created_by` | low | open — measured 2026-11-02: the only domain table without one (the other three are the two join tables and Flyway's own) |
+
+**FE-P2-01, closed with its proof.** A school with no rows yet read `GET /classrooms` as **204 No
+Content**: no body, which the SPA's request layer reads as `null`, and `const { data: x = [] }` only defaults
+on `undefined` — so `x.map()` threw and unmounted the route, with no error boundary to catch it. Six list
+reads on four controllers answered that way (`ClassroomController` ×2, `SubjectController` ×2,
+`UserController`, `ParentController`); all now answer `200` with `[]`, and the DELETE verbs keep their 204.
+The proof is three-legged, because a test merely existing proves nothing:
+
+```
+EmptyCollectionContractTest            6 tests, 0 failures — the four list reads at 200 + [], the two
+                                       teacher-assigned reads, and a source scan of every controller
+negative demonstration                 the defect reintroduced by hand in SubjectController → the HTTP leg
+                                       fails "Status expected:<200> but was:<204>" and the scan names
+                                       "SubjectController.java: getAll"; reverted, 6/6 green again
+verify-mvp-e2e.sh (live, 2026-11-02)   252 passed, 0 failed, exit 0 — including four new F8 assertions on
+                                       the genuinely-empty school B: classrooms 200 + 0 rows, subjects
+                                       200 + 0 rows, before its first classroom is created
+```
+
+**FE-P2-03, closed with its proof.** The finding was two claims, and each now has a measurement.
+
+```
+frontend test count     0 → 9 tests across 2 files, `npm test` green in 1.9 s
+                        Vitest 5.0.5 + Testing Library + jsdom, dev-only dependencies; the runner is
+                        wired through `test` in package.json and a `test` block in vite.config.js, so
+                        the production bundle is untouched (`npm run build` green: 11,999 modules)
+error boundary          ErrorBoundary.jsx wraps AppRouter inside BrowserRouter in App.jsx, so it sits
+                        above every route; the console stack confirms it
+                        ("at AppRouter (src/App.jsx) / at ErrorBoundary (src/components/common/…:6)")
+counterfactual, browser the same deliberate crash (`title.map is not a function` injected into
+                        AdminDashboard's StatCard) rendered twice, boundary on and boundary off:
+                          boundary on  → "This screen could not be displayed", the message surfaced,
+                                         and "Try again" / "Back to dashboard" both actionable
+                          boundary off → the page snapshot is an empty RootWebArea. Nothing renders.
+                                         This is FE-P2-01's failure mode, reproduced on demand
+both reverted          AdminDashboard.jsx carries no diff against HEAD; the suites re-ran 9/9 and the
+                       build re-ran green after the revert
+```
+
+The two suites are `ErrorBoundary.test.jsx` (4 tests: contains a throw, offers recovery, renders children
+untouched when nothing throws, and recovers after "Try again") and `ProtectedRoute.test.jsx` (5 tests,
+including the SEC-P2-04 negative: an account flagged `requirePasswordChange` is refused the screen behind
+the guard, while the rotation screen itself stays reachable so the redirect cannot loop).
+
+**SEC-P2-04, closed with its proof.** `POST /auth/login` answers `requirePasswordChange` as a **top-level**
+field — there is no `user` object in that response at all — and `authService.js:27` re-attaches it to the
+session user, which is what the gate reads. Measured live in the browser against the backend on 8082 and
+the disposable fixture, as a provisioned admin whose flag was `t` in the database:
+
+```
+1 first login            lands on /change-password with "Set your own password before you continue" —
+                         it never reaches a portal screen
+2 bypass attempt         typing /admin/students into the address bar (a full reload, not a client-side
+                         push) is bounced back to /change-password; the flag survives the reload because
+                         the session user is re-read from storage
+3 weak new password      "weakpassword" is refused in-form with the server's own policy text — "Use at
+                         least 8 characters with upper, lower, digit and one of @$!%*?&.#_" — and no
+                         request leaves the page
+4 valid new password     → /admin/dashboard, live aggregates for school #2, "Password changed
+                         successfully"
+5 database               users.require_password_change for that admin: t → f
+6 old bootstrap password POST /auth/login → 401
+7 new password           POST /auth/login → 200 with requirePasswordChange false
+8 clean re-login         the browser reaches /admin/dashboard directly — the gate releases, it does not
+                         trap an account that has rotated
+console                  no error and no warning on any screen of the journey
+```
+
+What this does **not** cover, stated because the finding is closed on it: the gate is a client gate. The
+server keeps `requirePasswordChange` advisory by design — `SecurityConfig`'s `SELF_SERVICE` group admits
+`/auth/change-password`, `/users/me` and `/users/me/**` and nothing else is relaxed — so a caller holding a
+bootstrapped bearer token can still reach the API until it rotates. Making the flag authoritative would
+mean refusing every authenticated endpoint while it is set, which is a change to the tenancy contract in
+ADR-020 rather than to the SPA, and would break the six verification scripts and the e2e journey that
+authenticate with bootstrap passwords today. That trade is recorded as a decision, not as a pass.
+
+The same live run removed a defect **in the script itself** that this environment exposed: one `sqlv` call
+sat outside every `have_db` guard, so with no database handle it died under `set -u` on
+`${!PG_PASSWORD_ENV}` and reported a phantom product FAIL (`expected , got 6`) — the same failure mode the
+TOKEN_T guard exists to prevent. It now SKIPs like every other SQL-dependent check. That run's 28 SKIPs are
+all the SQL half (features 3, 6, 9 and 11): docker/colima is dead on this machine, so feature 11 stays
+UNPROVEN there, honestly, rather than passing with holes in it. The run used a local PostgreSQL 15 on
+loopback, a fresh disposable database migrated V1→V9 in one pass, and `ddl-auto=validate`.
 
 **Acceptance criteria.**
 1. DoD-1's scripted journey passes, twice, from an empty database.
@@ -833,7 +1017,10 @@ queries rather than `array.length`; the ACD/FIN stubs the MVP actually needs (`A
 3. Every list request round-trip carries `page`/`size`/`sort` and the server, not the browser, does the slicing
    (proven by a network-level assertion that the payload is bounded by `size`).
 4. Frontend: no page derives a count by downloading a collection.
-5. `npm run build` green, and the frontend test count > 0 (today: **0** Vitest tests).
+5. `npm run build` green, and the frontend test count > 0. **Met, measured 2026-11-02:** build green at
+   11,999 modules, and **9** Vitest tests across 2 files (`npm test`, 1.9 s). What it does not cover: the
+   suites guard two components — the route guard and the boundary — not the journey's screens, so a
+   regression inside a feature page is still caught only by `verify-mvp-e2e.sh`.
 
 ### Stage 5 — Verification at volume, and CI that refuses
 
@@ -842,8 +1029,11 @@ queries rather than `array.length`; the ACD/FIN stubs the MVP actually needs (`A
 
 Work: a seeded dataset generator (`scripts/seed-performance.sql` + a JUnit **ignored-by-default** harness) creating
 ≥50,000 students and proportional attendance/fee/result/timetable rows for 2 schools; Testcontainers integration
-jobs; the remaining Infra-M2 items (required status checks with `enforce_admins`, dependabot, secret scan, image
-scan, SBOM, artefact retention, CODEOWNERS).
+jobs; the remaining Infra-M2 items (dependabot, secret scan, image scan, SBOM, artefact retention, CODEOWNERS).
+**One of that list's original entries is no longer on it**: "required status checks with `enforce_admins`" was
+applied to `master` on 2026-11-02 and its refusal demonstrated, which is criterion 4's evidence below — the
+Infra-M2 half that survives is everything that needs a third-party app or an organisation setting this repository
+does not have.
 
 **A finding that sharpens criterion 4.** On 2026-11-02 the workflow whose stated job is to notice a missing run was
 itself missing one: a literal unclosed expression opener inside a shell `case` pattern made `validate-workflows.yml`
@@ -856,9 +1046,29 @@ belongs in this stage's wording: **criterion 4 is not satisfiable by adding chec
 the failure mode a green build cannot see is the one where a check was never there.
 
 **Measured on 2026-11-02 — criteria 1 and 2, on a real server at real volume.**
-Everything below is a number read off a run, not a claim about code. Environment: PostgreSQL
-**16.15** in Colima on `127.0.0.1:5433`, disposable database `gms_perf_seed` (456 MB, V1..V7 applied
-by Flyway), one backend process, `ddl-auto=validate`, calls strictly sequential and warm.
+Everything below is a number read off a run, not a claim about code. Environment as first recorded:
+PostgreSQL **16.15** in Colima on `127.0.0.1:5433`, disposable database `gms_perf_seed` (456 MB, V1..V7
+applied by Flyway), one backend process, `ddl-auto=validate`, calls strictly sequential and warm.
+
+> **That environment sentence is withdrawn, and the correction is measured rather than assumed.** On
+> 2026-11-02 `colima status` reports *colima is not running*, the docker socket at
+> `~/.colima/default/docker.sock` does not exist, nothing answers `127.0.0.1:5433`
+> (`pg_isready` → no response, exit 2), and `docker images` lists no postgres tag. The server that is
+> verifiable on this machine is **Homebrew PostgreSQL 15.8** on `127.0.0.1:5432`
+> (`select version()` → `PostgreSQL 15.8 (Homebrew) … 64-bit|150008`), and `gms_perf_seed` lives on it.
+> The latency table below is therefore read twice: as first recorded on the container that is no longer
+> reachable, and as re-measured on 15.8/5432 by the concurrent leg's own c=1 rung, which is the same
+> probe run one-at-a-time and warm. `/dashboard/school` came back p50 167.1 / p95 201.0 ms there against
+> the 204.2 ms worst p95 recorded below — the two runs agree to within the noise of a five-sample rung,
+> so the *conclusions* survive the correction and only the version attribution had to change. Both sides
+> of that comparison are the pre-fix code — the fee sums still joined through `students` — which is why
+> they are the right pair to reconcile. Nothing was re-run against 16.15 to prove the original sentence,
+> which is precisely why it is withdrawn instead of quietly re-dated. The major version is a `DoD-2`
+> clause of its own and stays open; see below. **One consequence reaches the docs:**
+> [ARCHITECTURE.md](ARCHITECTURE.md) tells a reader to boot "against an empty disposable PostgreSQL 16.15"
+> and the Compose stack pins `postgres:16-alpine`, so following that instruction today means starting a
+> container runtime and pulling an image — which no number in this stage did. The reproduction path as
+> written is unverified, not wrong; the path that produced these figures is Homebrew **15.8 on 5432**.
 
 *Volume (NFR-01).* `scripts/seed/perf_seed_50k.sql` loads **1,840,468 rows across 27 tables** in
 **71 s** (a second load took 78 s) in one transaction. The clause is per school and it is met per
@@ -875,6 +1085,10 @@ clock until every one matches, and `fee_payments`/`receipts` are re-derived by r
 own `WHERE` clause rather than pinned to a constant.
 
 *Criterion 1 — latency, 20 runs per probe, nearest-rank, p99 as the worst run.*
+**State:** met sequentially, at volume, one request in flight — this table is evidence of that claim alone, and it was recorded
+on the pre-fix code; the post-fix sequential re-run of the same ten probes passed every one as well, worst p95 **152.1 ms**
+(`/dashboard/school`, p50 148.4). With 8 clients in flight on the same seed, **four of the six endpoints section 4b drives** at
+volume failed — three of them after the two fixes described further down — so criterion 1 as a whole is **Open**.
 
 | probe | p50 ms | p95 ms | max ms | budget p95 | verdict |
 |---|---|---|---|---|---|
@@ -904,7 +1118,7 @@ returns the **newest** pupils rather than an arbitrary prefix. `verify-perf-50k.
 halves of that honesty — the returned length is 100 for a request of 500, and the ids come back
 descending — before it measures anything. 378.5 ms became **26.6 ms**.
 
-*Criterion 1, the `EXPLAIN (ANALYZE, BUFFERS)` half.* Five probes, listed in the seed's footer, run
+*Criterion 1, the `EXPLAIN (ANALYZE, BUFFERS)` half.* Six probes, listed in the seed's footer, run
 after `ANALYZE;` on the volume tenant. Every one plans through an index this project created, and
 NFR-03's per-statement budget is p95 < 100 ms:
 
@@ -915,6 +1129,7 @@ NFR-03's per-statement budget is p95 < 100 ms:
 | P3 fee ledger joined to the roll | `idx_student_fee_student_status` + `students_pkey`, 20 rows touched | 0.09 ms |
 | P4 one pupil's attendance history | `Index Scan Backward using idx_attendance_student_date` | 0.08 ms |
 | P5 a tenant's users with their roles | `idx_user_roles_role` + `users_pkey`, 135 teachers | 0.21 ms |
+| P6 the two dashboard fee sums, **both shapes** (the Stage 5 change) | joined shape: `Parallel Hash Join` over a `Parallel Seq Scan` of all 509,000 `student_fees` rows plus an index-only scan of the roll, 7,894 blocks (2,447 from disk) → tenant-column shape: `Parallel Index Scan using idx_student_fee_school`, 4,089 blocks, **0 read** | **88.9 / 87.0 ms → 44.0 / 43.4 ms** (cold first run of the joined shape: 186.3 ms — outside NFR-03's 100 ms) |
 
 *Criterion 4 is now demonstrated twice.* The harness's own count assertion was the first accidental
 false-pass waiting to be found: it pinned `users` and `user_roles` at 103,480, but the run this card
@@ -937,54 +1152,429 @@ comment states the truncation and how it was verified, and the fingerprint count
 numbers so the same mistake cannot pass as idempotent again.
 
 **What these numbers do not cover, stated as plainly as what they do.** Cold cache (every run is
-warm); more than one instance; connection-pool saturation (one in-flight request, so HikariCP never
-queues); p99 with statistical strength (20 samples, worst-run proxy); SQL-layer percentiles beyond
-the five probes. `DoD-2` also names **PostgreSQL 17** and asks for Testcontainers alongside local
-Docker; the container that produced these numbers is **16.15**, and it stays 16 because the named
-volume and the owner's existing local databases are 16 — changing the major is an owner decision, not
-a quiet edit.
+warm); more than one instance; p99 with statistical strength (20 samples, worst-run proxy); SQL-layer
+percentiles beyond the six probes. Connection-pool saturation was *not* among the things left
+unmeasured for long: the concurrent leg below runs eight and sixteen clients in flight against the same
+seed, and it is that leg which answers the pool question. `DoD-2` also names **PostgreSQL 17** and asks
+for Testcontainers alongside local Docker; no number in this stage was produced on 17, the sequential
+leg's 16.15 attribution is withdrawn above because the container cannot be reached to re-prove it, and
+the server that can be verified today is **15.8**. Changing the major is an owner decision, not a quiet
+edit, and the gap is recorded as open rather than closed by a nearby version.
 
-**Criterion 3 is built, proven to discriminate, and stopped by a decision rather than by work.**
+**Criterion 1, the concurrent leg — eight clients in flight, and it does not hold.**
+**State:** sequential at volume passes; concurrent at volume **failed four of the six endpoints `verify-perf-50k.sh` drives at
+8-wide**, two of the causes were then fixed and re-measured, and the criterion is **Open** — after both fixes the dashboard still
+breaches p95 at 8-wide (**1382.4 ms** in the script's own run, **705.9 ms** in the ladder, both against a 300 ms budget), and the
+two `search` lines that still breach were not touched by either change.
+
+Environment, rebuilt on the laptop for this leg: Homebrew PostgreSQL **15.8** on `127.0.0.1:5432`, `gms_perf_seed`,
+loaded by `scripts/seed/perf_seed_50k.sql` to **1,840,468 rows across 27 tables in 74 s** (463 MB on disk), `ANALYZE`
+afterwards, the backend jar booted on port 8083. Schools 1 and 2 hold 50,000 pupils each (101,800 in the roll, 509,000
+`student_fees`, 103,480 users); the API-visible roll is 96,443 — `findStudents` excludes 5,357 deactivated pupils.
+
+*Section 4b of `scripts/verify-perf-50k.sh`* fires each endpoint with `xargs -P 8`, 80 requests per endpoint, records curl's
+`time_total` per request, samples active backends in `pg_stat_activity` during the run, and applies the budget of
+[PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) NFR-02 unmodified — p95 < 300 ms and p99 < 800 ms for the ten hottest endpoints at
+volume. A request exceeding curl's `--max-time 10` counts as a failure, not a dropped sample. All responses were 200.
+
+| endpoint (8 clients in flight, 80 requests) — **pre-fix**; see the delta block below for the same run on fixed code | min ms | p50 ms | p95 ms | max ms | req/s | dbpeak | NFR-02 |
+|---|---|---|---|---|---|---|---|
+| `search?query=<selective>` | 127.4 | 186.2 | 319.0 | 523.9 | 35.6 | 16 | **FAIL** |
+| `search?query=<matches-all>` | 166.4 | 270.6 | 427.1 | 761.8 | 25.3 | 16 | **FAIL** |
+| `search?page=4000` (deep) | 198.3 | 271.1 | 342.1 | 411.7 | 26.8 | 14 | **FAIL** |
+| `GET /students` default page | 20.3 | 34.1 | 60.0 | 90.0 | 141.8 | 9 | ok |
+| `GET /students/{id}` | 4.3 | 7.8 | 10.6 | 13.8 | 236.7 | 2 | ok |
+| `GET /dashboard/school` | 317.4 | 528.9 | 1725.2 | 1826.8 | 10.4 | 16 | **FAIL** |
+
+Four lines breach the p95 budget — the three `search` lines and `/dashboard/school`, which also breaches the p99 proxy at
+**1826.8 ms** worst run against 800 ms. The run tallied **52 passed, 4 failed, 1 skipped**. Section 4 of the same script, twenty runs per
+endpoint one at a time, passed every one of the ten on this seed, worst p95 **204.2 ms**, again `/dashboard/school`. The contrast is the
+point: the recorded pass was sequential, and the script's own footer had already disclaimed "connection-pool saturation, concurrent load".
+
+*A concurrency ladder*, 1 → 16 clients over three probes, run with a throwaway script under `/tmp`, not a repo artefact, on one machine with
+8 physical and 8 logical CPUs and a single PostgreSQL 15.8 instance (`shared_buffers=128MB`, `effective_cache_size=4GB`,
+`max_parallel_workers_per_gather=2`, `max_parallel_workers=8`, `max_worker_processes=8`):
+
+| probe | clients | runs | p50 ms | p95 ms | max ms | req/s | dbpeak |
+|---|---|---|---|---|---|---|---|
+| `GET /dashboard/school` | 1 | 5 | 167.1 | 201.0 | 201.0 | 5.4 | 4 |
+| `GET /dashboard/school` | 2 | 10 | 214.9 | 239.2 | 239.2 | 8.4 | 7 |
+| `GET /dashboard/school` | 4 | 20 | 350.3 | 554.8 | 627.8 | 10.3 | 12 |
+| `GET /dashboard/school` | 8 | 40 | 492.0 | 1502.6 | 1834.6 | 11.1 | 16 |
+| `GET /dashboard/school` | 16 | 80 | 1258.5 | 2392.5 | 2619.6 | 10.6 | 18 |
+| `search?query=verma` | 1 | 5 | 90.7 | 97.8 | 97.8 | 9.5 | 3 |
+| `search?query=verma` | 4 | 20 | 145.7 | 165.2 | 165.8 | 24.4 | 9 |
+| `search?query=verma` | 8 | 40 | 308.0 | 489.3 | 736.6 | 22.9 | 16 |
+| `search?query=verma` | 16 | 80 | 540.5 | 954.6 | 1197.6 | 25.2 | 18 |
+| `GET /students/{id}` | 1 | 10 | 4.3 | 5.6 | 5.6 | 64.9 | 1 |
+| `GET /students/{id}` | 8 | 80 | 8.3 | 13.3 | 15.7 | 254.8 | 1 |
+| `GET /students/{id}` | 16 | 160 | 8.5 | 30.3 | 81.3 | 243.5 | 2 |
+
+*What these numbers support, and no further.*
+- Throughput plateaus while latency grows with concurrency — a saturated server, not a client-side artefact.
+  `/dashboard/school` reaches ~10-11 requests/s at c=4 and never exceeds it at c=8 or c=16; `search?query=`
+  reaches ~23-25/s at c=4 and stops there. Clients past c=4 buy only queueing. *(This is the pre-fix ladder,
+  and the plateau below it is the thing the fix removed — see "The two fixes, and the same ladder run again".)*
+- The connection pool is not the wall. `spring.datasource.hikari.*` is unset, so the pool is Spring Boot's default 10 and
+  Tomcat's thread limit the default 200. `GET /students/{id}` ran 254.8 requests/s at 8-wide with `dbpeak=1` and p95 13.3 ms — a
+  read needing one connection scales essentially linearly. `dbpeak` counts active rows in `pg_stat_activity`, and exceeds 10 only
+  because PostgreSQL parallel-worker processes and the sampler's own `psql` connection appear in it — not a pool-exhaustion signal.
+- The cost is aggregate CPU inside the database. `/dashboard/school` issues seven aggregate statements per request (five `COUNT`s
+  plus two `SUM`s over `student_fees`, 254,500 rows per tenant). `EXPLAIN (ANALYZE, BUFFERS)` on the two `SUM`s as the JPQL **then**
+  wrote them — joining `student_fees` to `students` to reach the tenant — gave 39.5 ms and 71.2 ms with 2 parallel workers each; the
+  same sums written against the tenant column `student_fees` itself carries (`sf.school_id`, Stage 3 `C-7`, covered by
+  `idx_student_fee_school`) gave 36.0 ms and 36.0 ms on 4,079-4,086 shared-buffer hits instead of 7,893. A second session hours later,
+  with four backends resident, measured the same pair as 88.9/87.0 → 44.0/43.4 ms on 7,894 blocks (2,447 read from disk) →
+  4,089/4,091 hit-only blocks. The block counts repeat to within a handful; the milliseconds do not repeat at all — which is why
+  the *plan* is the evidence and the timings only the shape. Eight concurrent dashboards therefore ask roughly 24 database
+  processes to share 8 cores.
+- `search?page=4000` is the offset-paging cost, and it is Stage 4's bounded-list/keyset work, not a Stage 5 patch.
+
+**The two fixes, and the same ladder run again against them.** Both causes named above were changed where the work happens —
+in the query, not in an annotation or a comment:
+- `StudentFeeRepository.java:28,31` — the dashboard's two fee sums now filter on `sf.school.id`, the tenant column
+  `student_fees` has carried since Stage 3 `C-7`, instead of `sf.student.school.id`. That these select *exactly* the same rows is
+  not an assumption: the composite FK `fk_student_fee_student_same_school` ties `(student_id, school_id)` to
+  `students(id, school_id)`, so a fee row can never point at a pupil of another school, and `idx_student_fee_school` covers the
+  shorter predicate. The plan changes accordingly — probe P6 above.
+- `ResultRepository.java:31-38` — the statement behind both result-sheet routes became one query with five `JOIN FETCH`es over
+  the graph the response actually reads. This closed the two production findings this stage surfaced: the N+1 measured at **26
+  statements** for a six-row sheet is **7**, and O(1) now (a seventh result adds nothing), and
+  `GET /api/v1/results/student/{id}` answers **200** where it answered **500** with `LazyInitializationException`. Both are
+  pinned, not asserted: they are the eighth and ninth cases of `SqlStatementCountPerRequestTest`, whose ninth carries the
+  status assertion *inside* the guard, so deleting the fetch join turns the request red before any count is compared. The final
+  run of the whole suite: **121 tests, 0 failures, 0 errors, 0 skipped**, of which 9 are the statement-count cases, in 21.9 s.
+
+*Same probe script, same run counts (`n = 5 × clients`), same seed, same single PostgreSQL 15.8 on 5432, one backend on 8083,*
+*re-run on the fixed jar. `GET /dashboard/school`:*
+
+| clients | runs | before p50 / p95 | before max | before r/s | after p50 / p95 | after max | after r/s |
+|---|---|---|---|---|---|---|---|
+| 1 | 5 | 167.1 / 201.0 | 201.0 | 5.4 | 99.2 / 337.6 | 337.6 | 6.2 |
+| 2 | 10 | 214.9 / 239.2 | 239.2 | 8.4 | 121.6 / 169.7 | 169.7 | 13.6 |
+| 4 | 20 | 350.3 / 554.8 | 627.8 | 10.3 | 178.2 / 281.5 | 289.8 | 17.8 |
+| 8 | 40 | 492.0 / 1502.6 | 1834.6 | 11.1 | 283.3 / 705.9 | 893.1 | 19.9 |
+| 16 | 80 | 1258.5 / 2392.5 | 2619.6 | 10.6 | 628.0 / 1209.2 | 1413.5 | 21.5 |
+
+p95 **equals** max on the two smallest rungs — nearest-rank over 5 or 10 samples puts the last request at the 95th percentile — so
+the c=1 line is one slow request, not a distribution, and its "worse p95" sits beside a 41% better p50.
+
+- **The plateau is gone.** Throughput rose from 10.3 → 10.6 requests/s across c=4..16 before the change to 17.8 → 19.9 → 21.5 after.
+  The dashboard stopped being queue-limited at four clients.
+- **NFR-02 still fails, at a higher ceiling.** The endpoint now holds the budget at 4-wide (p95 281.5 < 300, max 289.8 < 800, where
+  pre-fix c=4 breached by 85%) and breaches at 8-wide and beyond. **The criterion therefore stays Open**, and one run of twenty
+  samples is what "holds at c=4" rests on.
+- **How much of the delta is real is bounded by a control, not by argument.** Two probes whose code did not change at all were run
+  in the same sessions. `search?query=verma` moved p50 by −7% to +6% across its four rungs and its r/s by −7% to +5% — reads as flat.
+  `GET /students/{id}` moved from p95 13.3 to 73.2 ms at 8-wide and 254.8 to 174.7 r/s, also with no code change: single-request
+  latency on this laptop is noisy in absolute terms (60 ms of jitter) but that jitter is an order of magnitude smaller than the
+  800 ms the dashboard shed, and every rung of the dashboard moved the same way. The honest reading is a real improvement whose
+  size at 8-wide lies **between −20% and −53%**, because the repo's own script measured the same endpoint at p95 **1382.4 ms** 38
+  minutes earlier on the same jar — see the next paragraph.
+- **`scripts/verify-perf-50k.sh` section 4b, which is the verdict that counts.** 80 requests per endpoint at 8-wide, before → after:
+  `search?query=<selective>` p95 319.0 → **259.8** (FAIL → PASS, inside the noise band, no code touched it);
+  `<matches-all>` 427.1 → **731.8** (FAIL, and its p50 got *worse*, also with no code change); deep page 342.1 → **707.5** (FAIL);
+  `GET /students` default 60.0 → 90.6 (ok); `GET /students/{id}` 10.6 → 13.5 (ok); `GET /dashboard/school` 1725.2 → **1382.4**, max
+  1826.8 → 1593.5 (**FAIL** still). The run tallies **53 passed, 3 failed, 1 skipped** where the pre-fix run tallied **52/4/1**.
+  The script hammers 80 requests back-to-back per endpoint where the ladder fires 40, so the two dashboard readings bracket the
+  truth rather than contradict each other. Sequentially, on the same fixed jar, all ten probes still pass — worst p95 now
+  **152.1 ms** (`/dashboard/school`, p50 148.4).
+- **The remaining breach is a different problem from the one just fixed.** At 8-wide the dashboard still asks for roughly 24 database
+  processes on 8 cores, and the fix made each of them cheaper rather than fewer. Caching the aggregates, precomputing them per
+  academic year, or moving them off the request path are all larger changes than Stage 5's remit, and the `search` lines are Stage 4's
+  bounded-list/keyset work. Neither is recorded here as done.
+
+**What this leg does not cover.** One node on a laptop, warm cache: cold cache, more than one application instance and a provisioned
+database are outside it, p99 is still the worst-run proxy, and the budget is NFR-02 as written. The absolute milliseconds do not
+generalise to production; the shape does — aggregate CPU inside the database is the bottleneck and an indexed single-row read is
+not, and how many clients one endpoint can serve inside budget is a function of how many blocks its aggregates touch (c=2 before
+the fix, c=4 after, on identical hardware and identical data).
+
+**Criterion 3 is built, landed, and green — in CI as well as on this machine.**
 `SqlStatementCountPerRequestTest` measures the statements Hibernate prepares for one real HTTP
-request through the full filter chain on a `RANDOM_PORT`, against a database it seeds and asserts
-before starting the clock, with `hibernate.generate_statistics=true` scoped to that context only — no
-production code, no proxy, no migration. Eight endpoints are pinned, and each ceiling is
-`measured + 1` with that relation itself asserted, so widening a ceiling takes two edits rather than
-one. It was seen to fail both ways it can: inserting a per-row fee read into `toResponse` took
-`GET /students/search` from 4 statements to **44** against a ceiling of 5 and named the growth as
-per-row (`40 ≥ 20 rows`), and moving one seed's row count took a second case over its ceiling with
-the opposite diagnosis. `mvn -o test` with it present is **114 green** (106 + 8).
-It is not yet in `src/test`, and that is deliberate: **no CI job starts a database**, and this stage's
-own rule forbids a silently skipped test class, so landing it would turn `mvn -B clean verify` red on
-every push. It needs either a `services: postgres` job or ADR-019's Testcontainers dependency, and
-both are changes to the pipeline's shape and minutes — the same owner decision criterion 5 asks for,
-reported here rather than made quietly.
+request through the full filter chain on a `RANDOM_PORT`, against a database it creates, seeds and
+counts before starting the clock, with `hibernate.generate_statistics=true` scoped to that context only — no
+production code, no proxy, no migration. **Nine** endpoints are pinned, at 4 / 4 / 3 / 9 / 6 / 3 / 4 /
+7 / 3 statements, every ceiling is `measured + 1` with that relation itself asserted, and widening a
+ceiling therefore takes two edits rather than one. It was seen to fail both ways it can: inserting a
+per-row fee read into `toResponse` took `GET /students/search` from 4 statements to **44** against a
+ceiling of 5 and named the growth as per-row (`40 ≥ 20 rows`), and moving one seed's row count took a
+second case over its ceiling with the opposite diagnosis. The full reactor against a real PostgreSQL
+15.8 on `127.0.0.1:5432` — `mvn -o clean verify`, this class included — is **121 tests, 0 failures, 0
+errors, 0 skipped in 21.9 s**; the class's own nine cases took 6.9 s.
 
-The measurement also surfaced two production findings that belong to Stage 4, not to this test:
-`GET /api/v1/results/student/{id}` answers **500** because `ResultController.mapToResponse`
-dereferences lazy proxies after the transaction closes under `open-in-view=false`, and
-`GET /parents/children/{id}/results` is a live N+1 at **26 statements** (19 per-row lazy loads) that
-wants a fetch join. Both are recorded with the numbers rather than smoothed over.
+The reason it could land is that the owner took the decision this card used to record as blocking
+(2026-11-02): `ci.yml`'s `backend` job now declares a `postgres:15` **service** published to
+`127.0.0.1:5432` — ADR-019's zero-cost route, an ephemeral loopback container with a throwaway password
+that exists only for that job, not a paid runner feature and not a cloud database.
 
-**Criterion 5 is a measurement, and it came in under the estimate.** Run `41397864650` at `0058d0d` —
-the head that carries criteria 1 and 2 — spent **99 runner-seconds across its four jobs** on
-`ubuntu-latest`: scripts 6 s, frontend 30 s, infrastructure 21 s, backend 42 s, the disabled
-live-tenancy job 0 s, wall clock 43 s because the jobs run in parallel. Against the standing
-estimate of 2–4 minutes per push that is a 60–75% under-run, and the number that makes it safe is
-the one that is not in it: the skipped live-tenancy job starts no database, so no `services:`
-block and no Testcontainers pull are hiding in the figure. Landing criterion 3's
-`SqlStatementCountPerRequestTest` would add a Postgres service container and its pull to every
-push — the delta is reportable here before the owner decides, which is why the decision and the
-measurement sit in the same section.
+**That sentence is now read off a GitHub run rather than off this laptop.** Run `41454080530`, head
+`8a83d37`, job `Backend build and tests`, **1m30s**, passed. Its log is the evidence, in order:
+`Initialize containers` → `/usr/bin/docker pull postgres:15` at 13:34:07 → `docker create … -p
+127.0.0.1:5432:5432 --health-cmd "pg_isready -U ci_user -d postgres"` → `postgres service is healthy.`
+at 13:34:26, nineteen seconds before the first step of the job ran; then
+`GMS_N1_DB_URL: jdbc:postgresql://127.0.0.1:5432/gms_n_plus_1` on the checkout and setup-java steps, so
+the DB-backed cases were aimed at the container and not at anything on this machine. Inside `mvn`:
+`Running com.gms.performance.SqlStatementCountPerRequestTest` → **`Tests run: 9, Failures: 0, Errors: 0,
+Skipped: 0, Time elapsed: 12.71 s`**, and the reactor line `Tests run: 121, Failures: 0, Errors: 0,
+Skipped: 0` — the same 121 this branch reports locally, on the same PostgreSQL major (15), which is the
+only way the nine ceilings mean anything in CI: a statement count that held locally and drifted in GitHub
+would have shown up as a red ceiling, not as a green job. Criterion 3 is `Verified`, not
+`Implemented + Tested locally`.
+
+The 12.71 s is also the first honest number for what the sidecar costs: the same nine cases take 6.9 s on
+this machine, and the job as a whole went from **42 s to 90 s**, of which 19 s is the image pull and
+health probe, 12.71 s is the DB-backed class, and the rest is `mvn` waiting on nothing it used to have to
+skip. See criterion 5 for the whole-pull arithmetic.
+
+The measurement also surfaced two production findings that belong to Stage 4, not to this test, and both
+are now closed inside the query rather than in a comment. `GET /api/v1/results/student/{id}` answered
+**500** because `ResultController.mapToResponse` dereferences lazy proxies after the service transaction
+closes under `open-in-view=false`; `GET /parents/children/{id}/results` was a live N+1 at **26
+statements** (19 per-row lazy loads over six rows). The five fetch joins in
+[ResultRepository.java:31-38](../gms_backend/src/main/java/com/gms/repository/ResultRepository.java) took
+the first to **200** and the second to **7**, and both are guards: the ninth case asserts the status
+before it compares a count, so deleting the join reopens the finding as a red build.
+
+**Read, not measured: the N+1 sites that remain on MVP-journey paths.** This inventory came from reading
+each mapper against `open-in-view=false` and the all-LAZY associations `C-7` left in place. **No statement
+count has been taken for any endpoint below and none is pinned** — that is the difference between this
+table and the one above it, and it is why the count column says `N`, not a number.
+
+| path | shape | where the per-row load is | what it would take |
+|---|---|---|---|
+| timetable reads | `3 + 4N` | [TimetableServiceImpl.java:131-143](../gms_backend/src/main/java/com/gms/service/impl/TimetableServiceImpl.java) — `getSlots()` per timetable, then `getAssignment()` (:149) and that assignment's teacher/subject/classroom (:153-171) | fetch join the slots, batch the assignments |
+| attendance reads | `1 + 2N` | [AttendanceServiceImpl.java:233-243](../gms_backend/src/main/java/com/gms/service/impl/AttendanceServiceImpl.java) — `getStudent()` then `getTimetableSlot()` per row | fetch join both, or project the response in JPQL |
+| teacher-assignment reads | `1 + 3N` | [TeacherAssignmentServiceImpl.java:199-220](../gms_backend/src/main/java/com/gms/service/impl/TeacherAssignmentServiceImpl.java) — teacher, subject and classroom per row, classroom's school one deeper | three fetch joins |
+| `GET /parents` | `1 + N` | [ParentServiceImpl.java:99, 327-328](../gms_backend/src/main/java/com/gms/service/impl/ParentServiceImpl.java) over [ParentRepository.java:42](../gms_backend/src/main/java/com/gms/repository/ParentRepository.java) — the children collection loads once per parent | `JOIN FETCH p.students`, or `@BatchSize` |
+| `GET /users` | `1 + N` | `User.roles` is `@ElementCollection(fetch = EAGER)` ([User.java:48](../gms_backend/src/main/java/com/gms/model/entity/User.java)) — one secondary SELECT per user row, on a **paged** read | `@BatchSize` on the collection; a fetch join would multiply the page's rows |
+| five write paths | `N × 2` | per-item `findById` inside the loop: [AttendanceServiceImpl.java:118, 126, 139](../gms_backend/src/main/java/com/gms/service/impl/AttendanceServiceImpl.java), [ParentServiceImpl.java:116](../gms_backend/src/main/java/com/gms/service/impl/ParentServiceImpl.java), [ExamServiceImpl.java:72](../gms_backend/src/main/java/com/gms/service/impl/ExamServiceImpl.java), [TimetableServiceImpl.java:60](../gms_backend/src/main/java/com/gms/service/impl/TimetableServiceImpl.java), [ParentStudentServiceImpl.java:67](../gms_backend/src/main/java/com/gms/service/impl/ParentStudentServiceImpl.java) | one `…IdIn` query per request, keeping the scoped repository's 404 behaviour |
+
+These are Stage 4's work with Stage 5's evidence behind them; they are recorded rather than fixed here
+because the criterion was a detector, and the detector now exists and runs.
+
+**Criterion 5 is a measurement, it came in under the estimate, and the change this stage made to it is
+now named.** Run `41397864650` at `0058d0d` — the head that carries criteria 1 and 2 — spent
+**99 runner-seconds across its four jobs** on `ubuntu-latest`: scripts 6 s, frontend 30 s,
+infrastructure 21 s, backend 42 s, the disabled live-tenancy job 0 s, wall clock 43 s because the jobs
+run in parallel. Against the standing estimate of 2–4 minutes per push that is a 60–75% under-run, and
+the number that made it safe was the one *not* in it: no job started a database, so no `services:` block
+and no image pull were hiding in the figure.
+
+Two things on this branch change that figure, and the owner approved the first of them on 2026-11-02:
+- the `backend` job's `postgres:15` service — an image pull before the job's steps start (the runner has
+  no `postgres` tag pre-baked), then the DB-backed cases inside `mvn -B clean verify`. Locally that half
+  of the suite cost 6.9 s of the 21.9 s build.
+- `gate-coverage.yml` — one new job per pull request. Its own work is two `gh api` calls and a Python
+  guard, but it **polls until every gate the diff owes reaches a conclusion**, so its duration is bounded
+  by the slowest gate it is waiting for, not by its own CPU. Ceiling set to 25 minutes of polling; the
+  job reports the gate table it read rather than a bare pass.
+
+Both are Linux minutes on a **public** repository, which GitHub does not bill, so the expected cost of
+the delta remained **$0** — and it is no longer an expectation. The same run read above,
+`41454080530` + `41454080548` + `41454080602` at head `8a83d37`, spent **302 runner-seconds across seven
+executed jobs in three workflow runs**, and **112 s of wall clock** (13:34:04 → 13:35:56) because the jobs
+run in parallel and the meta check finishes last:
+
+| job | at `0058d0d` | at `8a83d37` | delta |
+|---|---|---|---|
+| `Backend build and tests` | 42 s | **90 s** | **+48** — 19.1 s is the `postgres:15` pull and health probe (13:34:07.9 → "service is healthy" 13:34:26.9), 12.71 s is the nine DB-backed cases; the rest is run-to-run variance |
+| `Frontend lint and build` | 30 s | **37 s** | **+7** — `vitest run` over 2 files / 9 tests, `Duration 2.49s`, plus the new present-or-refuse check |
+| `Verify scripts syntax and presence` | 6 s | 8 s | +2 |
+| `Infrastructure definitions` | 21 s | 19 s | −2 |
+| `Lint every workflow` | not in the 99 s | 33 s | actionlint, run only by GitHub |
+| `Check trigger sets and permissions` | not in the 99 s | 8 s | the 15 structure guards, re-run in CI |
+| `Gate coverage` | did not exist | **107 s** | its own work is two `gh api` calls and a Python guard; ~90 s of that job is *asleep in a 20 s poll loop waiting for the `backend` job it guards* |
+| ci.yml's four jobs (the like-for-like set) | **99 s** | **154 s** | **+55 s, +56 %** |
+
+Read against the standing zero-unexpected-cost rule rather than against the estimate: the figure that rule
+cares about is **money**, and the money is $0 — public repository, `ubuntu-latest` only, no paid runner
+feature, no cloud service, the one container ephemeral and loopback-published. The figure that reads badly
+is the runner-seconds: 302 s of wall-held runner time is **5.0 minutes**, which is *above* the 2–4 minutes
+the estimate named, and the estimate was always a latency estimate that got compared to seconds. On wall
+clock the push takes 112 s, which is inside it. The honest statement is therefore both numbers with their
+units named, plus the one structural cause: a coverage guard that waits for the gates it guards costs, by
+construction, roughly as many runner-seconds as the slowest gate it is watching. That is the price of
+making *absence* red, and it is not paid by making the poll faster — a shorter interval buys more API
+calls, not fewer held runners.
+
+What the criterion also asks — "unit **and** integration jobs", plural — is met in shape but not in split:
+the nine DB-backed cases run in the same `backend` job as the 112 others, now with a real PostgreSQL
+behind them. A separate integration job is a pipeline-shape change with its own minutes, and nothing
+about the current arrangement hides a skipped test: `ci.yml`'s discovery step counts the classes and
+refuses a non-zero `skipped`, which is exactly what an `@Disabled` or `if:false` escape hatch produces —
+the failure mode this stage's history already contains. A database-less runner cannot hide either: the
+context fails to boot and the build goes red on its own.
+
+**The first push of this branch spent two of its gates, and both defects were in the pipeline.** Head
+`8fab836` came back with `Backend build and tests`, both validation jobs, scripts and infrastructure green
+and **two red**, in 18 s and 6 s respectively. Neither was a product failure, and both are worth the words
+because each is the shape of a bug that a green build cannot see:
+- `Frontend lint and build` died on `npm test -- --run --watchAll=false`. `--watchAll` is a **Jest** flag;
+  Vitest's argument parser rejects unknown options with `CACError: Unknown option \`--watchAll\``, so the
+  step exited before collecting a single test file — nine tests that pass on this machine were not running
+  in CI, and the gate was red for a reason that had nothing to do with the code. The fix drops the flag and
+  keeps `--run` (non-watch belongs to CI, not to whatever mode `package.json` declares), and it removes the
+  tolerance underneath: this step used to *notice* a missing `test` script, print a notice and pass. Since
+  Stage 4's criterion "frontend test count > 0" is now claimed as **met**, a missing script or a missing
+  `src/**/*.test.*` file is a red step. That was tested both ways before pushing: the real tree gives
+  `2 file(s)` and `Tests 9 passed (9)` / exit 0, and two fixtures — `test` stripped from `package.json`,
+  and a `test` script with an empty `src/` — each print their reason and exit 1.
+- `Gate coverage` died on `gh api … --paginate --per-page 100`: `unknown flag: --per-page`. `per_page` is a
+  query parameter, not a flag. What matters here is that the guard behaved correctly while dying — it
+  printed the owed computation (`gates owed: 6 of 6`), then exited 1 in six seconds instead of reporting a
+  verdict it had not computed. A coverage check that cannot reach a verdict and says nothing is the exact
+  absence it was written to detect, so this is the meta check's first negative test, seen to fail for the
+  right reason.
+
+`8a83d37` then put the same pipeline up with both fixed and read **all green**: six gates passed, `Gate
+coverage` passed and printed the table it had actually read — `gates owed: 6 of 6`, then one `ok` line per
+gate with its check-run id — and the live-tenancy job reported `skipping`, which is its declared state
+rather than a hidden one. The whole sequence is the evidence for criteria 3 and 5, and the two red runs
+are the evidence that the gates can say no.
+
+**Criterion 4 is repository state now, and the demonstration is the merge attempt.** Everything above this line
+was closable from a branch; this was not, because a required status check is a setting on `master` and no commit
+can create one. Applied on 2026-11-02 through the branch-protection API, additively:
+
+| rule | before (read first) | after (read back) |
+|---|---|---|
+| `required_status_checks.contexts` | `[]` | `["Gate coverage"]` — matched by the job's display name, `app_id` 15368 |
+| `required_status_checks.strict` | `false` | `true` |
+| `enforce_admins.enabled` | `false` | `true` |
+| `required_pull_request_reviews` | 1 approval, `dismiss_stale_reviews`, `require_last_push_approval`, no code-owner reviews | **unchanged**, sent back field-for-field |
+| everything else (`linear_history`, `force_pushes`, `deletions`, `signatures`, `lock`, `conversation_resolution`, `restrictions`) | off | off |
+
+One context, not seven, and that choice is the design: requiring all six gates directly would make a docs-only
+pull unmergeable forever, because `ci.yml`'s `paths-ignore` means those jobs never start for that diff. The meta
+check computes what a given diff owes and refuses what it cannot verify, so the single required name carries the
+whole set transitively — and if the meta check itself is deleted or filtered out, its absence *is* a missing
+required context, which is the failure this criterion exists to catch.
+
+The demonstration is PR #27, opened and closed as an instrument. Its only content was
+`gms_frontend/src/ci-probe.test.jsx`, asserting `1 + 1 === 3`, and it failed in CI exactly as designed:
+`Frontend lint and build` **fail 28 s** with `Test Files 1 failed | 2 passed (3)` — nine real tests still green,
+one probe red — and `Gate coverage` **fail 1m27s** on its own printed verdict, `##[error]1 owed gate(s) did not
+pass: Frontend lint and build`, after listing `gates owed: 6 of 6` and one `ok` line per gate that passed. Then,
+with `enforce_admins` read back as `true` in the same minute and the acting token confirmed `admin: true`:
+
+```
+$ gh pr merge 27 --admin --merge
+GraphQL: New changes require approval from someone other than the last pusher.
+         Required status check "Gate coverage" is failing.  (mergePullRequest)
+exit 1
+```
+
+Two blocks appear in that one message, and the one under test is the second. The first — "new changes require
+approval from someone other than the last pusher" — is the pre-existing `require_last_push_approval` rule, which
+was already there and is not what `DoD-4` asks about. The second is GitHub applying a required status check *to
+an administrator*: the override was requested, the actor holds admin, and the merge was refused. The chain that
+made a one-line bad assertion unmergeable is assertion → red job → red meta check → the single required context →
+refusal. The pull closed `state: CLOSED`, `mergedAt: null`, `mergeCommit: null`, and its branch is deleted on
+both sides, so the instrument left nothing in the tree.
+
+**The harder case was probed separately, because it is the one this stage's own history produced.** A *failing*
+check has always been visible; an *absent* one renders as nothing, which is indistinguishable from "not started",
+and that is exactly how `validate-workflows.yml` sat unparsable for four commits with both of its checks simply
+gone while the pull stayed green. So PR #28's single commit deleted `.github/workflows/validate-workflows.yml` —
+515 lines, nothing else — and `Gate coverage` answered in **6 s**:
+
+```
+##[error].github/workflows/validate-workflows.yml is gone. 2 gate job(s) were owed
+           from it: Lint every workflow, Check trigger sets and permissions
+           — a deleted workflow is not a passed check
+```
+
+No polling, no waiting on gates that were never going to arrive, no green — the guard reads the tree before it
+reads the API, finds the workflow it is contracted to hold answers from, and refuses. The merge attempt on that
+head returned the same second clause as #27 did, `Required status check "Gate coverage" is failing`, exit 1. Both
+probes closed unmerged with their branches deleted, so `master` never lost the file and never gained a bad
+assertion; the cost of the two demonstrations was one pipeline run each, and one pipeline run in this repository
+is $0.
+
+Deleting the workflow is the cheaper attack on this pipeline, and it is now the faster one to detect: 6 s against
+a red test's 1m27s.
+
+The counterfactual this establishes is the one all of Stage 5's CI work was for: before `8fab836`, a green PR in
+this repository could not distinguish "the check passed" from "the check never ran", and it now cannot
+distinguish that from "an administrator merged it anyway" either.
 
 **Acceptance criteria.**
 1. `DoD-2` budgets met, with `EXPLAIN (ANALYZE, BUFFERS)` output and latency percentiles recorded per query —
    p50/p95/p99 for the ten hottest endpoints, not a single average.
+   **Open.** The `EXPLAIN` half is met and now includes the two statements this stage changed (P6). The latency half is
+   met sequentially at volume, twice — pre-fix and post-fix, worst p95 **152.1 ms** — and **failed** at 8 and 16 clients
+   in flight: three of the six endpoints the concurrent section drives still breach NFR-02 after both fixes. What was met
+   never had p99 in it either: 20 samples give a worst-run proxy, and the table says so rather than relabelling it.
 2. The generator is re-runnable and idempotent; the seeded counts are asserted, not assumed.
+   **Met.** A 54-line fingerprint came back byte-identical across two independent loads, and both verification scripts
+   refuse to start the clock until every count matches what they re-derive from the seed's own `WHERE` clauses.
 3. N+1 detection: a test that fails the build when a request issues more than a stated number of SQL statements.
+   **Met, and now met in CI.** `SqlStatementCountPerRequestTest` is in `src/test`, pins nine endpoints at
+   `measured + 1`, was seen to fail in both directions it can fail, and closes two findings it surfaced (the 500,
+   and 26 → 7 statements). The CI half is read off run `41454080530`: `postgres:15` pulled and healthy before the
+   first step, then `Tests run: 9, Failures: 0, Errors: 0, Skipped: 0, Time elapsed: 12.71 s` for that class and
+   `Tests run: 121` for the reactor — the same numbers this machine produces, on the same PostgreSQL major.
 4. A PR that breaks a test is unmergeable **even with `--admin`** (`DoD-4`), demonstrated once.
+   **Met, demonstrated twice, on 2026-11-02.** `master` now requires one context — `Gate coverage` — with `strict`
+   on and `enforce_admins` on; the review rules were carried over unchanged (1 approval, dismiss-stale,
+   last-push-approval). The first demonstration was a throwaway pull whose only content was an assertion that
+   fails: one red Vitest job → `Gate coverage` refusing (`1 owed gate(s) did not pass: Frontend lint and build`) →
+   an administrator's `gh pr merge --admin` answered by GitHub with **`Required status check "Gate coverage" is
+   failing`** and exit 1. The second deleted a whole workflow and got the same refusal in 6 s, on the message
+   *"a deleted workflow is not a passed check"* — which is the case this stage's own INF-23 incident was about.
+   Full measurements above, under criterion 4's own block.
 5. `mvn verify` in CI runs unit **and** integration jobs; CI minutes reported against estimate, per the standing
    zero-unexpected-cost rule.
+   **Met on minutes, partly met on the split.** Measured post-change: **302 runner-seconds** across seven executed
+   jobs in three workflow runs, **112 s wall clock**, **$0** (public repo, `ubuntu-latest` only, one ephemeral
+   loopback container); the like-for-like set — `ci.yml`'s four jobs — went **99 s → 154 s**, and the whole
+   per-job table with its attribution is above. What is still a gap is the criterion's plural: the nine DB-backed
+   cases share the `backend` job with the other 112 rather than forming a second job, and that is recorded as a
+   wording gap rather than argued away.
+
+**Then the other documents were re-read against the tree.** Stage 5 is the first point in this programme where the
+evidence had been gathered faster than the prose was corrected, and the audit documents had accumulated sentences that
+were true on the day they were written and false now — "Zero tests", "no test runner", "`contexts=[]` today", "the
+frontend gates are **advisory**", "`ci.yml` has two jobs", "`master` still has no migrations at all". Corrected
+2026-11-02 across [TECHNICAL_DEBT.md](audit/TECHNICAL_DEBT.md), [BASELINE_STATUS.md](audit/BASELINE_STATUS.md),
+[REPOSITORY_AUDIT.md](audit/REPOSITORY_AUDIT.md), [INFRASTRUCTURE_AUDIT.md](infrastructure/INFRASTRUCTURE_AUDIT.md)
+and [INFRASTRUCTURE_DECISIONS.md](infrastructure/INFRASTRUCTURE_DECISIONS.md): 32 replacements (34 diff hunks), plus a
+standing
+correction notice at the top of `BASELINE_STATUS.md` — that file is the Milestone-0 record at `256b8e4`, so its
+baseline tables were **not** rewritten; the four statements that no longer describe the tree are corrected in a block
+above them instead, because a baseline that quietly updates itself is not a baseline. Findings whose body was written
+in the present tense got dated `*Corrected 2026-11-02:*` clauses appended rather than substitutions, so the register
+still shows what was found. Two claims were retired by this pass rather than merely dated: OPS-01's "production deploys
+with no test gate", because `deploy-backend.yml` was deleted in `5f6a55a` and there is no SSH path to gate, and
+"403-vs-404 for cross-tenant reads" as an outstanding owner decision, because `C-4` shipped 404. What was checked
+afterwards, with the check itself as evidence: all 15 structure guards pass, a column-count walk over every table in
+the nine touched documents reports **0** mismatches, all three workflows still parse, and the local suite re-ran to
+`Tests run: 121, Failures: 0, Errors: 0` / BUILD SUCCESS — after a first attempt that came back **113 tests and one
+error**, because that shell had no `DB_USERNAME`/`DB_PASSWORD` exported and `SqlStatementCountPerRequestTest` refuses
+to skip when it cannot reach a database. The gap between 113 and 121 is the nine cases in that one class, so a missing
+local database costs 8 counted tests and a red build, which is the intended shape; it is now in `README.md`'s command
+table rather than left for the next person to rediscover.
+
+**The docs-only run this stage expected to measure did not happen, and the reason is a fact about GitHub rather than
+about this branch.** The plan was to let the two documentation commits push into PR #26 and read the `ci.yml owed:
+False` line off the meta check — the live confirmation that a diff no code can break still merges under *one* required
+context. Run `41456272793` (CI) and `41456272823` (Gate coverage) on `c5698bf` printed instead:
+
+```
+changed files: 58 | ci.yml owed: True | validate-workflows.yml owed: True | gates owed: 6 of 6
+ok   Backend build and tests: completed / success (run 125313629455)
+…
+```
+
+58 files, for a commit that changed three. A `pull_request` event evaluates `paths-ignore` against the **whole pull
+diff**, not the commit that was just pushed, so a documentation commit inside a pull request that also carries Java
+owes every gate the code-owning diff owes. Two consequences, both recorded rather than argued away: the `ci.yml owed:
+False` case is **still unmeasured on this programme** — it needs a pull request whose entire diff is documentation,
+which PR #15 was and which this branch is not — and the design argument for one required context does not change,
+because it never rested on this branch. It rests on PR #15's measured **zero runs** for a docs-only diff: if all six
+gates had been required, that pull would have been unmergeable. What `c5698bf` does prove is the cheaper half — six
+gates owed, all six returned `success`, and the meta check named each one's check-run id instead of assuming them.
 
 ### Stage 6 — Deployment preparation (Oracle enters)
 
@@ -1025,9 +1615,11 @@ system, the remaining `DOC-*`).
 ## 6. Standing constraints — every stage, no exceptions
 
 - **Never push directly to `master`.** One feature branch per stage-package, PR, then merge.
-- **Never bypass repository protection or required checks** without the owner naming the bypass. Every merge so far
-  has needed `--admin` because protection is not yet switched on (that is Stage 5's `DoD-4`, and it is an owner
-  action, not a code action).
+- **Never bypass repository protection or required checks** without the owner naming the bypass. Every merge *up to
+  Stage 5* needed `--admin` because protection was not switched on; that is no longer the state — `Gate coverage` is
+  required with `strict` and `enforce_admins` since 2026-11-02 — and `--admin` is now both unavailable in practice and
+  ruled out by the owner, so a protected merge is an approval, not a privilege. The one merge attempt that tested this
+  (`gh pr merge 27 --admin --merge`) was refused and is recorded under Stage 5 criterion 4.
 - **Zero unexpected cost.** GitHub-hosted `ubuntu-latest` only; no paid runners, no managed services, no billable
   feature started without asking. Docker on the runner is free; Testcontainers is Docker. Estimated and actual
   Actions minutes are reported for every package.
@@ -1041,11 +1633,11 @@ system, the remaining `DOC-*`).
 - **A failing check stays failing** until it is fixed or its irrelevance is argued in writing. Never silenced by
   `continue-on-error`.
 
-## 7. Blocked on the owner (unchanged, and Oracle is no longer one of them)
+## 7. Blocked on the owner (one row closed on 2026-11-02; Oracle is no longer one of them)
 
 | Blocker | Needed | Gates which stage |
 |---|---|---|
-| Branch protection | Name the five checks, `strict`, `enforce_admins`, review count 0 | Stage 5 (`DoD-4`) |
+| Branch protection | **no longer blocked on the owner — applied 2026-11-02.** `master` requires `Gate coverage`, with `strict` and `enforce_admins`; the refusal was then demonstrated against an admin merge attempt. The row used to read "name the five checks, `strict`, `enforce_admins`, **review count 0**", and three of those four happened as written; the fourth did not and was not done quietly: the review rules were sent back **unchanged** (1 approval, `dismiss_stale_reviews`, `require_last_push_approval`, no code-owner reviews), because dropping the required approval count to 0 removes the owner's own last human gate and is a decision rather than a side effect of a CI task. Restoring it is one API call and is still the owner's to make. | Stage 5 (`DoD-4`) — **closed for the CI half, open on the review-count half** |
 | Dead `EC2_*` secrets | Delete `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `EC2_SSH_KNOWN_HOSTS` from the repo/org | Housekeeping; recorded in `ADR-017` |
 | Neon ownership | Create **your own** project, verify the email | Stage 6 |
 | DNS | Where `bytendra.com` / `bytencia.com` are hosted | Stage 6 (TLS) |
@@ -1057,22 +1649,27 @@ system, the remaining `DOC-*`).
 | Stage | Gate | State | Cost | Oracle |
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
-| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed on the branch** — `C-1`…`C-7` plus `C-8` are implemented and measured on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). | $0 | No |
-| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features | $0 | No |
-| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — criteria **1, 2 and 5 are measured on the branch** (`ed869d2`/`0e13290`): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), five EXPLAIN plans through this project's own indexes, and CI at **99 runner-seconds** per push against a 2–4-minute estimate. Criterion 3 is built and proven to discriminate but **not landed** — no CI job starts a database (§19, owner decision). Criterion 4 still needs required status checks — which only the owner can set | $0 (runner minutes only) | No |
+| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Merged** — `ef00eb9` / PR #25. Criteria 2, 3, 6, 7, 8 met; 1 open; 4, 5 moved to Stage 5. `master` now carries V1…V7 and `ddl-auto=validate` | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**: V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
+| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
+| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated twice** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see); **5 met on minutes, partly on the job split** — **302 runner-seconds** over seven executed jobs, **112 s wall**, **$0**, with `ci.yml`'s own four jobs at 99 s → 154 s. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (nothing here ran on 17; the 16.15 attribution is withdrawn), the live-tenancy CI job (declared `skipping`, gated on a repository variable, blocked on the boot step plus the **12 secret names `ci.yml` references that the repository does not have**), and the integration-job split in criterion 5's wording | $0 (runner minutes only; the DoD-4 probe spent one extra pipeline run, also $0) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 
-**Reading this honestly:** Stage 1 is `Closed` on `master`. Stage 2 is not — its migrations, its verification
-script and its Compose repair exist only on `feat/stage2-flyway-baseline` (`231bdab`, PR #25), and the branch cannot
-merge itself: `master` requires one approving review with last-push approval, the founder cannot approve their own PR,
-and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
-branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
-still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
-receives. Stage 3 is now executed on that same branch — `C-1` through `C-8` are implemented and measured — and part of
-Stage 4 is proved by the same run: the branch applies **seven** migrations, boots a schema that refuses a NULL tenant
-and stamps who wrote each row, and answers 294 live assertions across two tenants without a single failure, while
-`master` applies none and lets Hibernate guess — so the longer PR #25 sits unreviewed, the further the
-merged description of this project drifts from the verified one. Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
-disagree, the proof wins and this table is wrong.
+**Reading this honestly:** Stage 1 is `Closed` on `master`. Stage 2 **is now merged** — PR #25 landed as
+`ef00eb9`, so `master` carries migrations **V1…V7** and `ddl-auto=validate`, and a fresh clone receives a schema
+that refuses a NULL tenant and stamps who wrote each row instead of letting Hibernate guess. The earlier state
+recorded here — *"PR #25 is green on every check and still `BLOCKED`"*, *"master still describes a project with 0
+migrations"* — was true when it was written and is now **false**; it is corrected rather than deleted, because a
+status board that quietly drops a stale claim is a status board nobody can audit.
+
+Stage 3 (`C-1`…`C-8`) is implemented and measured on `feat/stage2-flyway-baseline`, which is now `master`, and
+Stage 4 is proved by the same run: **seven** migrations apply, the schema refuses a NULL tenant and stamps the
+author, and **294** live assertions across two tenants pass without a single failure. The **P1 batch** (PR #26,
+`90f3979`) is the first change to that merged tree since: it adds **V8** (eleven composite foreign keys) and
+**V9** (soft-delete columns for attendance and teacher assignment), closes four ownership gaps with **34** negative
+checks, and is green on every CI check — but it is **not merged**, so `master` still applies seven migrations and not
+nine.
+
+Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the
+proof. If the two disagree, the proof wins and this table is wrong.

@@ -9,7 +9,7 @@ import java.util.List;
 import java.util.Optional;
 
 public interface ParentService {
-    List<Parent> findBySchool();
+    List<ParentResponse> findBySchool();
     
     // Standard CRUD methods following reference pattern
     ResponseEntity<ParentResponse> create(ParentRequest request);

@@ -62,9 +62,9 @@ public class SubjectController {
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Subject> list = subjectService.findBySchool();
-        if (list.isEmpty()) return ResponseEntity.noContent().build();
-        return ResponseEntity.ok(list);
+        // See ClassroomController#getAll: an empty collection is 200 with [], never a 204 body the client
+        // has to guess the shape of.
+        return ResponseEntity.ok(subjectService.findBySchool());
     }
 
     @GetMapping("/{id}")
@@ -120,9 +120,6 @@ public class SubjectController {
     @PreAuthorize("hasAuthority('TEACHER')")
     public ResponseEntity<List<SubjectResponse>> getAssignedSubjectsForTeacher() {
         List<SubjectResponse> subjects = subjectService.findSubjectsForAuthenticatedTeacher();
-        if (subjects.isEmpty()) {
-            return ResponseEntity.noContent().build();
-        }
         return ResponseEntity.ok(subjects);
     }
 }

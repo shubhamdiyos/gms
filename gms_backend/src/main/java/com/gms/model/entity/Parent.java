@@ -34,6 +34,10 @@ public class Parent extends BaseAuditEntity {
     @Column(name = "phone_number", length = 15)
     private String phoneNumber;
 
+    // The login account is not part of a Parent's JSON. Jackson would walk the lazy proxy after
+    // the session closed (open-in-view=false), which is a LazyInitializationException at best and
+    // an account row in the response at worst.
+    @JsonIgnore
     @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id")
     private User user;

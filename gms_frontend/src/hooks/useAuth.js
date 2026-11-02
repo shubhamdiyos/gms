@@ -34,7 +34,7 @@ export const getDashboardRoute = (role) => DASHBOARD_BY_ROLE[role] || null;
 
 const normalizeRole = (role) => String(role).replace(/^ROLE_/, '').toUpperCase();
 
-const getPrimaryRole = (roles) => {
+export const getPrimaryRole = (roles) => {
   if (!Array.isArray(roles) || roles.length === 0) return null;
   const normalized = roles.map(normalizeRole);
   return ROLE_PRECEDENCE.find((role) => normalized.includes(role)) || null;
@@ -61,9 +61,17 @@ export const useAuth = () => {
       }
 
       dispatch(loginSuccess(result));
-      
+
+      // An account that was issued a password changes it before it uses anything else.
+      // The server says so in the login response; this is where the client stops ignoring it.
+      if (result.user?.requirePasswordChange) {
+        navigate(ROUTES.CHANGE_PASSWORD);
+        toast.warning('Set your own password before you continue');
+        return result;
+      }
+
       navigate(DASHBOARD_BY_ROLE[userRole]);
-      
+
       toast.success('Login successful!');
       return result;
     } catch (error) {

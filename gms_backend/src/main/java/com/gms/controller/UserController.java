@@ -56,9 +56,7 @@ public class UserController {
         List<UserResponse> users = userService.findBySchool().stream()
                 .map(userService::toResponse)
                 .toList();
-        if (users.isEmpty()) {
-            return ResponseEntity.noContent().build();
-        }
+        // 200 with an empty array, never 204 — see ClassroomController#getAll.
         return ResponseEntity.ok(users);
     }
 
