@@ -593,10 +593,15 @@ jobs:
 
   # ─────────────────────────────────────────────────────────────────────────────
   # DISABLED BY DEFAULT — this job is not a gate and must not be named in branch
-  # protection. `if: false` means it reports as *skipped* on every run: a skipped
-  # job satisfies nothing, and that is the honest state of live tenancy
-  # verification in CI today. It exists so the wiring is written down in the file
-  # that will own it rather than in a chat log.
+  # protection. Its condition is a repository variable nobody has set, so the job reports
+  # as *skipped* on every run: a skipped job satisfies nothing, and that is the honest
+  # state of live tenancy verification in CI today. It is a variable rather than a literal
+  # `false` for two reasons. actionlint refuses a constant condition
+  # (`constant expression "false" in condition`, [if-cond]) — and that is exactly what this
+  # line said from `01b7638` until 2026-11-02, where the lint gate that would have caught
+  # it was itself unparsable and so emitted no check at all. And a switch the owner can
+  # flip in Settings is the point of writing the wiring down: no workflow diff stands
+  # between the variable and a live suite.
   #
   # Why it is off: `verify-c1-tenancy.sh`, `verify-c2-tenant-context.sh`,
   # `verify-c3-scoped-reads.sh`, `verify-c4-owned-reads.sh`, `verify-c7-tenant-key.sh`,
@@ -609,15 +614,18 @@ jobs:
   # other runner label outright). The owner's rule is that a `services:` Postgres is allowed
   # only where a workflow here already does it, so there is no precedent to follow and CI
   # stays at unit, arch and static checks. Three of those scripts
-  # (`verify-c4-owned-reads.sh`, `verify-mvp-e2e.sh`, `verify-perf-50k.sh`) were also still
-  # untracked when this stub was written, so every step below that would execute one is
-  # gated on the presence probe: referencing a missing script fails a run for the wrong
-  # reason, which is the one outcome a gate must never produce.
+  # (`verify-c4-owned-reads.sh`, `verify-mvp-e2e.sh`, `verify-perf-50k.sh`) were still
+  # untracked when this stub was written — all three are tracked now, and the probe below
+  # stays because a job that dies on a missing file fails for the wrong reason, which is
+  # the one outcome a gate must never produce.
   #
   # What turning this on takes, in order:
+  #   0. `GMS_CI_LIVE_DB` set to `enabled` under Settings → Secrets and variables → Actions
+  #      → Repository variables. That comparison is the job's whole `if:`, so this is the
+  #      only switch, and it is the owner's to throw rather than a line in a diff.
   #   1. `services:` with `postgres:16` (loopback on the runner, published to nothing)
   #      plus the `gms_user` role and `gms_db` from docker-compose.yml, applied by
-  #      Flyway V1..V6 during the application's own boot — never by ddl-auto.
+  #      Flyway V1..V7 during the application's own boot — never by ddl-auto.
   #   2. `mvn -B clean spring-boot:run -Dspring-boot.run.profiles=dev` in the
   #      background, waited on through /actuator/health rather than a sleep.
   #   3. `scripts/seed/` applied so the two tenants, the platform account and the
@@ -641,7 +649,7 @@ jobs:
   #      owner call, not a silent one made in a workflow diff.
   live-tenancy:
     name: 'Live tenancy suites (disabled: no database exists in CI yet)'
-    if: false
+    if: ${{ vars.GMS_CI_LIVE_DB == 'enabled' }}
     needs: [backend, verification_scripts]
     runs-on: ubuntu-latest
     timeout-minutes: 30
