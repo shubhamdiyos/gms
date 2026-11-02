@@ -1461,7 +1461,7 @@ lint job could not be parsed.
 after it — the class of mistake, not this instance of it. (3) `live-tenancy`'s condition is now
 `vars.GMS_CI_LIVE_DB == 'enabled'`: non-constant, so the linter accepts it, and a repository variable the owner sets in
 Settings rather than a line in a workflow diff. The job still reports **skipped** on every run, which is the point of
-it, and step 0 of the block that explains how to turn it on names the switch. Two sentences in the same comment block
+it, and step 0 of the block that explains how to turn it on names the switch. *Superseded later on 2026-11-02, and the supersession is the point of this incident's second half:* that `if:` and the variable it read are deleted, the twelve secret names went with them, and `live-tenancy` now boots the `backend` job's jar against a `postgres:15` service and runs nine live steps as a required gate — see Stage 5 of the roadmap. The `vars.` condition was a way of leaving the work unfinished politely; the job that replaced it reads no secret, because a database that lives for one job on a runner's loopback holds nothing worth protecting. Two sentences in the same comment block
 had also gone stale on this branch and are corrected: the three scripts it called untracked are tracked now, and the
 baseline is `V1..V7`.
 

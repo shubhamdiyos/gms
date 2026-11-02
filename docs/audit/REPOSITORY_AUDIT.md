@@ -656,12 +656,17 @@ threshold — no coverage number gates a merge.
 **OPS-13 (P2) — No Spring profiles exist.** Only `application.properties`; no `application-dev`/`-prod`, no `spring.profiles.active`. *Corrected 2026-11-02:* all three exist and each pins `ddl-auto=validate` as a literal. Dev/prod separation rests entirely on env interpolation plus an untracked remote script. `spring.servlet.multipart.enabled=false` (`:39`) means no file upload is possible anywhere, which contradicts `announcements.attachment_urls`.
 
 **OPS-14 (P1) — Zero automated tests.** No `gms_backend/src/test` directory exists (0 classes, 0 methods); `mvn test` passes by running nothing. Frontend has no test files and no runner. `spring-boot-starter-test` is declared but unused. The only verification in the project is 45 Postman requests against ~230 mappings (~19%), and both collections ship `"auth": {}` with unset `{{school_id}}`/`{{user_id}}`, so none run without manual token pasting. **Any refactor of the 36 controllers / 40 entities is currently unguarded.** *Corrected 2026-11-02:* this row's
-core claim is false now. `gms_backend/src/test/java/com/gms/` holds **18 test classes and 121 tests** under
-`mvn -B verify`, and the frontend has **2 files / 9 Vitest tests** that a CI step is required to run. Four of the
+core claim is false now. `gms_backend/src/test/java/com/gms/` holds **19 test classes and 126 tests** under
+`mvn -B verify` (18 / 121 until `RetiredRowReadContractTest` arrived on 2026-11-02, five cases pinned to the
+retired-row contract the live-tenancy gate's first run turned up), and the frontend has **2 files / 9 Vitest tests** that a CI step is required to run. Four of the
 backend classes are architecture tests that fail the build on exactly the refactors this row said would go unnoticed —
 `DenyByDefaultAuthorizationArchTest`, `RepositoryTenantScopeArchTest`, `EntityLazyAccessorArchTest`,
 `TenantScopedReadArchTest`. The honest residue is the *behavioural* half: no Playwright journey, no Testcontainers, no
 coverage threshold, and the tenancy scripts still need a live backend (`ci.yml`'s `live-tenancy` job is disabled).
+*Corrected the same day:* the last parenthesis is false now. `live-tenancy` boots the `backend` job's jar against a
+`postgres:15` service on the runner and runs the nine live suites through `scripts/ci-live-tenancy.sh` as a gate —
+626 assertions, 17 skips inside one documented ceiling, no repository secret read. The residue this row names is
+otherwise unchanged: no coverage threshold, no Playwright journey, no Testcontainers.
 
 **OPS-15 (P2) — `.gitignore` gaps.** `.env`, `.env.local`, `.env.*.local` are covered and no real `.env` ever entered history (verified `git log --diff-filter=A`), but `.env.production` / `.env.prod*` are **not** ignored (one is tracked), and there are no `*.class`, `*.pem`, `*.key`, `secrets/` rules — which is how `PasswordVerificationTest.class` got committed.
 
