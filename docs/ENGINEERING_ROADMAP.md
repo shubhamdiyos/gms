@@ -817,7 +817,10 @@ separate event table, which is not MVP scope.
 at once.
 **State:** Partly proved on the branch — the 11 frozen-MVP features are all live-proved (11 of 11, 294 assertions, 0
 failures, 0 skips on a fresh V1→V7 database with two tenants); the post-#25 **P1 batch** is closed on 34 negative
-checks (PR #26, `90f3979`); the stage's own gate, *bounded* lists, is open.
+checks (PR #26, `90f3979`); the post-#25 **P2 batch** walked the journey through the real frontend and closed the
+empty-collection 204 contract defect on a three-legged proof, then closed the forced-password-rotation and
+render-crash findings in the browser and took the frontend test count from 0 to 9; the stage's own gate, *bounded*
+lists, is open.
 **Depends on:** Stage 3.
 
 Work: server-side pagination, sorting and filtering for every list resource (debt #10, `BKL-03`, `FE-08`); response
@@ -887,6 +890,110 @@ product behaviour is therefore **open**: `POST /timetables` against a classroom 
 for the year is refused by a constraint violation instead of replacing the timetable. It belongs to Stage
 4's list-and-write work, and it is recorded here so it is not lost.
 
+**The post-#25 P2 batch — the eleven features walked through the real frontend.** After the P1 batch, the
+mandate's §4 asked for the journey through the *actual* frontend and backend, not the API alone. Branch
+`feat/post-pr25-hardening`. The production Vite bundle was served same-origin against the backend through the
+SPA proxy, a platform owner created a school from the UI, and that school's administrator walked its own
+tenant: a dashboard of real aggregates, classrooms, subjects, a student registered and searched and archived
+and restored, and `/superadmin/*` refused as `/unauthorized`. The browser console stayed clean on every screen
+of the journey. What the journey produced, with each finding's measured state:
+
+| finding | severity | state |
+|---|---|---|
+| FE-P2-01 empty-collection reads answered 204 and blanked the page | high | **closed** — three-legged proof below |
+| FE-P2-02 create-then-refresh paints seconds late | medium | **withdrawn** — the 5–7 s figures were measured while a polling probe held the main thread; a MutationObserver with no polling paints the new row **180 ms** after the POST begins (measured 2026-11-02, `/admin/academic-years` 0→1). The residual real defect is smaller: every create issues both the tag invalidation and an explicit `refetch()`, a duplicate fetch across nine pages |
+| FE-P2-03 zero frontend tests, no error boundary | medium | **closed** — 0 → 9 Vitest tests green, and a render crash now costs one screen. Counterfactual measured in the browser: with the boundary removed the same crash leaves the page empty. Proof below |
+| SEC-P2-04 the SPA ignores `requirePasswordChange: true` | medium | **closed** — a bootstrapped admin is routed to a rotation screen and refused every other screen until it changes the password; verified end-to-end in the browser against the live backend. Client-side only, and the row below says what that does not cover |
+| FE-P2-05 deactivation is irreversible through the UI | medium | open — archived rows are excluded from every list by design, and the only toggle lives on a row the UI no longer shows |
+| DATA-P2-06 global `student_id` sequence | low | open — `STD011` leaks platform-wide volume to a tenant; ACD-08's per-school identifier intent is unmet |
+| MAIN-P2-07 33 controllers hardcode `@CrossOrigin` | low | recorded — the central allowlist wins (unlisted origin: 403, no ACAO), so it is latent misconfiguration, not a live hole |
+| A11Y-P2-08 `aria-hidden` warning when a dialog closes on its focused trigger | low | recorded — a warning; no console error anywhere on the journey |
+| ERRMAP-P2-09 `GET /students/` (empty id) answers 500, not 404/400 | low | open |
+| DATA-P2-10 `academic_years` carries no `created_by` | low | open — measured 2026-11-02: the only domain table without one (the other three are the two join tables and Flyway's own) |
+
+**FE-P2-01, closed with its proof.** A school with no rows yet read `GET /classrooms` as **204 No
+Content**: no body, which the SPA's request layer reads as `null`, and `const { data: x = [] }` only defaults
+on `undefined` — so `x.map()` threw and unmounted the route, with no error boundary to catch it. Six list
+reads on four controllers answered that way (`ClassroomController` ×2, `SubjectController` ×2,
+`UserController`, `ParentController`); all now answer `200` with `[]`, and the DELETE verbs keep their 204.
+The proof is three-legged, because a test merely existing proves nothing:
+
+```
+EmptyCollectionContractTest            6 tests, 0 failures — the four list reads at 200 + [], the two
+                                       teacher-assigned reads, and a source scan of every controller
+negative demonstration                 the defect reintroduced by hand in SubjectController → the HTTP leg
+                                       fails "Status expected:<200> but was:<204>" and the scan names
+                                       "SubjectController.java: getAll"; reverted, 6/6 green again
+verify-mvp-e2e.sh (live, 2026-11-02)   252 passed, 0 failed, exit 0 — including four new F8 assertions on
+                                       the genuinely-empty school B: classrooms 200 + 0 rows, subjects
+                                       200 + 0 rows, before its first classroom is created
+```
+
+**FE-P2-03, closed with its proof.** The finding was two claims, and each now has a measurement.
+
+```
+frontend test count     0 → 9 tests across 2 files, `npm test` green in 1.9 s
+                        Vitest 5.0.5 + Testing Library + jsdom, dev-only dependencies; the runner is
+                        wired through `test` in package.json and a `test` block in vite.config.js, so
+                        the production bundle is untouched (`npm run build` green: 11,999 modules)
+error boundary          ErrorBoundary.jsx wraps AppRouter inside BrowserRouter in App.jsx, so it sits
+                        above every route; the console stack confirms it
+                        ("at AppRouter (src/App.jsx) / at ErrorBoundary (src/components/common/…:6)")
+counterfactual, browser the same deliberate crash (`title.map is not a function` injected into
+                        AdminDashboard's StatCard) rendered twice, boundary on and boundary off:
+                          boundary on  → "This screen could not be displayed", the message surfaced,
+                                         and "Try again" / "Back to dashboard" both actionable
+                          boundary off → the page snapshot is an empty RootWebArea. Nothing renders.
+                                         This is FE-P2-01's failure mode, reproduced on demand
+both reverted          AdminDashboard.jsx carries no diff against HEAD; the suites re-ran 9/9 and the
+                       build re-ran green after the revert
+```
+
+The two suites are `ErrorBoundary.test.jsx` (4 tests: contains a throw, offers recovery, renders children
+untouched when nothing throws, and recovers after "Try again") and `ProtectedRoute.test.jsx` (5 tests,
+including the SEC-P2-04 negative: an account flagged `requirePasswordChange` is refused the screen behind
+the guard, while the rotation screen itself stays reachable so the redirect cannot loop).
+
+**SEC-P2-04, closed with its proof.** `POST /auth/login` answers `requirePasswordChange` as a **top-level**
+field — there is no `user` object in that response at all — and `authService.js:27` re-attaches it to the
+session user, which is what the gate reads. Measured live in the browser against the backend on 8082 and
+the disposable fixture, as a provisioned admin whose flag was `t` in the database:
+
+```
+1 first login            lands on /change-password with "Set your own password before you continue" —
+                         it never reaches a portal screen
+2 bypass attempt         typing /admin/students into the address bar (a full reload, not a client-side
+                         push) is bounced back to /change-password; the flag survives the reload because
+                         the session user is re-read from storage
+3 weak new password      "weakpassword" is refused in-form with the server's own policy text — "Use at
+                         least 8 characters with upper, lower, digit and one of @$!%*?&.#_" — and no
+                         request leaves the page
+4 valid new password     → /admin/dashboard, live aggregates for school #2, "Password changed
+                         successfully"
+5 database               users.require_password_change for that admin: t → f
+6 old bootstrap password POST /auth/login → 401
+7 new password           POST /auth/login → 200 with requirePasswordChange false
+8 clean re-login         the browser reaches /admin/dashboard directly — the gate releases, it does not
+                         trap an account that has rotated
+console                  no error and no warning on any screen of the journey
+```
+
+What this does **not** cover, stated because the finding is closed on it: the gate is a client gate. The
+server keeps `requirePasswordChange` advisory by design — `SecurityConfig`'s `SELF_SERVICE` group admits
+`/auth/change-password`, `/users/me` and `/users/me/**` and nothing else is relaxed — so a caller holding a
+bootstrapped bearer token can still reach the API until it rotates. Making the flag authoritative would
+mean refusing every authenticated endpoint while it is set, which is a change to the tenancy contract in
+ADR-020 rather than to the SPA, and would break the six verification scripts and the e2e journey that
+authenticate with bootstrap passwords today. That trade is recorded as a decision, not as a pass.
+
+The same live run removed a defect **in the script itself** that this environment exposed: one `sqlv` call
+sat outside every `have_db` guard, so with no database handle it died under `set -u` on
+`${!PG_PASSWORD_ENV}` and reported a phantom product FAIL (`expected , got 6`) — the same failure mode the
+TOKEN_T guard exists to prevent. It now SKIPs like every other SQL-dependent check. That run's 28 SKIPs are
+all the SQL half (features 3, 6, 9 and 11): docker/colima is dead on this machine, so feature 11 stays
+UNPROVEN there, honestly, rather than passing with holes in it. The run used a local PostgreSQL 15 on
+loopback, a fresh disposable database migrated V1→V9 in one pass, and `ddl-auto=validate`.
+
 **Acceptance criteria.**
 1. DoD-1's scripted journey passes, twice, from an empty database.
 2. No list endpoint returns an unbounded collection: `grep -rc "ResponseEntity<List<" controller/` falls from
@@ -895,7 +1002,10 @@ for the year is refused by a constraint violation instead of replacing the timet
 3. Every list request round-trip carries `page`/`size`/`sort` and the server, not the browser, does the slicing
    (proven by a network-level assertion that the payload is bounded by `size`).
 4. Frontend: no page derives a count by downloading a collection.
-5. `npm run build` green, and the frontend test count > 0 (today: **0** Vitest tests).
+5. `npm run build` green, and the frontend test count > 0. **Met, measured 2026-11-02:** build green at
+   11,999 modules, and **9** Vitest tests across 2 files (`npm test`, 1.9 s). What it does not cover: the
+   suites guard two components — the route guard and the boundary — not the journey's screens, so a
+   regression inside a feature page is still caught only by `verify-mvp-e2e.sh`.
 
 ### Stage 5 — Verification at volume, and CI that refuses
 
