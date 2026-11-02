@@ -630,10 +630,26 @@ jobs:
   #      background, waited on through /actuator/health rather than a sleep.
   #   3. `scripts/seed/` applied so the two tenants, the platform account and the
   #      role holders the scripts log in as actually exist.
-  #   4. `GMS_REQUIRE_DB=1` (set below) so a missing database handle is a failure and not a
-  #      SKIP: these scripts report UNPROVEN rather than PASS, and a live job that tolerates
-  #      SKIP proves nothing. Each one also dies on `FATAL: no backend on $API`, so a job
-  #      wired this way cannot pass by doing nothing.
+  #   4. No script invents a pass when a dependency is missing, but only one of them reads
+  #      `GMS_REQUIRE_DB`, so that variable alone is not what makes the job honest — the
+  #      per-script guards are. Checked file by file on 2026-11-02:
+  #        - `verify-mvp-e2e.sh` is the only reader (`REQUIRE_DB=${GMS_REQUIRE_DB:-}`, :93)
+  #          and the only one that names a missing backend in its own words
+  #          (`FATAL: no backend on $API`, :267) or honours the switch
+  #          (`FATAL: GMS_REQUIRE_DB is set but the database half is unavailable`, :272);
+  #        - `verify-c1/c2/c3/c4/c7` die on `FATAL: no platform token` when the login call
+  #          does not answer, which is the same outcome reached by a different sentence;
+  #        - `verify-perf-50k.sh` treats the database as mandatory without being asked —
+  #          `FATAL: $DB_PASSWORD_ENV must be set` (:107) — and then refuses to time a
+  #          database whose row counts do not match the seed, so a job pointed at an empty
+  #          schema cannot produce a green line either way;
+  #        - `verify-security.sh` has no guard clause at all: every probe is a `record`
+  #          comparing an expected status to whatever curl got, so with no backend each
+  #          becomes a counted failure and `[[ $failures -eq 0 ]] || exit 1` ends the job.
+  #      `GMS_REQUIRE_DB=1` is set below because that is the documented local invocation for
+  #      the e2e suite; naming it here would be a lie about the other seven if the comment
+  #      claimed it was a convention. What is true — and enough — is that no step in this
+  #      job can pass by doing nothing.
   #   5. The secrets listed in the map below, created in Settings → Secrets and actions,
   #      with the script that reads each named next to it. They reach the process through
   #      `env:` only — never interpolated into a command, never echoed — which is what the
@@ -660,7 +676,13 @@ jobs:
       GMS_PG_CONTAINER: gms-postgres
       GMS_PG_USER: gms_user
       GMS_PG_PASSWORD_ENV: DB_PASSWORD
-      GMS_PERF_DB: gms_perf
+      # Not a free choice: `scripts/seed/perf_seed_50k.sql:92` raises
+      # `IF current_database() <> 'gms_perf_seed' THEN RAISE EXCEPTION`, and the harness's
+      # first section is `check "psql is talking to the perf database" "$PERF_DB"
+      # "$CURRENT_DB"` followed by `FATAL: refusing to measure database` (:143). Any other
+      # value here therefore dies on the load or on the clock — which is the point of the
+      # guard; the earlier `gms_perf` in this line was a name nothing in the repo produces.
+      GMS_PERF_DB: gms_perf_seed
       GMS_PERF_RUNS: '20'
       # Non-secret identifiers, defaulted by the scripts themselves; naming them here keeps
       # a run reproducible rather than dependent on whoever last edited a script.
@@ -725,11 +747,25 @@ jobs:
           fi
 
       - name: What this job still needs
+        # Reachable only by throwing `GMS_CI_LIVE_DB`, so the wording cannot say "not wired" —
+        # by the time this line runs, the owner has said it is. What is still true is the
+        # unmet half: the job declares no `services:` and boots nothing, so a step that gets
+        # here without a backend on GMS_BASE_URL would go on to report eight suite failures
+        # that are all one missing prerequisite. Naming it once, in its own words, and
+        # stopping is more honest than eight downstream FATALs.
         run: |
           set -euo pipefail
-          echo "Live tenancy suites are not wired: this job needs a services: PostgreSQL, a booted"
-          echo "backend, scripts/seed and the secrets named in the workflow comment above. Until then"
-          echo "C-1/C-2/C-3/C-4/C-7 are gated in CI by the arch tests only - declarations, not behaviour."
+          echo "This job declares no services: PostgreSQL and boots no backend; steps 1-3 of the"
+          echo "comment above are owner work that has not landed. Until it does, C-1/C-2/C-3/"
+          echo "C-4/C-7 are gated in CI by the arch tests only - declarations, not behaviour."
+          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+                 "$GMS_BASE_URL/actuator/health" || echo 000)
+          if [ "$code" != "200" ]; then
+            echo "FATAL: nothing answers GET $GMS_BASE_URL/actuator/health (got HTTP $code)."
+            echo "       Every suite below would fail for that one reason, not for a real defect."
+            exit 1
+          fi
+          echo "backend is up on $GMS_BASE_URL - proceeding to the suites"
 
       # One step per suite, each gated on the probe. `verify-perf-50k.sh` additionally needs the seed:
       # its own count assertion refuses to measure a half-loaded table, so running it before the seed
