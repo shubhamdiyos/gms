@@ -369,7 +369,10 @@ Spring profile** so Flyway builds the schema and `StartupSecurityValidator` has 
 `/actuator/health/liveness`, builds the bundle, runs the four tests, then stops the application and drops the
 database — including on a red run, because a gate that can only be run once per tag is a gate that gets its guard
 removed. It needs `curl docker java node npm openssl` on `PATH`, and refuses outright if something already answers on
-the web port: a suite driving a build this run did not make is the worst kind of green.
+the web port: a suite driving a build this run did not make is the worst kind of green. Two lines of the boot log are
+printed verbatim into the job output and the step summary — `Startup security validation passed (profiles: none).`
+and `SuperAdmin bootstrap completed successfully!` — because both were long only *checked*: the harness refused a run
+whose log lacked them, which is not the same as a reader being able to see they were there.
 
 To run the suite against a backend that is already up on `http://localhost:8080` with a platform account that may
 create schools:
@@ -415,13 +418,15 @@ around on the three journey tests.
 
 **Result policy, and what has actually been measured.** One worker, zero retries, Chromium only — the engine the
 portal's users have, one worker so each test may provision its own tenant against a shared database without two runs
-inventing the same school code, and no retries because **a red run is a finding, not a flake**. Measured locally on
-this machine twice: on 2026-11-02 against a jar booted by hand (`4 passed (16.0s)`), and on 2026-11-03 through the
-harness itself — `scripts/ci-playwright-e2e.sh`, `4 passed (19.5s)`, exit 0, 37 s from preflight to a dropped
-database, with the bundle built by that run's `vite build`. Both on PostgreSQL 15, both with the jar booted with no
-Spring profile. That is a local result and labelled as one. The CI gate `Playwright e2e`
-(`.github/workflows/ci.yml`) has been added to the workflow and **has not yet run on the platform**, so nobody should
-read it as a passing check until a run URL is recorded next to it.
+inventing the same school code, and no retries because **a red run is a finding, not a flake**. Measured on this
+machine three times — 2026-11-02 against a jar booted by hand, then twice through the harness itself — and once on
+the platform. The harness run that matters is the platform one: Actions run
+[`41503973978`](https://github.com/shubhamdiyos/gms/actions/runs/41503973978) executed
+`scripts/ci-playwright-e2e.sh` on an `ubuntu-latest` runner and printed `4 passed (18.3s)`, exit 0, against the
+per-run database `gms_e2e_r48` it created and dropped, with `Startup security validation passed (profiles: none).`
+in the uploaded boot log. The job `Playwright e2e` concluded `success` in **2m0s** and `Gate coverage` accepted it
+as one of the pipeline's eight owed gates, so it is a blocking check rather than a report. Local runs are labelled
+as local: the most recent, on 2026-11-03, is `4 passed (16.0s)` with a 9 s boot.
 
 **Where the evidence goes.** `gms_frontend/playwright-report/` is the HTML report (the config's own reporter, and the
 place a reader checks that the console guard actually ran). Failure traces and screenshots go to Playwright's output

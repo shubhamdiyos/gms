@@ -1733,6 +1733,18 @@ runner minute for a boot-and-suite job") is replaced by those numbers rather tha
 from "gone", and it finished a full 2100 s before the deadline it is armed with and 25 minutes before its own job
 timeout.
 
+**The same arithmetic, re-measured with the browser gate in the pipeline.** Run `41503973978` (PR #32, nine jobs
+across the three workflows): `Backend build and tests` 69 s, `Verify scripts syntax and presence` 6 s,
+`Infrastructure definitions` 24 s, `Frontend lint and build` 24 s, `Playwright e2e` 120 s, `Live tenancy suites`
+80 s, `Lint every workflow` 32 s, `Check trigger sets and permissions` 13 s, `Gate coverage` 198 s — **566
+runner-seconds over nine jobs = 9.4 runner-minutes per push, $0** on a public repository. So the browser gate cost
+**120 s**, of which 49.1 s is the harness doing its work and 63 s is runner setup; it did not lengthen the pipeline,
+because `Gate coverage` finished 17 minutes inside its 2100 s deadline with two booting gates running side by side
+rather than one. The honest comparison with the row above: eight jobs / 444 s → nine jobs / 566 s, and the 122 s
+added is the new job's own 120 s plus `Gate coverage` waiting 23 s longer for it, against 21 s the older jobs got
+faster.
+
+
 A read-only sweep of every script the job executes (all twelve, end to end) looked for the next `date -v` — `sed -i`,
 `grep -oP`, `stat -f`, `base64 -d`, padded `wc`, gawk-only `match()`, `find -printf`, the Homebrew-Postgres
 assumption — and found none: the only remaining host-dependent path is the `psql`-on-the-host branch in
@@ -1770,8 +1782,8 @@ moving after it.
 15 minutes, `needs: [backend, verification_scripts]` — and the sentence above is the reason it changes nothing:
 it runs **side by side** with `Live tenancy suites` behind the same 20-minute `backend`, so the critical path is
 still 20 + 15 and `DEADLINE_SECONDS` stays **2100**. The difference between the two 15-minute ceilings is what
-they rest on: `live-tenancy`'s is backed by a measured 82 s on a runner, `Playwright e2e`'s by a measured 16.0 s
-on a laptop and a job that has not run on the platform yet.
+they rest on: `live-tenancy`'s is backed by a measured 82 s on a runner, and `Playwright e2e`'s now is too — a
+measured **2m0s** job on run `41503973978`, of which 49.1 s is the harness itself.
 
 **Status, in the mandate's buckets.** *Verified:* the harness, the nine-step list, the ceiling policy, the two
 defect fixes, the five controls, the gate wiring in both enforcement lists — and now **the job on a GitHub runner**,
@@ -1852,11 +1864,13 @@ future change break it silently are named above.
 of PRD `J-01` ([PRODUCT_REQUIREMENTS.md §5](PRODUCT_REQUIREMENTS.md): an account is issued, the person signs in,
 rotates what it was handed, registers a pupil) into measurements taken **from inside a browser**, which is the
 only place a console error exists to be taken.
-**State:** the suite **ran and passed locally** — 4 tests, `4 passed (16.0s)`, Chromium at 1440x900, one worker,
-zero retries, against a jar booted with no profile; and on 2026-11-03 the **harness** that CI will execute ran
-end-to-end over it on the same machine — `scripts/ci-playwright-e2e.sh`, `4 passed (19.5s)`, 37 s from the first
-preflight line to a dropped database. Its CI gate is **written and has never run on the platform**:
-no runner-minute of `Playwright e2e` exists in any total in this file, and one product defect the browser surfaced
+**State:** the suite **ran and passed on the platform** — Actions run `41503973978`, job `Playwright e2e`,
+`4 passed (18.3s)`, exit 0, on an `ubuntu-latest` runner, 4 tests, Chromium at 1440x900, one worker, zero retries,
+against a jar booted with no profile and a per-run database the harness created and dropped. Locally it had already
+passed three times: 2026-11-02 against a hand-booted jar (`4 passed (16.0s)`), then twice through
+`scripts/ci-playwright-e2e.sh` — the sequence CI executes — at `4 passed (19.5s)` and `4 passed (16.0s)`. Its CI
+gate is **written and has run**, so `Playwright e2e` now contributes **120 s** of measured runner time to the
+per-push total in the paragraph above, and one product defect the browser surfaced
 (`SchoolServiceImpl`'s username/password mismatch) is recorded **open**, not closed.
 
 The reason this section is a measurement and not a re-telling of Stage 4's P2 walkthrough is that the walkthrough
@@ -1945,29 +1959,76 @@ them. And the uniqueness that forces the suffix is not a Java convention but DDL
 test in this repository currently fails because of it — which is exactly why it is written here instead of left in
 a trace.
 
-**CI wiring: written, and it has not run.** `scripts/ci-playwright-e2e.sh` boots the backend and runs the suite the
+**CI wiring: written, and it has run.** `scripts/ci-playwright-e2e.sh` boots the backend and runs the suite the
 way `scripts/ci-live-tenancy.sh` does — a script rather than workflow YAML, for the reason Stage 5 already gives:
 a laptop and the platform must execute the *same instructions*, or CI proves something no local run reproduces. The
 harness owns the boot, the wait on the anonymous liveness probe, the `npm run build`, the run and the teardown; it
 deliberately does not start `vite preview`, because `playwright.config.js`'s `webServer` owns that process and a
 second owner is where a gate and a laptop would disagree. On the platform side: `.github/workflows/ci.yml:853`
-gains the job `playwright_e2e` with display name `Playwright e2e`, `needs: [backend, verification_scripts]`,
+carries the job `playwright_e2e` with display name `Playwright e2e`, `needs: [backend, verification_scripts]`,
 `timeout-minutes: 15`, the same `postgres:15` service container `--name gms-postgres` the live-tenancy job uses and
 the `backend` job's jar artifact; `gate-coverage.yml:126` adds `"Playwright e2e"` to `GATES["ci.yml"]`, so `ci.yml`
 now contributes **6** gates and the pipeline **8** overall (validate-workflows.yml's two); and
 `validate-workflows.yml:231` adds `ci.yml|Playwright e2e` to the required-context pair list, so renaming the job
-dies at the structure guard instead of quietly removing a gate. **None of this has executed on the platform.** The
-job's 15-minute ceiling is the one number in the wiring that is not a guess: the harness was executed on this
-laptop on 2026-11-03 and the whole run — preflight, `CREATE DATABASE`, boot to liveness in 9 s, `vite build` in
-5.41 s, four tests in 19.5 s, `DROP DATABASE` — took **37 s of wall clock**, printed as `4 passed (19.5s)` with
-exit code 0. Most of what a runner adds to that is setup this machine had already paid for once (`npm ci`, a cold
-`postgres:15` pull, the ~130 MB chromium download), which is why fifteen minutes is fifteen times the measured
-work rather than a rounded guess. The harness's own first-execution defects are of the kind `ci-live-tenancy.sh`
-taught this repository to expect — the Linux-only `--with-deps`, the `date` that must be `%s` and not `%N`, the
-BSD-versus-GNU `sed` that has to avoid back-references — every one of them is a host-portability question a macOS
-run can only partially answer. The honest label
-for the whole paragraph is still *written*, not *tested* — in the mandate's buckets, the suite and its harness are
-`Verified` locally, the gate is `Implemented`.
+dies at the structure guard instead of quietly removing a gate.
+
+**The first platform execution: green, and it is the run this stage was waiting for.** Actions run
+[`41503973978`](https://github.com/shubhamdiyos/gms/actions/runs/41503973978) on PR #32, head `62aef13`, branch
+`test/playwright-e2e`, base `ci/live-tenancy-suites`, 2026-11-02. The job `Playwright e2e` concluded `success` in
+**2m0s** (18:49:20Z → 18:51:20Z) and every step in it passed. An excerpt of its stdout follows, with two things
+dropped and nothing else changed: the runner's `Playwright e2e<TAB>step<TAB>timestamp` column, and the
+`[chromium] › e2e/admin-journey.spec.js:<line>:1 ›` prefix on the four test lines. The preflight's jar/work-dir/log
+lines and the `vite build` chunk table are elided as uninteresting, not edited:
+
+```
+== preflight ==
+database    gms_e2e_r48 (per-run) via jdbc:postgresql://127.0.0.1:5432/gms_e2e_r48 as gms_user; created through docker exec gms-postgres
+== database ==
+created gms_e2e_r48 (owner gms_user); nothing else in this run may touch a database
+== boot ==
+pid 3749; waiting for http://localhost:8080/actuator/health/liveness (max 180s)
+up after 18s
+✓ built in 10.77s
+== suite ==
+Running 4 tests using 1 worker
+  ✓  1 … a provisioned administrator reaches its dashboard only after rotating the password it was issued (2.5s)
+  ✓  2 … the administrator registers a pupil through the dialog and the roll shows it (10.2s)
+  ✓  3 … a second school's administrator searches for the first school's pupil and finds nothing (3.2s)
+  ✓  4 … the API refuses a browser whose origin the deployment has not allowed (635ms)
+  4 passed (18.3s)
+== teardown ==
+application (pid 3749) stopped
+dropped gms_e2e_r48
+```
+
+The `backend.log` the job uploaded says what the boot itself did, which matters more than the suite's count:
+`Database: jdbc:postgresql://127.0.0.1:5432/gms_e2e_r48 (PostgreSQL 15.19)`, then
+`Successfully applied 9 migrations to schema "public", now at version v9 (execution time 00:00.616s)`, then
+`Startup security validation passed (profiles: none).` and `SuperAdmin bootstrap completed successfully!`. So the
+run proves the three things the wiring was designed to prove and could not prove on macOS: the harness executes
+under Linux and a real GitHub runner, the per-run `CREATE`/`DROP` pair works against the service container, and a
+boot that runs Flyway from V1 with `StartupSecurityValidator` enforced is a boot a real Chromium can drive. The
+harness's work — preflight to a dropped database — measured **49.1 s** (18:50:24.247 → 18:51:13.375); the job's 2m0s
+around it is checkout, the jar artifact, `setup-java`, `setup-node`, `npm ci` and the ~130 MB chromium install, all
+of which this laptop had already paid for once. **15 minutes is therefore no longer a guess with a 37-second
+sample behind it — it is 18 times a measured 49 s of harness work plus 63 s of measured runner setup.**
+
+Two defects in the wiring that only a platform run could settle, both found by reading the substitution against the guard rather than by a red job. First, the job
+as first written set `GMS_E2E_TAG: ci${{ github.run_id }}`, and this run's `run_id` is an 11-digit number, so the
+tag would have been 13 characters and the harness's own database-name guard (`^gms_e2e_[a-z0-9]{1,12}$`) would have
+exited `FATAL` on every CI run — a gate that cannot start. It is now `r${{ github.run_number }}`, which for this
+run spells `r48` and the database `gms_e2e_r48`: 12 characters, inside the guard, and *accepted* — the log line
+above is the measurement of that, not a reading of the regex. Second, the artifact step uploaded
+`gms_frontend/test-results`, a directory the suite never writes because `--output` points at the work dir; it would
+have uploaded an empty tree and reported success. The path is now the report directory plus
+`playwright-e2e-work`, which is what the log above came from.
+
+The job ran beside its five siblings on the same commit and all of them passed: `Backend build and tests` 1m9s,
+`Frontend lint and build` 24s, `Infrastructure definitions` 24s, `Verify scripts syntax and presence` 6s,
+`Live tenancy suites` 1m20s, and in the other workflow `Gate coverage` 3m18s, `Lint every workflow` 32s, `Check
+trigger sets and permissions` 13s. `Gate coverage` passing is the part with teeth: it is the guard that refuses a
+required check no workflow produces, and it accepted a pipeline of 8 gates including this one, so `Playwright e2e`
+is blocking rather than decorative.
 
 **The deadline arithmetic does not move, and that is a measured statement about the graph rather than luck.**
 `gate-coverage.yml:99` keeps `DEADLINE_SECONDS: 2100`, because the new gate runs **in parallel** with
@@ -1978,6 +2039,19 @@ below the 15 minutes the watcher already budgets for. What the parallel pair doe
 (`gate-coverage.yml:112`) accounts for — a failed upstream names three gates instead of one, and the pull request
 was already refused.
 
+**A third change this run motivated, in the harness rather than the wiring.** Reading the job log to write the
+transcript above produced an unpleasant finding about the harness's own evidence: it *refuses* a boot whose log has
+no `Startup security validation passed` line, and prints nothing when the line is there. So the mandate's
+"no browser-console errors on the core journey" sits next to a claim — *this was the hardened boot* — that a reader
+could only check by downloading an artifact and grepping it. The harness now echoes both lines verbatim into the job
+output and puts them in the step summary, which is the same reasoning `console-guard.fixture.js` already applies to
+the console transcript: a check whose passing result is invisible cannot be told apart from a check that never ran.
+Re-measured locally after the change — `4 passed (16.0s)`, exit 0, 9 s boot, `gms_e2e_1793645819` created and
+dropped — and the summary table now carries `| startup validation | Startup security validation passed (profiles:
+none). |`. The next platform run will show the two rows this commit adds; the run quoted above did not have them,
+which is why the boot log lines in this section are cited from the uploaded artifact rather than presented as job
+output.
+
 **What this browser does not cover, stated as plainly as what it does.** It is **one journey** — the administrator
 — out of the PRD's frozen MVP feature list; teacher, student and parent screens are not driven in a browser at all,
 so `J-02`…`J-05` remain proven at the layers that prove them and not at this one. The eleven live scripts under
@@ -1985,14 +2059,24 @@ so `J-02`…`J-05` remain proven at the layers that prove them and not at this o
 names as deliberately not run by CI — are unchanged and still carry the behavioural coverage: not one of the 626
 assertions the tenancy gate
 makes moved into these four tests, and none of them could — a CORS refusal, a routing decision and a console
-transcript are the whole of what is new here. The harness has since run here — `4 passed (19.5s)`, 37 s end to end —
-so the gap that remains is **the Linux half of it**, and it is a real gap rather than a formality: it was the Linux
-run of `ci-live-tenancy.sh` that found the `date -v` class of host-portability defects no laptop could produce, and
-`scripts/ci-playwright-e2e.sh` has not met a Linux runner yet. Its defence against that class is written into it:
-the tag clock is `date +%s` and never `%N` (`:82-85`), the `sed` that rewrites the JDBC URL is built without
-back-references (`:231-235`), and `--with-deps` is passed only under `Linux` (`:416-422`) — each one a line this
-repository has already seen a host disagree with. The run is **one database on one PostgreSQL major
-(15)**, one browser, one viewport, one machine, 16.0 s of wall clock with no concurrency in it — so it says nothing
+transcript are the whole of what is new here. **The Linux half has now run, and it paid for itself exactly the way
+`ci-live-tenancy.sh` taught this repository to expect.** The first platform execution of
+`scripts/ci-playwright-e2e.sh` did not need a portability defect to prove the point — it needed the harness's own
+guard, which a macOS run had already shown it obeying: `GMS_E2E_TAG: ci${{ github.run_id }}` spells a 13-character
+tag on a runner whose run ids are 11 digits, and the database-name guard refuses anything over 12. On a laptop the
+tag comes from `date +%s`, is always 10 characters, and the guard never bites; only a Linux run could produce a tag
+long enough to matter, and the wiring as first written produced one — caught by reading the guard against the
+substitution before the push rather than by a red run, so what the platform measured is the *fixed* spelling. Same
+class, second instance: the artifact step
+named `gms_frontend/test-results`, a directory that exists only when a laptop's hand run leaves traces in it, so CI
+would have uploaded an empty tree and called that evidence. Both were corrected before this run, and the run is the
+measurement that the corrections hold — `gms_e2e_r48` created, driven and dropped, and the report plus `backend.log` and
+the suite transcript uploaded from the work dir. What the harness's *defences* were written for is the remaining
+category: the tag clock is `date +%s` and never `%N` (`:82-85`), the `sed` that rewrites the JDBC URL is built
+without back-references (`:231-235`), and `--with-deps` is passed only under `Linux` (`:416-422`) — all three now
+executed on a Linux runner and none of three found wanting, which is a weaker claim than "portability is proven"
+and is the honest one. The run is **one database on one PostgreSQL major
+(15.19)**, one browser, one viewport, one machine, 18.3 s of suite wall clock with no concurrency in it — so it says nothing
 about `DoD-2`'s budgets and nothing about Firefox or Safari, and it does not touch `DoD-1`'s verdict: the journey is
 now *seen* in a browser for one role, while the criterion is the whole journey from an empty database, twice. The
 console claim is per-journey and opt-in by design (`console-guard.fixture.js:15-19`), which is why test 4 asserts
@@ -2079,12 +2163,14 @@ system, the remaining `DOC-*`).
 `scripts/ci-live-tenancy.sh`, measured at **626 assertions / 17 skips at ceiling / exit 0** on both the laptop and
 the runner (run `41485021174` red on two host-portability defects, run `41488389433` green with the job at 82 s),
 seen red by five local controls and once by the real platform, still awaiting the owner's review, and the
-integration-job split in criterion 5's wording. **A sixth `ci.yml` gate has been wired since, and it has not run:**
+integration-job split in criterion 5's wording. **A sixth `ci.yml` gate has been wired since, and it has run:**
 `Playwright e2e` boots the same jar against the same `postgres:15` sidecar and drives the admin journey in Chromium —
 **written** in `ci.yml`, `gate-coverage.yml`'s `GATES` and `validate-workflows.yml`'s required-context pair list, and
-**verified only locally**, at `4 passed (16.0s)`; the per-push job count this row carries (eight) and its 444
-runner-second total therefore stay as they are, because a job that has never executed spends no minutes. See *The
-browser measures it* at the end of this stage. | $0 — 906 runner-seconds (15.1 runner-minutes) for the two pipelines this branch has run, on a **public repository where Linux minutes are not billed** | No |
+**verified on the platform** at `4 passed (18.3s)` in a 120 s job on run `41503973978`; the per-push job count this
+row therefore goes to **nine** and its runner-second total to **566** (see the paragraph above), because a job that
+has executed spends minutes and this one spent them. See *The
+
+browser measures it* at the end of this stage. | $0 — **566 runner-seconds (9.4 runner-minutes)** for the push measured above, nine jobs across the three workflows, and this branch is the first to carry the browser gate in that total; the earlier figure for this line of work was 906 s for two pipelines. Either way **$0 billed**, because the repository is public and Linux minutes are not charged | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 
