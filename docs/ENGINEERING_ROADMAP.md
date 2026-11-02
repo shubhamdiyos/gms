@@ -1556,6 +1556,26 @@ to skip when it cannot reach a database. The gap between 113 and 121 is the nine
 local database costs 8 counted tests and a red build, which is the intended shape; it is now in `README.md`'s command
 table rather than left for the next person to rediscover.
 
+**The docs-only run this stage expected to measure did not happen, and the reason is a fact about GitHub rather than
+about this branch.** The plan was to let the two documentation commits push into PR #26 and read the `ci.yml owed:
+False` line off the meta check — the live confirmation that a diff no code can break still merges under *one* required
+context. Run `41456272793` (CI) and `41456272823` (Gate coverage) on `c5698bf` printed instead:
+
+```
+changed files: 58 | ci.yml owed: True | validate-workflows.yml owed: True | gates owed: 6 of 6
+ok   Backend build and tests: completed / success (run 125313629455)
+…
+```
+
+58 files, for a commit that changed three. A `pull_request` event evaluates `paths-ignore` against the **whole pull
+diff**, not the commit that was just pushed, so a documentation commit inside a pull request that also carries Java
+owes every gate the code-owning diff owes. Two consequences, both recorded rather than argued away: the `ci.yml owed:
+False` case is **still unmeasured on this programme** — it needs a pull request whose entire diff is documentation,
+which PR #15 was and which this branch is not — and the design argument for one required context does not change,
+because it never rested on this branch. It rests on PR #15's measured **zero runs** for a docs-only diff: if all six
+gates had been required, that pull would have been unmergeable. What `c5698bf` does prove is the cheaper half — six
+gates owed, all six returned `success`, and the meta check named each one's check-run id instead of assuming them.
+
 ### Stage 6 — Deployment preparation (Oracle enters)
 
 **Goal:** a deploy and a rollback each executed once, on owner-controlled infrastructure.
