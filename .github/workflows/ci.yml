@@ -426,19 +426,53 @@ jobs:
 
       - name: Frontend unit tests
         # The step this workflow used to run was `npm test -- --run` with continue-on-error, against a
-        # `package.json` that has no `test` script — measured 2026-11-02: the script set is
-        # dev/build/lint/preview. So it failed every run and the failure was discarded, which reads as
-        # a passing "Unit tests" check while nothing was tested. It now runs the suite if and when one
-        # exists and says plainly in the summary when it does not (Stage 4's criterion is a frontend
-        # test count above zero; today it is zero, and that fact belongs in the log, not in a downgrade).
+        # `package.json` that had no `test` script — measured 2026-11-02 when this was written: the
+        # script set was dev/build/lint/preview. So it failed every run and the failure was discarded,
+        # which reads as a passing "Unit tests" check while nothing was tested.
+        #
+        # It used to tolerate that absence and say so in the summary, because the tests had not been
+        # written yet. They have: `a20239c` on this branch added `"test": "vitest run"` and two suites,
+        # and Stage 4 criterion 5 now claims a frontend test count above zero as **met**. A criterion
+        # that is met has to be *held* met, so the absence of the script or of a test file is a red step
+        # from here on — the same reasoning that made this workflow refuse a `skipped` count above zero
+        # in the backend's discovery step. Deleting the suite was always going to be visible; it should
+        # not also be cheap.
+        #
+        # `--run` is kept, and it is not redundant: `test` is `vitest run` today, so the command would
+        # work without it, but a step that inherits whatever mode the script happens to declare can hang
+        # a runner for the whole job timeout. The flag makes non-watch a property of CI rather than of
+        # package.json.
+        #
+        # `--watchAll=false` was the argument that made this step red on PR #26 and it is gone: that is
+        # a Jest flag, and Vitest's parser refuses unknown options outright —
+        # `CACError: Unknown option \`--watchAll\`` — so the run died on its own command line before a
+        # single test executed. Worth recording because the defect was in the invocation, not in a test,
+        # and from outside the two look identical: a red gate either way. Measured after the change with
+        # the same command line, on node 24.22.0 / npm 11.19.1 / vitest 5.0.5: `Test Files 2 passed (2)`,
+        # `Tests 9 passed (9)`, exit 0. That is not this job's environment — `setup-node` pins 22 here —
+        # so the local run proves the flags parse and the suite passes, and only the CI run proves it on
+        # the shipped Node.
         run: |
           set -euo pipefail
-          if python3 -c 'import json,sys; sys.exit(0 if "test" in json.load(open("package.json")).get("scripts", {}) else 1)'; then
-            npm test -- --run --watchAll=false
-          else
-            echo "::notice::no test script in gms_frontend/package.json - zero frontend unit tests ran"
-            echo "frontend unit tests: NOT PRESENT (0 tests; Vitest/RTL arrive with M3)" >> "$GITHUB_STEP_SUMMARY"
-          fi
+          python3 - <<'PY'
+          import glob, json, os, sys
+
+          scripts = json.load(open("package.json")).get("scripts", {})
+          files = sorted(glob.glob("src/**/*.test.*", recursive=True))
+          if "test" not in scripts:
+              print("::error::gms_frontend/package.json declares no `test` script, so zero frontend "
+                    "unit tests can run. Stage 4 criterion 5 is a frontend test count above zero and "
+                    "Stage 5 recorded it as met at 9 tests — a step that notices this and passes is the "
+                    "green-while-untested shape this workflow was rewritten to refuse.")
+              sys.exit(1)
+          if not files:
+              print("::error::the `test` script is present but no `src/**/*.test.*` file is, so "
+                    "`npm test` would exit 0 having collected nothing")
+              sys.exit(1)
+          print(f"frontend unit tests: {scripts['test']} over {len(files)} file(s): "
+                f"{', '.join(os.path.basename(f) for f in files)}")
+          PY
+          npm test -- --run
 
       - name: Production build
         # The blocking step. Vite/Rollup resolves every import and every named export at build time,

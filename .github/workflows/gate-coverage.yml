@@ -196,8 +196,14 @@ jobs:
           started = time.time()
           latest = {}
           while True:
-              rows = sh(["gh", "api", f"repos/{repo}/commits/{sha}/check-runs",
-                         "--paginate", "--per-page", "100", "--jq",
+              # `per_page=100` is a query parameter, not a `gh api` flag — the first run of this step on
+              # PR #26 passed `--per-page 100` and died in six seconds on `unknown flag: --per-page`,
+              # which is worth recording because the guard's own refusal path worked: it exited non-zero
+              # and fast rather than reporting a verdict it had not computed. `--paginate` alone would be
+              # correct (9 check-runs today, one page), and 100 keeps the polling loop to one request per
+              # cycle as the head SHA accumulates more.
+              rows = sh(["gh", "api", f"repos/{repo}/commits/{sha}/check-runs?per_page=100",
+                         "--paginate", "--jq",
                          '.check_runs[] | [.id, .name, .status, (.conclusion // "")] | @tsv'])
               # Greatest check-run id wins: a re-run of the same job on the same head SHA creates a new
               # row, and the API's ordering is not a promise. An id that is not a positive integer means
