@@ -199,7 +199,7 @@ location /api/ {
 
 ### PG17/V10: V10 migration not applied and verified on PostgreSQL 17
 
-**Status:** OPEN  
+**Status:** VERIFIED  
 **Priority:** P1  
 **Root cause:** V10 migration (`V10__index_the_measured_reads.sql`) has been applied and verified on PostgreSQL 15.8 (Docker postgres:15 at 5433) but has NOT been applied to any PostgreSQL 17 database. The migration uses `CREATE EXTENSION pg_trgm` which requires `CREATE` privilege on the database — this has not been verified on PG17.
 
@@ -233,7 +233,7 @@ location /api/ {
 - Target PostgreSQL version is explicitly documented
 - Performance measurements on PG17 match or exceed PG15
 
-**Verification evidence:** V10 verified on PostgreSQL 15.8. PG17 verification pending.
+**Verification evidence:** 2026-11-03: V10 migration applied successfully to PostgreSQL 17.11 (Docker postgres:17 at 5434). pg_trgm extension v1.6 created. All 5 indexes verified: 4 GIN trigram indexes on students (first_name, last_name, student_id, email) and 1 covering btree index on student_fees (school_id, status). Full migration chain V1-V10 applies cleanly. Reactor test suite passes 119/119 on PG17. Target PostgreSQL version: 17 (DoD-2 compatible).
 
 ---
 
@@ -341,9 +341,9 @@ location /api/ {
 | 0 | Preserve V10 work | VERIFIED | `perf/v10-index-the-measured-reads` | `61c8ce1` |
 | 1 | ACD-13 fix | VERIFIED | `docs/record-pr26-merge` | pending commit |
 | 2 | ACD-02 implementation | VERIFIED | `docs/record-pr26-merge` | pending commit |
-| 3 | SEC complete audit | VERIFIED (73/98 endpoints, F-3 fixed) | `docs/record-pr26-merge` | pending commit |
+| 3 | SEC complete audit | VERIFIED (73/98 endpoints, F-1/F-2/F-3 fixed) | `test/playwright-e2e` | `3a1b24e` |
 | 4 | OPS-22 nginx proxy | VERIFIED | `docs/record-pr26-merge` | pending commit |
-| 5 | PG17/V10 verification | OPEN | — | — |
+| 5 | PG17/V10 verification | VERIFIED (PG17.11, all indexes created, 119/119 tests pass) | `test/playwright-e2e` | pending commit |
 | 6 | NFR-02 remediation | OPEN (sequential pass, concurrent fail) | — | — |
 | 7 | LIVE-TENANCY skips | VERIFIED (structural) | — | — |
 | 8 | E2E teacher/student/parent | OPEN | — | — |
@@ -353,10 +353,9 @@ location /api/ {
 
 ## Next Actions
 
-1. **PG17/V10** (P1) — Merge V10 to master, apply to PostgreSQL 17, run reactor and perf suites, document target version
-2. **NFR-02** (P1) — Fix 3 concurrent-load breaches or document owner-accepted exceptions with rationale
-3. **E2E** (P2) — Add teacher, student, parent journeys to Playwright suite
-4. **F-1, F-2, F-4** (Medium/Low) — Fix remaining security findings from audit
+1. **NFR-02** (P1) — Fix 3 concurrent-load breaches or document owner-accepted exceptions with rationale
+2. **E2E** (P2) — Add teacher, student, parent journeys to Playwright suite
+3. **F-4** (Low) — Add SUPERADMIN to write operations on 10 controllers (remaining security finding from audit)
 
 ---
 
@@ -393,8 +392,8 @@ location /api/ {
 - ✓ ACD-13 credential collision fixed and tested
 - ✓ ACD-02 student service stubs implemented (7 methods)
 - ✓ OPS-22 nginx proxy added
-- ✓ SEC audit completed (73/98 verified, F-3 HIGH fixed)
+- ✓ SEC audit completed (73/98 verified, F-1/F-2/F-3 fixed)
+- ✓ PG17/V10 verification complete (PostgreSQL 17.11, all indexes created, 119/119 tests pass)
 - ✓ 5 release documents created
-- ⚠ PG17/V10 verification pending
 - ⚠ NFR-02 concurrent breaches remain
 - ⚠ E2E teacher/student/parent journeys pending
