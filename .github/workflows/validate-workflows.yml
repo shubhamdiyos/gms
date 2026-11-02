@@ -45,9 +45,10 @@ jobs:
     # detect the deletion or rename of that same workflow — a removed file runs no
     # checks, and GitHub reports a workflow that never ran as the *absence* of a check,
     # which is exactly how INF-23 went unnoticed. These steps catch a careless edit, not
-    # a deliberate removal. The real answer is INF-10: name these jobs as required status
-    # checks, so a missing run blocks the merge. Until that is configured, an absent
-    # "Workflow validation" check is suspicious, not a pass.
+    # a deliberate removal. INF-10 is closed one level up, by `gate-coverage.yml`: a job in a third
+    # workflow that declares no path filter, runs on every pull request, and goes red when a gate these
+    # two files owe is missing or failed. An absent "Workflow validation" check is therefore no longer
+    # merely suspicious — on any diff that touches code or `.github/**`, the coverage gate refuses it.
     steps:
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
@@ -180,12 +181,44 @@ jobs:
           fi
           exit "$missing"
 
+      - name: The coverage gate has no path filter of its own
+        # `gate-coverage.yml` is the check branch protection actually names, and the only one in this
+        # repository that must run on every pull request without exception: it is what turns "a workflow
+        # was deleted and reported nothing" into a red check instead of an absent one. A `paths:` or
+        # `paths-ignore:` added to its `pull_request` trigger would make the required context missable —
+        # the exact INF-23 failure the file exists to close — and the degradation would be invisible in
+        # the file itself. So the absence of a filter is the invariant, asserted.
+        #
+        # Control run 2026-11-02: inserting `paths-ignore: [ 'docs/**' ]` under that trigger turns this
+        # step red naming the file; removing the file turns it red on the same line, because the check
+        # that can see a missing workflow cannot itself be quietly missing.
+        run: |
+          set -euo pipefail
+          f=.github/workflows/gate-coverage.yml
+          if [ ! -f "$f" ]; then
+            echo "::error::$f is gone. It is the required status check, so a branch protection rule that names a context nothing reports blocks every merge — delete it deliberately or restore it"
+            exit 1
+          fi
+          block=$(awk '/^  pull_request:/{on=1;next} on&&/^[^ \t]/{on=0} on' "$f")
+          if printf '%s\n' "$block" | grep -qE '^[[:space:]]*(paths|paths-ignore):'; then
+            echo "::error::$f filters its own pull_request trigger — the required context becomes missable, which is the failure it was written to detect"
+            exit 1
+          fi
+          echo "ok   $f triggers on pull_request with no path filter"
+
       - name: Every required context still exists under the same name
         # A required status check is matched by its job display name, so a rename is not cosmetic: it
         # silently un-gates the rule the owner configured, and with `strict` on it stalls every PR
         # instead. The names below are the contract; the step that enforces it fails the run when the
         # contract is broken, and the job-name guard below catches the looser version of the same
         # mistake (a name built from an expression, or a job that has no name at all).
+        #
+        # What branch protection requires is `Gate coverage` alone, measured 2026-11-02: naming all six
+        # gates as required contexts would stall every pull request the two path filters legitimately
+        # skip, because a required check that never runs is indistinguishable from one that has not
+        # started yet. The six names stay here because the coverage gate reads them out of these two
+        # files and refuses a PR whose owed gate is missing or red — the enforcement moved from the
+        # protection rule into the check, which is the only place that can see both.
         run: |
           set -euo pipefail
           missing=0
@@ -195,7 +228,8 @@ jobs:
             "ci.yml|Verify scripts syntax and presence" \
             "ci.yml|Infrastructure definitions" \
             "validate-workflows.yml|Lint every workflow" \
-            "validate-workflows.yml|Check trigger sets and permissions"; do
+            "validate-workflows.yml|Check trigger sets and permissions" \
+            "gate-coverage.yml|Gate coverage"; do
             file="${pair%%|*}"
             context="${pair#*|}"
             if ! grep -qxF "    name: ${context}" ".github/workflows/${file}"; then
@@ -380,7 +414,15 @@ jobs:
         # only place a workflow can start spending money, so this refuses every other label — a
         # self-hosted runner, a larger macOS/Windows image, a `runs-on: [self-hosted, …]` array —
         # before a PR can bill for it. Measured 2026-11-02: every job in both workflows is
-        # `ubuntu-latest`, and no job, step or service declares a container.
+        # `ubuntu-latest`.
+        #
+        # `image:` is authorised in one position only: inside a job's `services:` block. The owner took
+        # that decision on 2026-11-02 because SqlStatementCountPerRequestTest counts the SQL statements
+        # one HTTP request prepares, which needs a real PostgreSQL — a guard that runs on exactly one
+        # laptop is a guard nothing can regress against. The sidecar is not a billable line: it shares
+        # the ubuntu-latest job, and this repository is public, where GitHub-hosted Linux minutes are not
+        # charged. A job-level `container:` stays refused, because replacing the runner image changes
+        # what every step may assume and is a different precedent from a sidecar.
         run: |
           set -euo pipefail
           bad=0
@@ -392,9 +434,51 @@ jobs:
             echo "::error::$hit — only ubuntu-latest is authorised; a different label is a cost decision the owner has not taken"
             bad=1
           done < <(grep -rnE '^[[:space:]]*runs-on:' .github/workflows/ || true)
-          if hits=$(grep -rnE '^[[:space:]]*([a-z-]+-)?image:[[:space:]]|^[[:space:]]*container:' .github/workflows/); then
+          # The scanner reports on stdout and always exits 0; the shell decides. A Python that exits 1 on
+          # findings would make `if hits=$(…)` fire on the *clean* tree and stay silent on the dirty one,
+          # which is the exact inversion this step had on 2026-11-02 when the grep it replaced was swapped
+          # for a script — caught by running the extracted step against the real tree, not by reading it.
+          # A non-zero exit here can therefore only mean the scanner itself broke, and that is a red step.
+          if ! hits=$(python3 - <<'PY'
+          import glob, re
+
+          mapping = re.compile(r'^(\s*)([A-Za-z_][\w.-]*):(\s|$)')
+          image = re.compile(r'^(\s*)(?:[a-z-]+-)?image:\s')
+          container = re.compile(r'^(\s*)container:')
+          findings = []
+
+          for path in sorted(glob.glob('.github/workflows/*.yml') + glob.glob('.github/workflows/*.yaml')):
+              lines = open(path, encoding='utf-8').read().splitlines()
+              stack = []            # (indent, key) of the enclosing mappings
+              for number, line in enumerate(lines, start=1):
+                  text = line.split('#')[0].rstrip() if '#' in line else line
+                  if not text.strip():
+                      continue
+                  indent = len(text) - len(text.lstrip())
+                  while stack and stack[-1][0] >= indent:
+                      stack.pop()
+                  # Both refusals are tested BEFORE the line is pushed as a mapping key. A mapping line is
+                  # `key:` followed by a space, and `image: postgres:15` is exactly that shape — so the
+                  # first version of this scanner pushed it and `continue`d, and a stray image or container
+                  # with a value on its line passed the gate it existed to fail.
+                  if container.match(text):
+                      findings.append(f'{path}:{number}: a job-level container replaces the runner image')
+                  elif image.match(text) and 'services' not in [key for _, key in stack]:
+                      findings.append(f'{path}:{number}: an image outside a job services: block')
+                  found = mapping.match(text)
+                  if found:
+                      stack.append((indent, found.group(2)))
+
+          for finding in findings:
+              print(finding)
+          PY
+          ); then
+            echo "::error::the runner-image scanner could not complete, so it has no verdict to report"
+            exit 1
+          fi
+          if [ -n "$hits" ]; then
             printf '%s\n' "$hits"
-            echo "::error::a container or service image in a workflow is the new-precedent step the owner reserved for themselves"
+            echo "::error::a container, or an image outside a job's services: block, is a precedent the owner has not authorised"
             bad=1
           fi
           exit "$bad"

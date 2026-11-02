@@ -1,0 +1,262 @@
+name: Gate coverage
+
+# The answer to INF-10, and the reason the other two workflows' path filters stopped being a
+# correctness problem. A required status check is only a gate while its workflow runs: a job that
+# never starts reports nothing, and GitHub renders "nothing" as *absent*, not as failed. Two shapes
+# reach that state — the owner's deliberate `paths-ignore` filter (a docs PR legitimately starts no
+# build), and the one this file exists to catch: a workflow deleted, renamed, or left without a
+# `pull_request` trigger, which is precisely how INF-23 shipped a green PR with zero runs and stayed
+# unnoticed across four commits.
+#
+# So this is the one workflow in the repository that declares NO path filter, on purpose: it runs on
+# every pull request, always, and it computes the verdict the platform cannot — which of the six gate
+# jobs this commit was obliged to run, and whether each of them actually said success. It is a
+# measurement of the other files, not a build: no toolchain, no database, ~20 seconds of
+# `ubuntu-latest` of its own and then the wait for the gates it is watching.
+#
+# What it refuses, in order of the mistake it was written for:
+#   1. a gate job that is owed by this diff and never reports — deleted job, renamed display name,
+#      workflow file gone, trigger removed, or runner starvation past the deadline;
+#   2. a gate job that reports anything other than `success`;
+#   3. a gate job whose newest run cannot be identified — two runs of the same job on the same head
+#      SHA are normal after a re-run, so the one with the greatest check-run id wins and a row whose
+#      id does not parse is a red step rather than a guess;
+#   4. its own inputs — no repository, no head SHA, no changed-file list, no check runs reachable, no
+#      workflow file: each one means there is no verdict, and an unverdictable guard exits non-zero
+#      instead of printing nothing and going green.
+# A gate that is NOT owed — `docs/**` only, so `ci.yml` is filtered by design — is reported as
+# filtered and is not a failure. That distinction is the whole product: the same absence that is
+# policy on one PR is a broken pipeline on the next, and only the diff can tell them apart.
+#
+# Zero-unexpected-cost note: seven jobs across three workflows, all on `ubuntu-latest`, pinned actions
+# only, no services here and no artifacts. See `Every job runs on a GitHub-hosted ubuntu-latest` in
+# `validate-workflows.yml`, which refuses anything else before a PR can bill for it.
+
+on:
+  pull_request:
+
+# `checks: read` is the one scope this job needs beyond `contents: read`: it reads other workflows'
+# check runs through the API and writes nothing. No `write` anywhere, and `gh` authenticates with the
+# job's own ephemeral token through `GH_TOKEN` — an env mapping, never interpolated into a command.
+permissions:
+  contents: read
+  checks: read
+
+concurrency:
+  group: gate-coverage-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  coverage:
+    name: Gate coverage
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          # Only the three workflow files are read. The source tree is irrelevant: this job inspects
+          # which gates must exist, not what the pull request changed in the code.
+          sparse-checkout: |
+            .github/workflows/ci.yml
+            .github/workflows/validate-workflows.yml
+            .github/workflows/gate-coverage.yml
+          sparse-checkout-cone-mode: false
+
+      - name: Every gate this commit owes has run, and said success
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          REPOSITORY: ${{ github.repository }}
+          # The wait, stated rather than buried in the loop: the slowest gate is `Backend build and
+          # tests`, measured at 42 runner-seconds before the Postgres sidecar landed and expected to
+          # reach roughly three minutes with the image pull and the Flyway chain. 1500s is that figure
+          # with room for a queued runner; past it, "absent" and "slow" are indistinguishable, and the
+          # honest answer is red.
+          DEADLINE_SECONDS: '1500'
+          POLL_SECONDS: '20'
+        run: |
+          set -euo pipefail
+          python3 - <<'PY'
+          import os, re, subprocess, sys, time
+
+          # The contract. A required status check is matched by its job display name, so a rename is a
+          # missing gate; `validate-workflows.yml`'s "Every required context still exists under the same
+          # name" step holds this same list, and this step additionally refuses a name that no longer
+          # appears in the file that claims to produce it.
+          GATES = {
+              "ci.yml": [
+                  "Backend build and tests",
+                  "Frontend lint and build",
+                  "Verify scripts syntax and presence",
+                  "Infrastructure definitions",
+              ],
+              "validate-workflows.yml": [
+                  "Lint every workflow",
+                  "Check trigger sets and permissions",
+              ],
+          }
+          OWED_ALL = GATES["ci.yml"] + GATES["validate-workflows.yml"]
+
+          # `ci.yml`'s paths-ignore set, in the order that file lists them, and
+          # `validate-workflows.yml`'s `paths:` set. GitHub's path filters treat `*` as not crossing `/`
+          # and `**` as crossing it, so fnmatch would wrongly ignore `infra/oci/README.md` under `*.md` —
+          # PR #20 is the commit that proved that mistake, and the guard is here so it cannot come back
+          # through this file.
+          CI_IGNORE = ["docs/**", "*.md", "infra/**/*.md", "gms_backend/memory-bank/**", ".github/**"]
+          VW_PATHS = [".github/**"]
+
+
+          def to_regex(pattern):
+              """GitHub `paths:` glob semantics: `**` spans `/`, `*` and `?` do not."""
+              out, i = [], 0
+              while i < len(pattern):
+                  if pattern.startswith("**/", i):
+                      out.append("(?:[^/]*/)*")          # `**/` also matches zero directories
+                      i += 3
+                  elif pattern.startswith("**", i):
+                      out.append(".*")
+                      i += 2
+                  elif pattern[i] == "*":
+                      out.append("[^/]*")
+                      i += 1
+                  elif pattern[i] == "?":
+                      out.append("[^/]")
+                      i += 1
+                  else:
+                      out.append(re.escape(pattern[i]))
+                      i += 1
+              return re.compile("^" + "".join(out) + "$")
+
+
+          CI_IGNORE_RE = [to_regex(p) for p in CI_IGNORE]
+          VW_PATHS_RE = [to_regex(p) for p in VW_PATHS]
+
+          def refuse(message):
+              # Every early exit in this step is a red step. A coverage guard that cannot reach a verdict
+              # and prints nothing is the very absence it exists to detect.
+              print(f"::error::{message}")
+              sys.exit(1)
+
+
+          def sh(args):
+              try:
+                  proc = subprocess.run(args, capture_output=True, text=True)
+              except OSError as exc:
+                  # `gh` missing or unexecutable is not a verdict either; the runner image is a
+                  # dependency of this step like the two workflow files are.
+                  refuse(f"could not run {args[0]!r}: {exc} — this step reads the API through gh, and "
+                         f"without it there is no verdict to report")
+              if proc.returncode != 0:
+                  refuse(f"{' '.join(args[:3])} … exited {proc.returncode}: "
+                         f"{(proc.stderr or proc.stdout).strip()}")
+              return proc.stdout
+
+
+          repo = os.environ.get("REPOSITORY", "")
+          pr = os.environ.get("PR_NUMBER", "")
+          sha = os.environ.get("HEAD_SHA", "")
+          if not (repo and pr and sha):
+              refuse("REPOSITORY / PR_NUMBER / HEAD_SHA are not all set — this step only ever runs on a "
+                     "pull_request event, so a missing one means the trigger or the env map changed")
+
+          for gate_file, names in GATES.items():
+              path = os.path.join(".github", "workflows", gate_file)
+              if not os.path.exists(path):
+                  refuse(f"{path} is gone. {len(names)} gate job(s) were owed from it: "
+                         f"{', '.join(names)} — a deleted workflow is not a passed check")
+              with open(path, encoding="utf-8") as fh:
+                  text = fh.read()
+              for name in names:
+                  if f"    name: {name}\n" not in text and f"    name: '{name}'\n" not in text:
+                      refuse(f"{path} no longer declares the job name '{name}'. A required status check "
+                             f"is matched by that string, so the gate is now unnameable, not passing")
+
+          files = [line for line in sh(["gh", "api", f"repos/{repo}/pulls/{pr}/files",
+                                        "--paginate", "--jq", ".[].filename"]).splitlines()
+                   if line.strip()]
+          if not files:
+              print("::warning::the pull request reports zero changed files, so no gate is owed and "
+                    "this run can only certify that both path rules were honoured")
+
+          ci_demanded = any(not any(r.match(f) for r in CI_IGNORE_RE) for f in files)
+          vw_demanded = any(any(r.match(f) for r in VW_PATHS_RE) for f in files)
+          demanded = (GATES["ci.yml"] if ci_demanded else []) + \
+                     (GATES["validate-workflows.yml"] if vw_demanded else [])
+          filtered = [n for n in OWED_ALL if n not in demanded]
+
+          print(f"changed files: {len(files)} | ci.yml owed: {ci_demanded} | "
+                f"validate-workflows.yml owed: {vw_demanded} | gates owed: {len(demanded)} of "
+                f"{len(OWED_ALL)}")
+          for f in files[:40]:
+              print(f"  diff  {f}")
+
+          deadline = float(os.environ.get("DEADLINE_SECONDS", "1500"))
+          poll = float(os.environ.get("POLL_SECONDS", "20"))
+          started = time.time()
+          latest = {}
+          while True:
+              rows = sh(["gh", "api", f"repos/{repo}/commits/{sha}/check-runs",
+                         "--paginate", "--per-page", "100", "--jq",
+                         '.check_runs[] | [.id, .name, .status, (.conclusion // "")] | @tsv'])
+              # Greatest check-run id wins: a re-run of the same job on the same head SHA creates a new
+              # row, and the API's ordering is not a promise. An id that is not a positive integer means
+              # the query shape changed, and this step refuses to rank runs it cannot order.
+              latest = {}
+              for line in rows.splitlines():
+                  if not line.strip():
+                      continue
+                  parts = line.split("\t")
+                  if len(parts) != 4:
+                      refuse(f"a check-run row did not parse: {line!r}")
+                  run_id, name, status, conclusion = parts
+                  if name not in OWED_ALL:
+                      continue
+                  if not run_id.isdigit() or int(run_id) <= 0:
+                      refuse(f"check run id {run_id!r} for {name} is not a positive integer, so the "
+                             f"newest run of that job cannot be identified")
+                  current = latest.get(name)
+                  if current is None or int(run_id) > int(current[0]):
+                      latest[name] = (run_id, status, conclusion)
+
+              pending = [n for n in demanded if n not in latest or not latest[n][2]]
+              if not pending:
+                  break
+              if time.time() - started > deadline:
+                  for name in pending:
+                      status = latest.get(name, ("0", "never reported", ""))[1]
+                      print(f"late   {name}: status={status}")
+                  refuse(f"{len(pending)} owed gate(s) had no verdict within {int(deadline)}s. An absent "
+                         f"check is not a passing one: either the job no longer exists, its workflow "
+                         f"lost its pull_request trigger, or the runner never picked it up")
+              print(f"waiting on {len(pending)} gate(s): {', '.join(pending)}")
+              time.sleep(poll)
+
+          bad, rows_out = [], []
+          for name in demanded:
+              run_id, status, conclusion = latest[name]
+              rows_out.append((name, status, conclusion, run_id))
+              if conclusion != "success":
+                  bad.append(name)
+
+          summary = os.environ.get("GITHUB_STEP_SUMMARY")
+          if summary:
+              with open(summary, "a", encoding="utf-8") as fh:
+                  fh.write("| gate job | status | conclusion | check run |\n|---|---|---|---|\n")
+                  for name, status, conclusion, run_id in rows_out:
+                      fh.write(f"| {name} | {status} | {conclusion or '-'} | `{run_id}` |\n")
+                  for name in filtered:
+                      fh.write(f"| {name} | filtered | not owed by this diff | - |\n")
+
+          for name, status, conclusion, run_id in rows_out:
+              print(f"{'ok  ' if conclusion == 'success' else 'FAIL'} {name}: {status} / "
+                    f"{conclusion or 'no conclusion'} (run {run_id})")
+          for name in filtered:
+              print(f"skip {name}: its workflow is path-filtered for this diff, which is policy, not a "
+                    f"pass")
+
+          if bad:
+              refuse(f"{len(bad)} owed gate(s) did not pass: {', '.join(bad)}")
+          print(f"gate coverage: {len(demanded)} owed gate(s) reported success, {len(filtered)} "
+                 f"legitimately filtered by the path rules")
+          PY

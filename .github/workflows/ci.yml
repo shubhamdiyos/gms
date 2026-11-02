@@ -18,9 +18,10 @@ name: CI
 # enumerates the whole test tree against surefire's discovery patterns, including the `*IT` shape that
 # needs a failsafe binding `pom.xml` does not yet have.
 # Behaviour over HTTP (a second tenant reading the first one's rows and getting 403) is NOT proved
-# here: no job in this repository has ever started a database, `Verification scripts syntax and presence`
-# checks the live suites statically only, and `live-tenancy` at the bottom is the disabled stub that
-# records what that job needs and the secret names it reads.
+# here: the `postgres` service above exists for one statement-count guard and boots an empty cluster,
+# no job here starts the application, `Verification scripts syntax and presence` checks the live suites
+# statically only, and `live-tenancy` at the bottom is the disabled stub that records what that job
+# needs and the secret names it reads.
 
 on:
   pull_request:
@@ -52,6 +53,42 @@ jobs:
     name: Backend build and tests
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    services:
+      # `SqlStatementCountPerRequestTest` counts the SQL statements one real HTTP request prepares, so
+      # the build now has a PostgreSQL to prepare them against. The owner took this decision on
+      # 2026-11-02; the reasoning that made it cheap is in the guard step of `validate-workflows.yml`
+      # that authorises `image:` inside a `services:` block and nowhere else.
+      #
+      # Loopback only: `ports:` publishes to the runner's own 127.0.0.1, to nothing outside the job, and
+      # the container dies with the job. The database it holds is created by the test itself
+      # (`gms_n_plus_1`), seeded with rows invented by the same test, and never contains real data.
+      # `postgres:15` is the major the operator's own server runs (Homebrew 15.8 on the machine that
+      # produced every Stage 5 number); `DoD-2` names 17, and moving the major is an owner decision, not
+      # a quiet edit here.
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: postgres
+          POSTGRES_USER: ci_user
+          # Not a credential. `ci_user` owns an ephemeral database that exists for the length of this job
+          # on a loopback interface inside a throwaway VM, and nothing in the repository can reach it
+          # afterwards. A reference to a repository secret here would be worse, not better: an unset secret
+          # expands to the empty string and PostgreSQL 15 refuses to initialise without a password.
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --health-cmd "pg_isready -U ci_user -d postgres"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      # The test's own override knobs. `GMS_N1_DB_URL` is the JDBC URL it must be allowed to create and
+      # use, and the class refuses any URL whose database path is not exactly `gms_n_plus_1` — so this
+      # line cannot point the suite at a database it does not own.
+      GMS_N1_DB_URL: jdbc:postgresql://127.0.0.1:5432/gms_n_plus_1
+      DB_USERNAME: ci_user
+      DB_PASSWORD: ci_password
     defaults:
       run:
         working-directory: gms_backend
@@ -606,42 +643,49 @@ jobs:
   # Why it is off: `verify-c1-tenancy.sh`, `verify-c2-tenant-context.sh`,
   # `verify-c3-scoped-reads.sh`, `verify-c4-owned-reads.sh`, `verify-c7-tenant-key.sh`,
   # `verify-mvp-e2e.sh`, `verify-perf-50k.sh` and `verify-security.sh` all drive a RUNNING
-  # backend over HTTP with real JWTs and, for their SQL halves, a PostgreSQL reachable
-  # through docker. Not one job in this repository starts a database — re-checked
-  # 2026-11-02: across `.github/workflows/` the only occurrences of `services:`, `postgres`
-  # and `docker` are prose in these comments, and every job runs on `runs-on: ubuntu-latest`
-  # with no container, no image and no cloud call (`Workflow validation` now refuses any
-  # other runner label outright). The owner's rule is that a `services:` Postgres is allowed
-  # only where a workflow here already does it, so there is no precedent to follow and CI
-  # stays at unit, arch and static checks. Three of those scripts
-  # (`verify-c4-owned-reads.sh`, `verify-mvp-e2e.sh`, `verify-perf-50k.sh`) were still
-  # untracked when this stub was written — all three are tracked now, and the probe below
-  # stays because a job that dies on a missing file fails for the wrong reason, which is
-  # the one outcome a gate must never produce.
+  # backend over HTTP with real JWTs and, for their SQL halves, a PostgreSQL reachable through `psql`.
+  # Since 2026-11-02 the `backend` job above starts a PostgreSQL, so "there is no precedent in this
+  # file" is no longer the reason — the reason is that these eight suites need the *application*
+  # booted against that database and twelve credentials supplied to it, and none of those credentials
+  # exists as a repository secret. Re-checked 2026-11-02 with `gh api
+  # repos/shubhamdiyos/gms/actions/secrets`: the response holds three entries — `EC2_HOST`,
+  # `EC2_SSH_KEY`, `EC2_USER` — all for the instance retired by ADR-015/017, and `actions/variables`
+  # returns `[]`. Not one of the twelve names the map below reads is among them. Every job still runs
+  # on `runs-on: ubuntu-latest` with no job-level `container:` and no cloud call
+  # (`Workflow validation` refuses any other runner label outright and authorises `image:` in a
+  # `services:` block only). Until the secrets land, C-1/C-2/C-3/C-4/C-7 are gated in CI by the arch
+  # tests and by `SqlStatementCountPerRequestTest` — declarations and one statement count, not
+  # behaviour over HTTP. Three of the eight scripts (`verify-c4-owned-reads.sh`,
+  # `verify-mvp-e2e.sh`, `verify-perf-50k.sh`) were still untracked when this stub was written — all
+  # three are tracked now, and the probe below stays because a job that dies on a missing file fails
+  # for the wrong reason, which is the one outcome a gate must never produce.
   #
   # What turning this on takes, in order:
   #   0. `GMS_CI_LIVE_DB` set to `enabled` under Settings → Secrets and variables → Actions
   #      → Repository variables. That comparison is the job's whole `if:`, so this is the
   #      only switch, and it is the owner's to throw rather than a line in a diff.
-  #   1. `services:` with `postgres:16` (loopback on the runner, published to nothing)
-  #      plus the `gms_user` role and `gms_db` from docker-compose.yml, applied by
-  #      Flyway V1..V7 during the application's own boot — never by ddl-auto.
+  #   1. `services:` with a PostgreSQL (loopback on the runner, published to nothing) plus the
+  #      `gms_user` role and `gms_db` from docker-compose.yml, applied by Flyway V1..V7 during the
+  #      application's own boot — never by ddl-auto. `backend` above now declares exactly such a
+  #      sidecar (`postgres:15`, published to `127.0.0.1`), so the shape exists to copy; it carries a
+  #      different role and database because that job only ever hands the suite `gms_n_plus_1`.
   #   2. `mvn -B clean spring-boot:run -Dspring-boot.run.profiles=dev` in the
   #      background, waited on through /actuator/health rather than a sleep.
   #   3. `scripts/seed/` applied so the two tenants, the platform account and the
   #      role holders the scripts log in as actually exist.
   #   4. No script invents a pass when a dependency is missing, but only one of them reads
   #      `GMS_REQUIRE_DB`, so that variable alone is not what makes the job honest — the
-  #      per-script guards are. Checked file by file on 2026-11-02:
-  #        - `verify-mvp-e2e.sh` is the only reader (`REQUIRE_DB=${GMS_REQUIRE_DB:-}`, :93)
+  #      per-script guards are. Checked file by file on 2026-11-02, line numbers re-read the same day
+  #      after both scripts grew a TCP transport and shifted their own offsets:
+  #        - `verify-mvp-e2e.sh` is the only reader (`REQUIRE_DB=${GMS_REQUIRE_DB:-}`, :96)
   #          and the only one that names a missing backend in its own words
-  #          (`FATAL: no backend on $API`, :267) or honours the switch
-  #          (`FATAL: GMS_REQUIRE_DB is set but the database half is unavailable`, :272);
+  #          (`FATAL: no backend on $API`, :281) or honours the switch
+  #          (`FATAL: GMS_REQUIRE_DB is set but the database half is unavailable`, :286);
   #        - `verify-c1/c2/c3/c4/c7` die on `FATAL: no platform token` when the login call
   #          does not answer, which is the same outcome reached by a different sentence;
   #        - `verify-perf-50k.sh` treats the database as mandatory without being asked —
-  #          `FATAL: $DB_PASSWORD_ENV must be set` (:107) — and then refuses to time a
-  #          database whose row counts do not match the seed, so a job pointed at an empty
+  #          `FATAL: $PG_PASSWORD_ENV must be set` (:143) — and then refuses to time a
+  #          database whose row counts do not match the seed (:192), so a job pointed at an empty
   #          schema cannot produce a green line either way;
   #        - `verify-security.sh` has no guard clause at all: every probe is a `record`
   #          comparing an expected status to whatever curl got, so with no backend each
@@ -659,12 +703,12 @@ jobs:
   #      so `DB_PASSWORD` itself is the secret; `SECURITY_JWT_SECRET` and the
   #      `APP_SUPERADMIN_*` pair are the application's own boot requirements
   #      (`application.properties:48,55-59`), not suite inventions.
-  #   6. A decision the owner has not taken: `ADR-019` budgets Testcontainers in CI as
-  #      the zero-cost route for database-backed tests. A `services:` Postgres is the
-  #      same engine at the same price, but it is a new precedent and therefore an
-  #      owner call, not a silent one made in a workflow diff.
+  #   6. `ADR-019` budgets Testcontainers as CI's zero-cost route for database-backed tests. The
+  #      `services:` shape it was weighed against is no longer hypothetical: the owner took that
+  #      decision on 2026-11-02 and `backend` above runs one, so what remains here is steps 2, 3 and 5
+  #      — boot the application and supply the credentials — not a precedent to set.
   live-tenancy:
-    name: 'Live tenancy suites (disabled: no database exists in CI yet)'
+    name: 'Live tenancy suites (disabled: CI boots no backend and holds none of the credentials below)'
     if: ${{ vars.GMS_CI_LIVE_DB == 'enabled' }}
     needs: [backend, verification_scripts]
     runs-on: ubuntu-latest
@@ -755,9 +799,11 @@ jobs:
         # stopping is more honest than eight downstream FATALs.
         run: |
           set -euo pipefail
-          echo "This job declares no services: PostgreSQL and boots no backend; steps 1-3 of the"
-          echo "comment above are owner work that has not landed. Until it does, C-1/C-2/C-3/"
-          echo "C-4/C-7 are gated in CI by the arch tests only - declarations, not behaviour."
+          echo "This job declares no services: PostgreSQL and boots no backend; steps 2, 3 and 5 of"
+          echo "the comment above are owner work that has not landed (step 1 landed on 2026-11-02 in"
+          echo "the backend job, as a sidecar for SqlStatementCountPerRequestTest). Until it does,"
+          echo "C-1/C-2/C-3/C-4/C-7 are gated in CI by the arch tests and one statement count -"
+          echo "declarations and a query shape, not behaviour over HTTP."
           code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
                  "$GMS_BASE_URL/actuator/health" || echo 000)
           if [ "$code" != "200" ]; then
