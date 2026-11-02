@@ -12,7 +12,9 @@ import { ROUTES, ROLES } from './constants';
 // Components
 import ProtectedRoute from './components/common/ProtectedRoute';
 import Unauthorized from './components/common/Unauthorized';
+import ErrorBoundary from './components/common/ErrorBoundary';
 import Login from './features/auth/Login';
+import ChangePasswordPage from './features/auth/ChangePasswordPage';
 import DashboardLayout from './components/layout/DashboardLayout';
 
 // Dashboard Pages
@@ -83,7 +85,7 @@ const theme = createTheme({
 
 // Main App Router Component
 const AppRouter = () => {
-  const { isAuthenticated, getUserRole, loading } = useAuth();
+  const { isAuthenticated, getUserRole, loading, user } = useAuth();
   const userRole = getUserRole();
 
   // Show loading while checking authentication
@@ -114,6 +116,9 @@ const AppRouter = () => {
   const getDefaultRoute = () => {
     if (!isAuthenticated || forceLogin) return ROUTES.LOGIN;
 
+    // An account that must change its password goes nowhere else until it has.
+    if (user?.requirePasswordChange) return ROUTES.CHANGE_PASSWORD;
+
     return getDashboardRoute(userRole) || ROUTES.LOGIN;
   };
 
@@ -129,6 +134,17 @@ const AppRouter = () => {
             <Login />
           )
         } 
+      />
+
+      {/* The rotation every account may perform, outside the dashboard chrome: an account
+          that must change its password has no business in the navigation yet. */}
+      <Route
+        path={ROUTES.CHANGE_PASSWORD}
+        element={
+          <ProtectedRoute>
+            <ChangePasswordPage />
+          </ProtectedRoute>
+        }
       />
 
       {/* Protected Routes with Layout */}
@@ -384,7 +400,10 @@ function App() {
       <ThemeProvider theme={theme}>
         <CssBaseline />
         <Router future={{ v7_startTransition: true, v7_relativeSplatPath: true }}>
-          <AppRouter />
+          {/* A throw during render must cost one screen, not the whole portal. */}
+          <ErrorBoundary>
+            <AppRouter />
+          </ErrorBoundary>
         </Router>
         <ToastContainer
           position="top-right"

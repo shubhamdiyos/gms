@@ -43,6 +43,9 @@ export const ROLE_LABELS = {
 export const ROUTES = {
   LOGIN: '/login',
   UNAUTHORIZED: '/unauthorized',
+  // Every role may reach this one: it is the step PRD J-01 names ("admin logs in and
+  // changes them") and the step a provisioned account is held at until it has.
+  CHANGE_PASSWORD: '/change-password',
   SUPERADMIN: {
     DASHBOARD: '/superadmin/dashboard',
     SCHOOLS: '/superadmin/schools',
