@@ -835,6 +835,16 @@ Work: a seeded dataset generator (`scripts/seed-performance.sql` + a JUnit **ign
 jobs; the remaining Infra-M2 items (required status checks with `enforce_admins`, dependabot, secret scan, image
 scan, SBOM, artefact retention, CODEOWNERS).
 
+**A finding that sharpens criterion 4.** On 2026-11-02 the workflow whose stated job is to notice a missing run was
+itself missing one: a literal unclosed expression opener inside a shell `case` pattern made `validate-workflows.yml`
+unparsable to GitHub, and an unparsable workflow reports *absence*, not failure. The pull request stayed green while
+both of its checks were gone, and the same commit's `if: false` on the live-tenancy job — the finding actionlint would
+have raised had actionlint ever run — went unreported for four commits with it. The file now refuses an unclosed
+opener, the disabled job switches on a repository variable instead of a constant, and §19 of
+[audit/BASELINE_STATUS.md](audit/BASELINE_STATUS.md) carries the measurements and the two controls. The conclusion
+belongs in this stage's wording: **criterion 4 is not satisfiable by adding checks, only by requiring them**, because
+the failure mode a green build cannot see is the one where a check was never there.
+
 **Acceptance criteria.**
 1. `DoD-2` budgets met, with `EXPLAIN (ANALYZE, BUFFERS)` output and latency percentiles recorded per query —
    p50/p95/p99 for the ten hottest endpoints, not a single average.
@@ -918,7 +928,7 @@ system, the remaining `DOC-*`).
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
 | 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed on the branch** — `C-1`…`C-7` plus `C-8` are implemented and measured on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). | $0 | No |
 | 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features | $0 | No |
-| 5 Volume + CI | 50k budgets met, checks required and enforced | Open | $0 (runner minutes only) | No |
+| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **one instrument repaired**: `validate-workflows.yml` was unparsable to GitHub from `01b7638` to `ea6aad5` and therefore emitted no checks at all while the PR stayed green; both of its jobs now run green, the file refuses an unclosed expression opener, and the disabled live-tenancy job switches on a repository variable (§19). The 50k measurement is still owed, and criterion 4 still needs required status checks — which only the owner can set | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 

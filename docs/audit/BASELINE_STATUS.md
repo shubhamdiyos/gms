@@ -1384,3 +1384,70 @@ is `0 failed`; the two skips are the harness's own omission, recorded rather tha
   appears in no build.
 * No credential appears in this document, in `V7__record_who_wrote_the_pupil.sql`, in any `scripts/verify-*.sh`, or
   anywhere else in the repository.
+
+
+## 19. The gate that was built to notice a missing check was itself the missing check (2026-11-02, `ea6aad5` + `0471c66`)
+
+**What happened.** `validate-workflows.yml` exists because of `INF-23`: a commit that edited `.github/**` started no
+run anywhere, because `ci.yml` ignores exactly that path set. Its own header says the honest limitation — a workflow
+that cannot run reports *absence*, not failure, and absence is what a green pull request accepts. On 2026-11-02 that
+limitation was reproduced by the file itself, from inside the step that polices job names.
+
+`01b7638` added a guard refusing a job whose display name is built from an expression. It matched with a shell case
+pattern written whole — `*'${{'*)` — and GitHub read that as a real expression with no end. The parser rejected the
+file, so the workflow never ran, so **both of its jobs disappeared from the check list**, and the pull request that
+contained them kept reporting green.
+
+**How it was measured, not assumed.** `gh run list` showed `Workflow validation` `failure` for the pushes at `5c07ac6`
+and `b0434dd`. `gh run view … --json jobs` returned `jobs: []`, `--log-failed` returned `log not found`, and the run's
+`name` was `.github/workflows/validate-workflows.yml` rather than its declared display name — GitHub's naming for a file
+it could not read. `check-runs` for `b0434dd` listed six entries: `ci.yml`'s four contracted jobs, the
+deliberately-skipped live-tenancy job, and Vercel. Neither `Lint every workflow` nor `Check trigger sets and
+permissions` appeared. The run page's own annotation: `Invalid workflow file: .github/workflows/validate-workflows.yml
+(Line: 163, Col: 14): The expression is not closed.` Line 163 is the `run:` block of the job-name step; the opener is
+on its line 177.
+
+**The second finding, from the gate's first real run.** Once the file parsed, `actionlint` ran for the first time in
+this branch's history and reported one issue: `ci.yml:644:9: constant expression "false" in condition. remove the if:
+section [if-cond]` — the `live-tenancy` job's `if: false`, also added by `01b7638`. Two defects from the same commit,
+each invisible to the other's checker: the lint job could not report the `ci.yml` finding because the file hosting the
+lint job could not be parsed.
+
+**The fixes.** (1) The case pattern assembles the two characters at runtime with
+`opener=$(printf '%s%s%s' '$' '{' '{')`, so the sequence never appears whole in the file. (2) A new step,
+*Every GitHub expression is closed*, scans every workflow in `.github/workflows/` and refuses an opener with no closer
+after it — the class of mistake, not this instance of it. (3) `live-tenancy`'s condition is now
+`vars.GMS_CI_LIVE_DB == 'enabled'`: non-constant, so the linter accepts it, and a repository variable the owner sets in
+Settings rather than a line in a workflow diff. The job still reports **skipped** on every run, which is the point of
+it, and step 0 of the block that explains how to turn it on names the switch. Two sentences in the same comment block
+had also gone stale on this branch and are corrected: the three scripts it called untracked are tracked now, and the
+baseline is `V1..V7`.
+
+**Controls, because a guard that has never been seen red is decoration.** The three steps below were run against
+throwaway copies of `.github/workflows/`, since deleted.
+
+* Re-inserting the literal opener makes the new balance step exit 1 and name `validate-workflows.yml:225` — the
+  injected line. With the fix in place the same step prints `expression balance: 2 workflow file(s) scanned, every
+  opener closed`.
+* A synthetic workflow with three job shapes — a display name built from an expression, a plain literal name, and no
+  name at all — makes the rewritten job-name step print exactly two errors, on the first and the third. The `printf`
+  rewrite therefore kept the guard's teeth rather than neutering it, which is the specific way this fix could have
+  been worse than the bug.
+* Every `run:` block of the `structure` job was extracted from the YAML with a parser and executed under
+  `bash --noprofile --norc`, the way the runner does. 15 of 15 pass on this tree (`no statement-level exit-status
+  swallow in 1199 workflow lines`, `arch contract: 6 rule class(es) in the tree, all named in ci.yml`, `script
+  references: 8 invocation(s), every target present or presence-gated`). This is what caught the first attempt at the
+  fix, which read `opener = "$" + "{" + "{"`: valid Python, and in bash a command named `opener`. CI would have
+  reported that as a failing step; the local harness reported it before the push.
+
+**The live result.** Run `41391320709` on `0471c66`: `Lint every workflow` success, `Check trigger sets and
+permissions` success. `check-runs` on that commit now lists seven checks plus the skipped live-tenancy job — the two
+validation contexts present for the first time on this branch.
+
+**What this does not close.** (1) `INF-10` is still the only real answer and it is still the owner's to configure:
+until both jobs are named as required status checks, an absent check costs nothing to ignore, and a **deleted**
+`validate-workflows.yml` produces no error at all — no balance step runs, because no step runs. (2) The new guard
+models one class of parse failure. A duplicate YAML key, an unknown top-level property or a malformed `jobs:` section
+still reaches GitHub's parser before any local check and would produce the same silent absence. (3) The scripts still
+have no local equivalent of `actionlint`'s shellcheck pass, so a bash-only mistake in a `run:` block is caught here
+only because this session chose to execute the extracted steps. All three belong with `OPS-21`.
