@@ -816,7 +816,8 @@ separate event table, which is not MVP scope.
 **Goal:** the frozen MVP in [PRODUCT_REQUIREMENTS.md §8](PRODUCT_REQUIREMENTS.md) works end-to-end for two tenants
 at once.
 **State:** Partly proved on the branch — the 11 frozen-MVP features are all live-proved (11 of 11, 294 assertions, 0
-failures, 0 skips on a fresh V1→V7 database with two tenants); the stage's own gate, *bounded* lists, is open.
+failures, 0 skips on a fresh V1→V7 database with two tenants); the post-#25 **P1 batch** is closed on 34 negative
+checks (PR #26, `90f3979`); the stage's own gate, *bounded* lists, is open.
 **Depends on:** Stage 3.
 
 Work: server-side pagination, sorting and filtering for every list resource (debt #10, `BKL-03`, `FE-08`); response
@@ -824,6 +825,67 @@ envelope and one error contract (`BKL-01`, `BKL-07`); DTOs instead of entity lea
 generated from code, not typed; the frontend contract repair (`FE-01…08`); dashboards computed from aggregate
 queries rather than `array.length`; the ACD/FIN stubs the MVP actually needs (`ACD-01…04`, `ACD-07`, `ACD-10`,
 `ACD-12`, `FIN-04`, `FIN-06`, and `SubjectServiceImpl.getById:102`).
+
+**The post-#25 P1 batch, closed on a refusal rather than on a test existing.** After PR #25 merged, this
+document's own §8 rule — *the proof wins* — was applied to the merged tree: an independent read of the
+post-#25 code produced a findings register, and the P1 batch is what closed the critical half of it.
+Branch `feat/post-pr25-hardening`, PR #26, commit `90f3979`.
+
+| finding | what it was | what it is now |
+|---|---|---|
+| AUTHZ-00 | `ParentController`'s administrative routes (`GET /parents`, `POST /parents/create`) matched no `SecurityConfig` matcher and so fell through to the catch-all `denyAll()`: a school administrator received **403 on its own surface**, and a create that slipped past the URL guard **500'd** on an unvalidated payload | an explicit matcher plus a role guard — the surface answers its own handlers |
+| AUTHZ-01 | the classroom timetable's URL rule refused `STUDENT` while its handler granted `STUDENT` | the two now agree |
+| TENW-02 | a school administrator in the platform's own system school could `PUT` or `DELETE` the platform owner — reset its password, rename the account, delete it | `UserServiceImpl` refuses to modify a `SUPERADMIN` account from inside a school scope |
+| ISO-01/03 | `ParentStudentService` let a school administrator re-point any parent–student pair, including a family belonging to another school, so a family could be moved between tenants | assignment and removal are checked against the family's own school |
+| ISO-02 | a parent could read another family's students inside the same school | the family and the caller's own account are both checked |
+| AUD-01…05 | five endpoints deleted rows outright — subjects, classrooms, teacher assignments, attendance, users — destroying the audit history a school needs | subjects and classrooms archive their `status`; users are disabled (`enabled = false`, `user_status = '0'`) rather than removed, because the row is the author every `created_by`/`updated_by` column points at; attendance and teacher assignment gain a `deleted` column (**V9**) and are flagged rather than removed |
+| DATA-01…05 | eleven foreign keys pointed at a referenced row's **bare id**, so the pair `(referenced id, school)` was never checked together: a student could point at another school's classroom while keeping its own `school_id`, and every same-school guarantee downstream of the column was vacuous | **V8** closes all eleven as composite keys, and refuses to migrate a database that already holds a straddled row, naming every table it refuses |
+
+**What was measured.** On a fresh database migrated **V1→V9** in one pass, the backend booted against it
+with `ddl-auto=validate` and every number below was read off that run:
+
+```
+scripts/verify-p1-hardening.sh   34 passed, 0 failed, 0 skipped
+verify-mvp-e2e.sh                294 passed, 0 failed, 11 of 11 features PROVED
+verify-c4-owned-reads.sh         118 passed, 0 failed, 17 skipped
+mvn package                      106 tests, 0 failures, BUILD SUCCESS
+```
+
+All 34 are *negative* checks: each asserts that an unauthorized or cross-tenant request is **refused** —
+`403`/`401`/`400` on the HTTP surface, or a named database constraint
+(`fk_students_classroom_same_school`, `fk_users_employee_same_school`) rejecting a straddled row inside a
+transaction the probe rolls back. The suite was red eleven times before it was green, and every one of
+those eleven was a defect in the probe *or in the product* — never a loosened expectation. Two of them
+were product defects, and they are worth naming:
+
+- `Attendance` and `TeacherAssignment` are `@Version`d, and Hibernate binds **id and version** to a
+  `@SQLDelete` statement. The single-placeholder form the entities carried failed at delete time with
+  `column index is out of range: 2`. Both statements now carry the version predicate and bump it.
+- `financial_transactions.invoice_id` was written into **V8** as a twelfth composite key, and the column
+  does not exist — it survives only on a pre-Flyway scratch database, and the entity has no invoice field.
+  The migration refused to apply with `column c.invoice_id does not exist`. V8 was corrected *before it
+  was recorded anywhere*: a migration that has never been applied is edited in place, one that has been
+  applied is not.
+
+**What this batch does not cover, stated as plainly as what it does.** The 34 checks exercise one school
+against another over HTTP and one straddled row at a time. They do not exercise a **transitive** straddle
+(a school-B classroom reached through a school-B student who is attached to a school-A family), concurrent
+writes racing to straddle the same row, or the read path of every archived resource: the suite proves an
+archived row *survives* and keeps its creation stamp, not that every query which reads it *excludes* it.
+The `users` delete path is exercised only as "the row survives". And the live-tenancy CI job remains
+**disabled**, because no CI job starts a database — the suite that would run it needs `services: postgres`,
+which is the owner decision Stage 5 names and this stage does not make for them.
+
+**A defect the P1 fixture surfaced, recorded rather than quietly fixed.**
+`TimetableServiceImpl.createOrUpdateTimetable` calls `timetable.getSlots().clear()` and then re-adds the
+submitted slots. Because the insert is ordered before the delete flush, that collides with
+`uq_slot_day_period` (a classroom, day and period may hold only one slot) and with the
+`attendances → timetable_slots` foreign key `fktnfhr6lp9sjxuxckwfi5xutku` (a slot that still carries an
+attendance row cannot be dropped). The fixture worked around both — it picks a classroom with no timetable
+and a date with no attendance row — and the workaround lives in the fixture, not in the product. The
+product behaviour is therefore **open**: `POST /timetables` against a classroom that already has a timetable
+for the year is refused by a constraint violation instead of replacing the timetable. It belongs to Stage
+4's list-and-write work, and it is recorded here so it is not lost.
 
 **Acceptance criteria.**
 1. DoD-1's scripted journey passes, twice, from an empty database.
@@ -1057,22 +1119,27 @@ system, the remaining `DOC-*`).
 | Stage | Gate | State | Cost | Oracle |
 |---|---|---|---|---|
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
-| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Executed, unmerged** — `231bdab` / PR #25, CI green, `BLOCKED` on `REVIEW_REQUIRED`. Criteria 2, 3, 6, 7, 8 met on the branch; 1 open; 4, 5 moved to Stage 5 | $0 | No |
-| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed on the branch** — `C-1`…`C-7` plus `C-8` are implemented and measured on `feat/stage2-flyway-baseline`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). | $0 | No |
-| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features | $0 | No |
+| 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Merged** — `ef00eb9` / PR #25. Criteria 2, 3, 6, 7, 8 met; 1 open; 4, 5 moved to Stage 5. `master` now carries V1…V7 and `ddl-auto=validate` | $0 | No |
+| 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**: V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
+| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
 | 5 Volume + CI | 50k budgets met, checks required and enforced | Open — criteria **1, 2 and 5 are measured on the branch** (`ed869d2`/`0e13290`): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), five EXPLAIN plans through this project's own indexes, and CI at **99 runner-seconds** per push against a 2–4-minute estimate. Criterion 3 is built and proven to discriminate but **not landed** — no CI job starts a database (§19, owner decision). Criterion 4 still needs required status checks — which only the owner can set | $0 (runner minutes only) | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 
-**Reading this honestly:** Stage 1 is `Closed` on `master`. Stage 2 is not — its migrations, its verification
-script and its Compose repair exist only on `feat/stage2-flyway-baseline` (`231bdab`, PR #25), and the branch cannot
-merge itself: `master` requires one approving review with last-push approval, the founder cannot approve their own PR,
-and the delivery objective's *"Never bypass branch protection using admin overrides"* rules out the way the last three
-branches got in — which is why PR #25 is green on every check and still `BLOCKED`. So as of this writing `master`
-still describes a project with **0 migrations and `ddl-auto=update` in dev**, and that is the state a fresh clone
-receives. Stage 3 is now executed on that same branch — `C-1` through `C-8` are implemented and measured — and part of
-Stage 4 is proved by the same run: the branch applies **seven** migrations, boots a schema that refuses a NULL tenant
-and stamps who wrote each row, and answers 294 live assertions across two tenants without a single failure, while
-`master` applies none and lets Hibernate guess — so the longer PR #25 sits unreviewed, the further the
-merged description of this project drifts from the verified one. Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the proof. If the two
-disagree, the proof wins and this table is wrong.
+**Reading this honestly:** Stage 1 is `Closed` on `master`. Stage 2 **is now merged** — PR #25 landed as
+`ef00eb9`, so `master` carries migrations **V1…V7** and `ddl-auto=validate`, and a fresh clone receives a schema
+that refuses a NULL tenant and stamps who wrote each row instead of letting Hibernate guess. The earlier state
+recorded here — *"PR #25 is green on every check and still `BLOCKED`"*, *"master still describes a project with 0
+migrations"* — was true when it was written and is now **false**; it is corrected rather than deleted, because a
+status board that quietly drops a stale claim is a status board nobody can audit.
+
+Stage 3 (`C-1`…`C-8`) is implemented and measured on `feat/stage2-flyway-baseline`, which is now `master`, and
+Stage 4 is proved by the same run: **seven** migrations apply, the schema refuses a NULL tenant and stamps the
+author, and **294** live assertions across two tenants pass without a single failure. The **P1 batch** (PR #26,
+`90f3979`) is the first change to that merged tree since: it adds **V8** (eleven composite foreign keys) and
+**V9** (soft-delete columns for attendance and teacher assignment), closes four ownership gaps with **34** negative
+checks, and is green on every CI check — but it is **not merged**, so `master` still applies seven migrations and not
+nine.
+
+Nothing above Stage 1 is `Closed`. The roadmap is the plan; the evidence sections of `BASELINE_STATUS.md` are the
+proof. If the two disagree, the proof wins and this table is wrong.
