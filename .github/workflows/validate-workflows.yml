@@ -214,9 +214,9 @@ jobs:
         # mistake (a name built from an expression, or a job that has no name at all).
         #
         # What branch protection requires is `Gate coverage` alone, measured 2026-11-02: naming all
-        # seven gates as required contexts would stall every pull request the two path filters
+        # eight gates as required contexts would stall every pull request the two path filters
         # legitimately skip, because a required check that never runs is indistinguishable from one
-        # that has not started yet. The seven names stay here because the coverage gate reads them out
+        # that has not started yet. The eight names stay here because the coverage gate reads them out
         # of these two files and refuses a PR whose owed gate is missing or red — the enforcement
         # moved from the protection rule into the check, which is the only place that can see both.
         run: |
@@ -228,6 +228,7 @@ jobs:
             "ci.yml|Verify scripts syntax and presence" \
             "ci.yml|Infrastructure definitions" \
             "ci.yml|Live tenancy suites" \
+            "ci.yml|Playwright e2e" \
             "validate-workflows.yml|Lint every workflow" \
             "validate-workflows.yml|Check trigger sets and permissions" \
             "gate-coverage.yml|Gate coverage"; do

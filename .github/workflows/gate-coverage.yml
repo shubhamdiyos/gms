@@ -9,7 +9,7 @@ name: Gate coverage
 # unnoticed across four commits.
 #
 # So this is the one workflow in the repository that declares NO path filter, on purpose: it runs on
-# every pull request, always, and it computes the verdict the platform cannot — which of the seven gate
+# every pull request, always, and it computes the verdict the platform cannot — which of the eight gate
 # jobs this commit was obliged to run, and whether each of them actually said success. It is a
 # measurement of the other files, not a build: no toolchain, no database, seconds of arithmetic and
 # then the wait for the gates it is watching — 175 s of job wall clock on run 41488389300, which is
@@ -29,7 +29,7 @@ name: Gate coverage
 # filtered and is not a failure. That distinction is the whole product: the same absence that is
 # policy on one PR is a broken pipeline on the next, and only the diff can tell them apart.
 #
-# Zero-unexpected-cost note: eight jobs across three workflows — five in `ci.yml`, two in
+# Zero-unexpected-cost note: nine jobs across three workflows — six in `ci.yml`, two in
 # `validate-workflows.yml`, and this one — all on `ubuntu-latest`, pinned actions only, no cloud
 # services and no artifacts beyond the build outputs. See `Every job runs on a GitHub-hosted
 # ubuntu-latest` in `validate-workflows.yml`, which refuses anything else before a PR can bill for it.
@@ -84,12 +84,17 @@ jobs:
           # onward the slowest gate is the boot: the backend job plus checkout, artifact download,
           # setup-java, a `postgres:15` pull, the Flyway chain and nine suites. That is no longer an
           # estimate — run 41488389433 measured the whole job at 82 s, boot included, which makes it the
-          # slowest of the seven gates by four seconds and puts the true critical path at 78 + 82 = 160 s.
-          # 2100 s is therefore thirteen times what this branch has actually needed, and it is exactly the
-          # sum of the two ceilings that stand behind it — `backend` at 20 min, `live-tenancy` at 15 — so a
-          # gate that finishes inside its own timeout always finishes inside this wait; and the job's own
-          # `timeout-minutes` is 40, five minutes past that sum, so the watcher gets to print a
-          # verdict rather than being killed mid-poll. Past the deadline, "absent" and "slow" are
+          # slowest gate on that run by four seconds and puts the measured critical path at 78 + 82 = 160 s.
+          # 2100 s is therefore thirteen times what this branch has actually needed, and it is the sum of
+          # the two *sequential* ceilings behind the gates, not a count of the gates — `backend` at 20 min,
+          # plus the 15 min of the longest gate that needs it. `live-tenancy` and `playwright_e2e` are both
+          # such a gate: each declares `needs: [backend, verification_scripts]` and a 15-minute ceiling, and
+          # they run side by side, so their parallelism holds the critical path at 20 + 15 = 35 min instead
+          # of stacking a fourth ceiling onto the wait. (`verification_scripts`, the other dependency, is
+          # capped at 5 min and is front-run by backend's 20, so it never sets the path.) A gate that
+          # finishes inside its own timeout therefore always finishes inside this wait; and this job's own
+          # `timeout-minutes` is 40, five minutes past that critical-path sum, so the watcher gets to print
+          # a verdict rather than being killed mid-poll. Past the deadline, "absent" and "slow" are
           # indistinguishable, and the honest answer is red.
           DEADLINE_SECONDS: '2100'
           POLL_SECONDS: '20'
@@ -104,11 +109,13 @@ jobs:
           # appears in the file that claims to produce it.
           #
           # `Live tenancy suites` joined this list on 2026-11-02, replacing the disabled stub that had
-          # the same job id. It is the only gate with `needs:` on another gate, and GitHub gives a job
-          # skipped by a failed dependency the conclusion `skipped` — measured on run 41462933910, where
-          # the old stub reported `skipped` in the same second its upstream finished. So a red backend
-          # makes this step name two gates instead of one. That is not a false positive: the pull
-          # request is already refused, and the second line says which live behaviour never got asked.
+          # the same job id. It and `Playwright e2e` are now the two gates with `needs:` on another gate —
+          # both declare `needs: [backend, verification_scripts]` and a 15-minute ceiling, and they run
+          # side by side — and GitHub gives a job skipped by a failed dependency the conclusion `skipped`:
+          # measured on run 41462933910, where the old stub reported `skipped` in the same second its
+          # upstream finished. So a red backend makes this step name three gates instead of one — backend
+          # plus the two `skipped` downstream gates. That is not a false positive: the pull request is
+          # already refused, and the two extra lines say which live and browser behaviour never got asked.
           GATES = {
               "ci.yml": [
                   "Backend build and tests",
@@ -116,6 +123,7 @@ jobs:
                   "Verify scripts syntax and presence",
                   "Infrastructure definitions",
                   "Live tenancy suites",
+                  "Playwright e2e",
               ],
               "validate-workflows.yml": [
                   "Lint every workflow",
