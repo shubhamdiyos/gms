@@ -855,6 +855,117 @@ opener, the disabled job switches on a repository variable instead of a constant
 belongs in this stage's wording: **criterion 4 is not satisfiable by adding checks, only by requiring them**, because
 the failure mode a green build cannot see is the one where a check was never there.
 
+**Measured on 2026-11-02 — criteria 1 and 2, on a real server at real volume.**
+Everything below is a number read off a run, not a claim about code. Environment: PostgreSQL
+**16.15** in Colima on `127.0.0.1:5433`, disposable database `gms_perf_seed` (456 MB, V1..V7 applied
+by Flyway), one backend process, `ddl-auto=validate`, calls strictly sequential and warm.
+
+*Volume (NFR-01).* `scripts/seed/perf_seed_50k.sql` loads **1,840,468 rows across 27 tables** in
+**71 s** (a second load took 78 s) in one transaction. The clause is per school and it is met per
+school: schools 1 and 2 hold **50,000 pupils each** (101,800 in the roll, 96,443 of them active and
+therefore servable, 47,369 in the first volume tenant). Proportional rows: 509,000 `student_fees`,
+203,600 `attendances`, 203,600 `student_exams`, 101,800 `results`, 101,800 `invoices`, 203,600
+`fee_payments`, 193,420 `receipts`, 103,480 seeded users.
+
+*Criterion 2 — re-runnable and asserted.* A 54-line fingerprint (exact counts of 14 tables, the
+number of distinct `(school_id, student_id)` admission numbers, and the status/role distributions of
+students, fees, attendance, invoices, payments and roles) came back **byte-identical across two
+independent loads**. The counts are not assumed anywhere: `verify-perf-50k.sh` refuses to start the
+clock until every one matches, and `fee_payments`/`receipts` are re-derived by re-running the seed's
+own `WHERE` clause rather than pinned to a constant.
+
+*Criterion 1 — latency, 20 runs per probe, nearest-rank, p99 as the worst run.*
+
+| probe | p50 ms | p95 ms | max ms | budget p95 | verdict |
+|---|---|---|---|---|---|
+| `search?query=<selective>` (1 row in 96,443) | 66.9 | 77.5 | 173.1 | 300 | ok |
+| `search?query=<matches-all>` (96,443 match) | 82.1 | 95.7 | 105.4 | 300 | ok |
+| `search?classId=<8,334-pupil classroom>` | 25.8 | 36.5 | 49.0 | 300 | ok |
+| `search?page=4000` (deep, inside the roll) | 79.9 | 136.9 | 150.1 | 300 | ok |
+| `search?size=100` (server-side cap) | 39.5 | 42.2 | 45.8 | 300 | ok |
+| `GET /students` default page | 17.1 | 26.6 | 30.4 | 300 | ok |
+| `GET /students?size=500` (refused down to 100) | 21.9 | 32.3 | 51.7 | 300 | ok |
+| `GET /students/{id}` | 12.8 | 20.9 | 23.7 | 300 | ok |
+| `GET /dashboard/school` | 120.8 | 156.1 | 315.1 | 300 | ok |
+| `GET /dashboard/platform` | 31.3 | 37.5 | 55.1 | 300 | ok |
+| `ADMIN search?query=…` (tenant-scoped token) | 30.4 | 32.2 | 32.3 | 300 | ok |
+| `ADMIN GET /dashboard/school` | 115.2 | 132.9 | 142.2 | 300 | ok |
+
+**The one endpoint that failed, and why the fix was a ceiling rather than a re-run.** Measured
+exactly as it was written — `StudentController.getAll` taking no paging parameters, handing back the
+caller's whole school — `GET /students` serialised **47,369 pupils** and returned p95 **378.5 ms** on
+the first run. The second run, same jar, same data, same warm cache, returned p95 **299.5 ms** —
+inside the same 300 ms budget by half a millisecond. An endpoint whose verdict flips on JVM and
+page-cache state is not a pass, and adjusting the budget to make the old shape fit would have been
+the second failure in this stage's history of a number that cannot say no. So the endpoint got the
+ceiling NFR-04 already asks for: `size` defaults to 20, is clamped server-side to the same
+`MAX_SEARCH_SIZE = 100` the search path uses, and the read is `ORDER BY id DESC` so a capped page
+returns the **newest** pupils rather than an arbitrary prefix. `verify-perf-50k.sh` now asserts both
+halves of that honesty — the returned length is 100 for a request of 500, and the ids come back
+descending — before it measures anything. 378.5 ms became **26.6 ms**.
+
+*Criterion 1, the `EXPLAIN (ANALYZE, BUFFERS)` half.* Five probes, listed in the seed's footer, run
+after `ANALYZE;` on the volume tenant. Every one plans through an index this project created, and
+NFR-03's per-statement budget is p95 < 100 ms:
+
+| probe | plan | execution |
+|---|---|---|
+| P1 deep roster page, `OFFSET 40000` | `Index Scan using students_pkey`, 40,020 rows walked, 2,223 removed by the status filter | **16.6 ms** |
+| P2 head-count of school 1 | `Index Only Scan using idx_students_school_status`, **Heap Fetches: 0** | 6.4 ms |
+| P3 fee ledger joined to the roll | `idx_student_fee_student_status` + `students_pkey`, 20 rows touched | 0.09 ms |
+| P4 one pupil's attendance history | `Index Scan Backward using idx_attendance_student_date` | 0.08 ms |
+| P5 a tenant's users with their roles | `idx_user_roles_role` + `users_pkey`, 135 teachers | 0.21 ms |
+
+*Criterion 4 is now demonstrated twice.* The harness's own count assertion was the first accidental
+false-pass waiting to be found: it pinned `users` and `user_roles` at 103,480, but the run this card
+requires — a backend restarted after the load, so `SuperAdminBootstrapService` can re-bind the
+platform account — inserts a 103,481st user and its `SUPERADMIN` role row. The first run failed on
+exactly those two lines. The expectation now excludes the bootstrap by name (the seed emits no
+`SUPERADMIN`, so the predicate cannot hide anything else) and a separate check asserts the account
+*is* present and bound to school 1 — the precondition the school-scoped probes quietly depend on.
+That is a check that was seen to fail and then made to mean something, which is the standard the rest
+of this stage has to meet.
+
+**A bug the load found that reading did not.** The scaled seed was reviewed as internally consistent
+and then refused to load: `uq_students_school_student_id` rejected `(3, 'STD0310000')`. PostgreSQL's
+`lpad(value, len)` **truncates** when `value` is already longer than `len`, so
+`lpad('100780', 5)` is `'10078'`, not `'100780'`; the file's own comment asserted the opposite — that
+padding "simply stops once the id has six digits" — and every school-3 and school-4 pupil with a
+six-digit id collapsed ten-to-a-code. Schools 1 and 2 could not show it, because their ids stay under
+100000, which is exactly how a defect of this class survives a review. The padding is now 7 wide, the
+comment states the truncation and how it was verified, and the fingerprint counts distinct admission
+numbers so the same mistake cannot pass as idempotent again.
+
+**What these numbers do not cover, stated as plainly as what they do.** Cold cache (every run is
+warm); more than one instance; connection-pool saturation (one in-flight request, so HikariCP never
+queues); p99 with statistical strength (20 samples, worst-run proxy); SQL-layer percentiles beyond
+the five probes. `DoD-2` also names **PostgreSQL 17** and asks for Testcontainers alongside local
+Docker; the container that produced these numbers is **16.15**, and it stays 16 because the named
+volume and the owner's existing local databases are 16 — changing the major is an owner decision, not
+a quiet edit.
+
+**Criterion 3 is built, proven to discriminate, and stopped by a decision rather than by work.**
+`SqlStatementCountPerRequestTest` measures the statements Hibernate prepares for one real HTTP
+request through the full filter chain on a `RANDOM_PORT`, against a database it seeds and asserts
+before starting the clock, with `hibernate.generate_statistics=true` scoped to that context only — no
+production code, no proxy, no migration. Eight endpoints are pinned, and each ceiling is
+`measured + 1` with that relation itself asserted, so widening a ceiling takes two edits rather than
+one. It was seen to fail both ways it can: inserting a per-row fee read into `toResponse` took
+`GET /students/search` from 4 statements to **44** against a ceiling of 5 and named the growth as
+per-row (`40 ≥ 20 rows`), and moving one seed's row count took a second case over its ceiling with
+the opposite diagnosis. `mvn -o test` with it present is **114 green** (106 + 8).
+It is not yet in `src/test`, and that is deliberate: **no CI job starts a database**, and this stage's
+own rule forbids a silently skipped test class, so landing it would turn `mvn -B clean verify` red on
+every push. It needs either a `services: postgres` job or ADR-019's Testcontainers dependency, and
+both are changes to the pipeline's shape and minutes — the same owner decision criterion 5 asks for,
+reported here rather than made quietly.
+
+The measurement also surfaced two production findings that belong to Stage 4, not to this test:
+`GET /api/v1/results/student/{id}` answers **500** because `ResultController.mapToResponse`
+dereferences lazy proxies after the transaction closes under `open-in-view=false`, and
+`GET /parents/children/{id}/results` is a live N+1 at **26 statements** (19 per-row lazy loads) that
+wants a fetch join. Both are recorded with the numbers rather than smoothed over.
+
 **Acceptance criteria.**
 1. `DoD-2` budgets met, with `EXPLAIN (ANALYZE, BUFFERS)` output and latency percentiles recorded per query —
    p50/p95/p99 for the ten hottest endpoints, not a single average.
