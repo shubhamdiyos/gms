@@ -38,6 +38,10 @@ PARENT=${GMS_PARENT_USERNAME:?set GMS_PARENT_USERNAME}
 PARENTPASSWORD=${GMS_PARENT_PASSWORD:?set GMS_PARENT_PASSWORD}
 SYSADMIN=${GMS_SYSTEM_ADMIN_USERNAME:?set GMS_SYSTEM_ADMIN_USERNAME}
 SYSADMINPASSWORD=${GMS_SYSTEM_ADMIN_PASSWORD:?set GMS_SYSTEM_ADMIN_PASSWORD}
+# The two tenants the fixture script built its families in. They arrive from that script rather than
+# being looked up here — see section 0.
+SCHOOL_A_ID=${GMS_P1_SCHOOL_A_ID:?set GMS_P1_SCHOOL_A_ID, written by scripts/seed/p1_fixtures.sh}
+SCHOOL_B_ID=${GMS_P1_SCHOOL_B_ID:?set GMS_P1_SCHOOL_B_ID, written by scripts/seed/p1_fixtures.sh}
 
 VERIFY_DB=${GMS_VERIFY_DB:-gms_p1_verify}
 PG_CONTAINER=${GMS_PG_CONTAINER:-gms-postgres}
@@ -99,11 +103,13 @@ check "system-school admin login" "ok" "$([[ -n "$SYSADMIN_TOKEN" ]] && echo ok 
 
 # The caller's own tenant: the ADMIN token is school A, and every entity lookup
 # below is scoped to it so a school-B row can never satisfy a school-A check.
-# School A is the lowest tenant id that is not the platform owner's system school.
-PLATFORM_SCHOOL=$(sql "SELECT school_id FROM users u JOIN user_roles r ON r.user_id = u.id WHERE r.role = 'SUPERADMIN' LIMIT 1")
-SCHOOL_A_ID=$(sql "SELECT id FROM schools WHERE id <> $PLATFORM_SCHOOL ORDER BY id LIMIT 1")
-SCHOOL_B_ID=$(sql "SELECT id FROM schools WHERE id NOT IN ($PLATFORM_SCHOOL, $SCHOOL_A_ID) ORDER BY id LIMIT 1")
-[[ -n "$SCHOOL_A_ID" && -n "$SCHOOL_B_ID" ]] || { echo "FATAL: two tenant schools expected in $VERIFY_DB; the fixtures were not built"; exit 1; }
+# The two ids come from the fixture script that built the families, rather than being re-derived here.
+# The first draft took "the lowest school ids that are not the platform owner's", which is correct only
+# on a database that nothing else has touched; on the shared database the live-tenancy harness runs the
+# nine suites against, those two schools are C-1's and C-2's, so the school-B family probe searched a
+# tenant with no p1 family in it and reported four failures against a fixture that had built correctly.
+[[ "$SCHOOL_A_ID" =~ ^[0-9]+$ && "$SCHOOL_B_ID" =~ ^[0-9]+$ ]] \
+  || { echo "FATAL: the fixture school ids are not numbers ('$SCHOOL_A_ID' / '$SCHOOL_B_ID')"; exit 1; }
 
 # ── 1. AUTHZ-00: the parent admin surface answers its own handlers ───────────
 echo

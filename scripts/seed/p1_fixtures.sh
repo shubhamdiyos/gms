@@ -65,24 +65,38 @@ admin_username() { # first initial + surname, the rule SchoolServiceImpl applies
   printf '%s%s' "$(echo "${first:0:1}" | tr 'A-Z' 'a-z')" "$(echo "$last" | tr 'A-Z' 'a-z')"
 }
 
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
+SCHOOL_A_CODE=${GMS_SCHOOL_A_CODE:-MVP801}
+SCHOOL_B_CODE=${GMS_SCHOOL_B_CODE:-MVP802}
+
+# Which two tenants, and what logins their administrators actually got — both read from the database
+# before anything logs in, because neither can be derived reliably.
+#   * The tenants are named by the codes `verify-mvp-e2e.sh` creates them with. The first draft picked
+#     "the two lowest school ids that are not the platform owner's", which is the right answer on a
+#     database only the e2e suite has touched and the wrong one on the shared database the live-tenancy
+#     harness runs this on: by then C-1 through C-7 have registered eight schools, so the two lowest
+#     belong to C-1, hold one pupil between them, and the fixture died on its own
+#     `expected pupils in both schools` guard while pointing at the wrong tenants.
+#   * The usernames are what `SchoolServiceImpl` wrote after `generateUniqueUsername` resolved a
+#     collision, which is not always the name the request carried. The password is unchanged: the
+#     service derives it from the base name, without the counter.
+SCHOOL_A=$(sql "SELECT id FROM schools WHERE school_code = '$SCHOOL_A_CODE'" | tr -d '[:space:]')
+SCHOOL_B=$(sql "SELECT id FROM schools WHERE school_code = '$SCHOOL_B_CODE'" | tr -d '[:space:]')
+[[ "$SCHOOL_A" =~ ^[0-9]+$ && "$SCHOOL_B" =~ ^[0-9]+$ ]] \
+  || { echo "FATAL: no schools coded $SCHOOL_A_CODE/$SCHOOL_B_CODE in $VERIFY_DB; run verify-mvp-e2e.sh first"; exit 1; }
+ADMIN_A_USER=$(sql "SELECT username FROM users WHERE school_id = $SCHOOL_A ORDER BY id LIMIT 1" | tr -d '[:space:]')
+ADMIN_B_USER=$(sql "SELECT username FROM users WHERE school_id = $SCHOOL_B ORDER BY id LIMIT 1" | tr -d '[:space:]')
+[[ "$ADMIN_A_USER" =~ ^[A-Za-z0-9_]+$ && "$ADMIN_B_USER" =~ ^[A-Za-z0-9_]+$ ]] \
+  || { echo "FATAL: neither school coded $SCHOOL_A_CODE/$SCHOOL_B_CODE has an administrator account"; exit 1; }
+ADMIN_A_PASS="$(admin_username "$ADMIN_A_NAME")@123"
+ADMIN_B_PASS="$(admin_username "$ADMIN_B_NAME")@123"
 
 echo "== logins =="
 PLATFORM=$(login "$SUPERUSER" "$SUPERPASSWORD")
-TOKEN_A=$(login "$ADMIN_A_USER" "${ADMIN_A_USER}@123")
-TOKEN_B=$(login "$ADMIN_B_USER" "${ADMIN_B_USER}@123")
+TOKEN_A=$(login "$ADMIN_A_USER" "$ADMIN_A_PASS")
+TOKEN_B=$(login "$ADMIN_B_USER" "$ADMIN_B_PASS")
 [[ -n "$PLATFORM" && -n "$TOKEN_A" && -n "$TOKEN_B" ]] \
   || { echo "FATAL: platform or school-admin login failed; is this the e2e-seeded database?"; exit 1; }
-echo "ok: platform, school A, school B"
-
-# School A is the lowest tenant id that is not the platform owner's system school
-# (the bootstrap reserves one school for the SUPERADMIN account).
-PLATFORM_SCHOOL=$(sql "SELECT school_id FROM users u JOIN user_roles r ON r.user_id = u.id WHERE r.role = 'SUPERADMIN' LIMIT 1")
-SCHOOL_A=$(sql "SELECT id FROM schools WHERE id <> $PLATFORM_SCHOOL ORDER BY id LIMIT 1")
-SCHOOL_B=$(sql "SELECT id FROM schools WHERE id NOT IN ($PLATFORM_SCHOOL, $SCHOOL_A) ORDER BY id LIMIT 1")
-[[ -n "$SCHOOL_A" && -n "$SCHOOL_B" ]] \
-  || { echo "FATAL: two tenant schools expected in $VERIFY_DB"; exit 1; }
+echo "ok: platform, school A ($ADMIN_A_USER in $SCHOOL_A), school B ($ADMIN_B_USER in $SCHOOL_B)"
 
 # ── families ─────────────────────────────────────────────────────────────────
 ensure_family() { # ensure_family <email> <first> <last> <phone> <studentId> <token>
@@ -226,14 +240,25 @@ umask 077
   echo "GMS_SUPERADMIN_USERNAME=$SUPERUSER"
   echo "GMS_SUPERADMIN_PASSWORD=$SUPERPASSWORD"
   echo "GMS_ADMIN_USERNAME=$ADMIN_A_USER"
-  echo "GMS_ADMIN_PASSWORD=${ADMIN_A_USER}@123"
+  # The base name, not the resolved login: `SchoolServiceImpl` derives the temporary password from the
+  # base and only uniquifies the username, so writing `$ADMIN_A_USER@123` here would be right while no
+  # collision exists and wrong the moment one does.
+  echo "GMS_ADMIN_PASSWORD=$ADMIN_A_PASS"
   echo "GMS_ADMIN2_USERNAME=$ADMIN_B_USER"
-  echo "GMS_ADMIN2_PASSWORD=${ADMIN_B_USER}@123"
+  echo "GMS_ADMIN2_PASSWORD=$ADMIN_B_PASS"
   echo "GMS_PARENT_USERNAME=$PARENT_USERNAME"
   echo "GMS_PARENT_PASSWORD=welcome123"
   echo "GMS_SYSTEM_ADMIN_USERNAME=$SYSADMIN_USER"
   echo "GMS_SYSTEM_ADMIN_PASSWORD=Sysadmin@123"
   echo "GMS_VERIFY_DB=$VERIFY_DB"
+  # The two tenants, by id, as this script resolved them from their codes. The negative tests need
+  # exactly these numbers, and reading them from here is the only way the pair cannot drift: the first
+  # draft of `verify-p1-hardening.sh` re-derived them as "the lowest school ids that are not the
+  # platform's", which is this database's C-1 tenants on any shared run — so its school-B family probe
+  # looked in a school that holds no p1 family and four checks failed on a fixture that had been built
+  # correctly two scripts earlier.
+  echo "GMS_P1_SCHOOL_A_ID=$SCHOOL_A"
+  echo "GMS_P1_SCHOOL_B_ID=$SCHOOL_B"
   echo "GMS_PG_CONTAINER=$PG_CONTAINER"
   echo "GMS_PG_USER=$PG_USER"
   echo "GMS_PG_PASSWORD_ENV=$PG_PASSWORD_ENV"

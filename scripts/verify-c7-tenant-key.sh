@@ -124,16 +124,63 @@ require_id() { # require_id <what created the row> <id>
   fi
 }
 
-admin_username() { # admin_username <full name>
+admin_username() { # admin_username <full name> — the base the service derives the password from
   local first last
   first=$(printf '%s' "$1" | awk '{print $1}')
   last=$(printf '%s' "$1" | awk '{print $2}')
   printf '%s%s' "${first:0:1}" "$last" | tr 'A-Z' 'a-z'
 }
 
+admin_login_for() { # admin_login_for <school code> <full name> — the username the service actually wrote
+  # SchoolServiceImpl mints the administrator's login from their name and appends a counter when that
+  # name is already taken (`generateUniqueUsername`), so the name in the request is not always the name
+  # in `users`. C-4 registers "Nadia Okonjo" first in the same database this card runs against, so the
+  # derived guess silently authenticated as C-4's administrator — a 200, a valid token, the wrong
+  # school — and every write below failed as that other tenant (`Classroom already exists with same
+  # name/grade/section`), which is how 42 failures arrived with no tenancy leak anywhere: the measured
+  # rows were `nokonjo1` in school 4 while the token in the requests belonged to school 2. The database
+  # is the only place the generated name is certain, so this reads it back.
+  local resolved=""
+  if have_db; then
+    # The argument is one of this script's own two school codes, interpolated exactly as the
+    # `SELECT id FROM schools WHERE school_code='NGS701'` below it does — the first draft used psql's
+    # `:'code'` binding and silently returned nothing, because psql does not substitute a variable into
+    # a `-c` string; a lookup that reads as empty is worse than one that reads as wrong.
+    resolved=$(sql "SELECT u.username FROM users u JOIN schools s ON s.id = u.school_id \
+                    WHERE s.school_code = '$1' ORDER BY u.id LIMIT 1" \
+                  | tr -d '[:space:]')
+    # `sql` merges stderr into its output, so a failed statement arrives here as text that is not a
+    # username. Anything that is not shaped like one is treated as no answer at all.
+    [[ "$resolved" =~ ^[a-z0-9_]{1,100}$ ]] || resolved=""
+  fi
+  if [[ -z "$resolved" ]]; then
+    printf 'NOTE  school %s could not be read from the database: falling back to the derived name, ' \
+      "$1" >&2
+    printf 'which only matches while that name is still unused\n' >&2
+    resolved=$(admin_username "$2")
+  fi
+  printf '%s' "$resolved"
+}
+
 sql() { # sql <statement> — SELECT and rolled-back probes only
   docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$VERIFY_DB" \
     -v ON_ERROR_STOP=1 -tAc "$1" 2>&1
+}
+
+# The JWT payload read without verifying the signature, so the tenant claim is visible in the register.
+# Not a second authority: the server decides access from the signature it does verify.
+jwt_payload() { # jwt_payload <token>
+  local seg
+  seg=$(printf '%s' "$1" | cut -d. -f2 | tr '_-' '/+')
+  case $(( ${#seg} % 4 )) in
+    2) seg="${seg}==" ;;
+    3) seg="${seg}=" ;;
+  esac
+  printf '%s' "$seg" | base64 -d 2>/dev/null
+}
+
+claim() { # claim <token> <jq filter over the payload>
+  jwt_payload "$1" | jq -r "$2 // empty" 2>/dev/null
 }
 
 have_db() { [[ -n "$VERIFY_DB" && -n "${!PG_PASSWORD_ENV:-}" ]]; }
@@ -151,12 +198,18 @@ code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Selborne College","schoolCode":"SEL702","adminFullName":"'"$ADMIN_B_NAME"'","adminEmail":"tomas@selborne.test"}')
 check "school B created" "200" "$code"
 
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_USER@123\"}")
+SCHOOL_A=$(sql "SELECT id FROM schools WHERE school_code='NGS701'" 2>/dev/null | tr -d '[:space:]')
+SCHOOL_B=$(sql "SELECT id FROM schools WHERE school_code='SEL702'" 2>/dev/null | tr -d '[:space:]')
+
+# The temporary password keeps the *base* name, without the uniqueness counter; the login does not.
+ADMIN_A_PASS="$(admin_username "$ADMIN_A_NAME")@123"
+ADMIN_B_PASS="$(admin_username "$ADMIN_B_NAME")@123"
+ADMIN_A_USER=$(admin_login_for NGS701 "$ADMIN_A_NAME")
+ADMIN_B_USER=$(admin_login_for SEL702 "$ADMIN_B_NAME")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_PASS\"}")
 check "school A admin login" "200" "$code"
 TOKEN_A=$(token_of)
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_USER@123\"}")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_PASS\"}")
 check "school B admin login" "200" "$code"
 TOKEN_B=$(token_of)
 if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
@@ -164,8 +217,19 @@ if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
   exit 1
 fi
 
-SCHOOL_A=$(sql "SELECT id FROM schools WHERE school_code='NGS701'" 2>/dev/null | tr -d '[:space:]')
-SCHOOL_B=$(sql "SELECT id FROM schools WHERE school_code='SEL702'" 2>/dev/null | tr -d '[:space:]')
+# The property every check below rests on: the token in hand belongs to the school this card created.
+# Worth two lines of its own because signing in with a name that exists in two schools answers 200 and
+# yields a valid token for the *other* tenant, and that failure looks like a broken write API.
+CLAIM_A=$(claim "$TOKEN_A" '.')
+if [[ -n "$CLAIM_A" && -n "$SCHOOL_A" ]]; then
+  check "school A's token claims the school this card created" "$SCHOOL_A" \
+    "$(printf '%s' "$CLAIM_A" | jq -r '.schoolId')"
+  check "and school B's token claims a different tenant" "different" \
+    "$([[ "$(claim "$TOKEN_A" '.schoolId')" != "$(claim "$TOKEN_B" '.schoolId')" ]] && echo different || echo same)"
+else
+  skip "the token this card signs in with names its own school" \
+    "no database to read the school id from, or the JWT payload could not be decoded"
+fi
 
 echo
 echo "=== 2. School A builds a term through its own endpoints ==="
@@ -270,15 +334,23 @@ echo "=== 3. Every row the API wrote carries school A ==="
 if have_db; then
   for t in attendances student_exams results student_fees fee_payments teacher_assignments timetables timetable_slots; do
     MINE=$(sql "SELECT count(*) FROM $t WHERE school_id = $SCHOOL_A" | tr -d '[:space:]')
-    ELSE_WHERE=$(sql "SELECT count(*) FROM $t WHERE school_id IS DISTINCT FROM $SCHOOL_A" | tr -d '[:space:]')
+    # "and by nobody else" was the second half of this line, counting every row outside school A. It
+    # was true only because the card had always been run against a database it owned; on the shared
+    # database the live-tenancy harness runs C-1 through C-7 against one boot, C-4's fee rows are
+    # somebody else's school and the check reported a tenant leak that section 4's platform-wide scan
+    # — 0 rows with a NULL tenant, in any tenant table — goes on proving. What this loop can honestly
+    # say is the pair below: this school wrote rows here, and no row of this table is untenant-ed or
+    # points at a school that does not exist.
+    ELSE_WHERE=$(sql "SELECT count(*) FROM $t WHERE school_id IS NULL
+                      OR school_id NOT IN (SELECT id FROM schools)" | tr -d '[:space:]')
     # Both halves, because "no row is in the wrong school" is also true of a table
     # the application never wrote to — the control run found that reading.
     if [[ -n "$MINE" && "$MINE" -gt 0 && "$ELSE_WHERE" == "0" ]]; then
       ACTUAL=ok
     else
-      ACTUAL="${MINE:-?} in school A, ${ELSE_WHERE:-?} elsewhere"
+      ACTUAL="${MINE:-?} in school A, ${ELSE_WHERE:-?} without a school that exists"
     fi
-    check "${t}: written by school A, and by nobody else" "ok" "$ACTUAL"
+    check "${t}: written by school A, and every row of it carries a real school" "ok" "$ACTUAL"
   done
   NONE_NULL=$(sql "SELECT count(*) FROM exam_subjects WHERE school_id IS NULL")
   HAS_TENANT=$(sql "SELECT count(*) FROM exam_subjects WHERE school_id = $SCHOOL_A")
