@@ -29,7 +29,11 @@ public class TimetableController {
     }
 
     @GetMapping("/classroom/{classroomId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT')")
+    // No STUDENT here even though the handler once granted it: the URL layer admits only
+    // ADMIN/SUPERADMIN/TEACHER for this path, so the grant was unreachable — a student reads the
+    // timetable through /timetables/student/me. Leaving the grant would promise a response the
+    // perimeter still refuses.
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<TimetableResponse> getTimetableForClassroom(@PathVariable Integer classroomId) {
         TimetableResponse response = timetableService.getTimetableForClassroom(classroomId);
         return ResponseEntity.ok(response);

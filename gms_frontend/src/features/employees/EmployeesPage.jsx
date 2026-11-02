@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Alert,
   Box,
   Typography,
   Button,
@@ -50,7 +51,7 @@ const EmployeesPage = () => {
   const [open, setOpen] = useState(false);
   const [editingEmployee, setEditingEmployee] = useState(null);
   
-  const { data: employees = [], isLoading, refetch } = useGetEmployeesQuery();
+  const { data: employees = [], isLoading, isError, error, refetch } = useGetEmployeesQuery();
   const [createEmployee] = useCreateEmployeeMutation();
   const [updateEmployee] = useUpdateEmployeeMutation();
 
@@ -215,6 +216,21 @@ const EmployeesPage = () => {
           Add Employee
         </Button>
       </Box>
+
+      {isError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={refetch}>
+              Retry
+            </Button>
+          }
+        >
+          Failed to load employees
+          {error?.status ? ` (HTTP ${error.status})` : ''}: {error?.data?.message || 'unexpected error'}
+        </Alert>
+      )}
 
       {/* Data Grid */}
       <Paper sx={{ height: 600, width: '100%' }}>

@@ -598,11 +598,8 @@ export const apiSlice = createApi({
       providesTags: ['Exam'],
     }),
 
-    // Result endpoints
-    getResults: builder.query({
-      query: () => '/results', // reserved for potential future list endpoint
-      providesTags: ['Result'],
-    }),
+    // Result endpoints. No GET /results hook: ResultController has no unscoped list route, so a
+    // hook for one could only 404 — reads go through getResultsForStudentExam/getResultsForStudent.
 
     recordResult: builder.mutation({
       query: (result) => ({
@@ -746,7 +743,6 @@ export const {
   useGetExamsByAcademicYearQuery,
   
   // Results
-  useGetResultsQuery,
   useRecordResultMutation,
   useUpdateResultMutation,
   useDeleteResultMutation,

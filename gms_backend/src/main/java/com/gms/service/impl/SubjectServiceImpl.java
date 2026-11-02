@@ -107,7 +107,10 @@ public class SubjectServiceImpl implements SubjectService {
         if (subject == null) {
             return false;
         }
-        subjectRepository.delete(subject);
+        // Archive, not delete: the row carries the authorship the audit trail reads, the update
+        // path already refuses archived rows, and the school's list already filters them out.
+        subject.setStatus("0");
+        subjectRepository.save(subject);
         return true;
     }
 

@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import {
+  Alert,
   Box,
   Typography,
   Button,
@@ -57,7 +58,7 @@ const SchoolsPage = () => {
   const [editingSchool, setEditingSchool] = useState(null);
   const [viewingSchool, setViewingSchool] = useState(null);
   
-  const { data: schools = [], isLoading, refetch } = useGetSchoolsQuery();
+  const { data: schools = [], isLoading, isError, error, refetch } = useGetSchoolsQuery();
   const [createSchool] = useCreateSchoolMutation();
   const [updateSchool] = useUpdateSchoolMutation();
   const [toggleSchool] = useToggleSchoolMutation();
@@ -245,6 +246,21 @@ const SchoolsPage = () => {
           Add School
         </Button>
       </Box>
+
+      {isError && (
+        <Alert
+          severity="error"
+          sx={{ mb: 2 }}
+          action={
+            <Button color="inherit" size="small" onClick={refetch}>
+              Retry
+            </Button>
+          }
+        >
+          Failed to load schools
+          {error?.status ? ` (HTTP ${error.status})` : ''}: {error?.data?.message || 'unexpected error'}
+        </Alert>
+      )}
 
       {/* Data Grid */}
       <Paper sx={{ height: 600, width: '100%' }}>

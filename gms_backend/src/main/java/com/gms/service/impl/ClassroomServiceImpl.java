@@ -102,7 +102,11 @@ public class ClassroomServiceImpl implements ClassroomService {
         if (classroom == null) {
             return false;
         }
-        classroomRepository.delete(classroom);
+        // Archive, not delete: the row carries the authorship the audit trail reads, the update
+        // path already refuses archived rows, and the school's list already filters them out. A
+        // hard delete would also collide with students.classroom_id's foreign key.
+        classroom.setStatus("0");
+        classroomRepository.save(classroom);
         return true;
     }
 

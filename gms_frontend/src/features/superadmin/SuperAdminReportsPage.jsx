@@ -3,15 +3,14 @@ import {
   School,
   TrendingUp,
   Block,
-  HourglassBottom,
 } from '@mui/icons-material';
 import { useGetSchoolsQuery } from '../../store/api/apiSlice';
 
+// School.status is the backend's "1" (active) / "0" (inactive) — School.java carries no other
+// states, so a label keyed on a word like INACTIVE could never render.
 const SCHOOL_STATUS_LABELS = {
   '1': 'Active',
-  INACTIVE: 'Inactive',
-  SUSPENDED: 'Suspended',
-  PENDING_APPROVAL: 'Pending Approval',
+  '0': 'Inactive',
 };
 
 const StatCard = ({ title, value, icon, color, subtitle }) => (
@@ -49,9 +48,7 @@ const SuperAdminReportsPage = () => {
   const schoolList = Array.isArray(schools) ? schools : [];
   const totalSchools = schoolList.length;
   const activeSchools = schoolList.filter((s) => s.status === '1').length;
-  const inactiveSchools = schoolList.filter((s) => s.status === 'INACTIVE').length;
-  const suspendedSchools = schoolList.filter((s) => s.status === 'SUSPENDED').length;
-  const pendingApprovalSchools = schoolList.filter((s) => s.status === 'PENDING_APPROVAL').length;
+  const inactiveSchools = schoolList.filter((s) => s.status === '0').length;
 
   if (schoolsLoading) {
     return (
@@ -92,14 +89,7 @@ const SuperAdminReportsPage = () => {
       value: inactiveSchools,
       icon: <Block />,
       color: '#757575',
-      subtitle: `${suspendedSchools} suspended`,
-    },
-    {
-      title: 'Pending Approval',
-      value: pendingApprovalSchools,
-      icon: <HourglassBottom />,
-      color: '#f57c00',
-      subtitle: 'Awaiting activation',
+      subtitle: 'Status Inactive',
     },
   ];
 
@@ -118,7 +108,7 @@ const SuperAdminReportsPage = () => {
       {/* Summary stats */}
       <Grid container spacing={3} sx={{ mb: 4 }}>
         {stats.map((stat) => (
-          <Grid item xs={12} sm={6} md={3} key={stat.title}>
+          <Grid item xs={12} sm={4} key={stat.title}>
             <StatCard {...stat} />
           </Grid>
         ))}

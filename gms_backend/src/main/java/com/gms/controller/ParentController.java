@@ -1,6 +1,5 @@
 package com.gms.controller;
 
-import com.gms.model.entity.Parent;
 import com.gms.model.request.ParentRequest;
 import com.gms.model.response.*;
 import com.gms.security.TenantContext;
@@ -60,12 +59,12 @@ public class ParentController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
-    public ResponseEntity<List<Parent>> getAll() {
+    public ResponseEntity<List<ParentResponse>> getAll() {
         Integer schoolId = TenantContext.schoolId();
         if (schoolId == null) {
             return ResponseEntity.status(401).build();
         }
-        List<Parent> parents = parentService.findBySchool();
+        List<ParentResponse> parents = parentService.findBySchool();
         if (parents.isEmpty()) {
             return ResponseEntity.noContent().build();
         }

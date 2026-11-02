@@ -69,11 +69,11 @@ public class ParentServiceImpl implements ParentService {
         if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
         }
-        
-        Parent parent = new Parent();
-        Parent savedParent = parentRepository.save(parent);
-        createUserForParent(savedParent);
-        return ResponseEntity.ok(toResponse(savedParent));
+        // This used to save an empty Parent and crash in createUserForParent (get(0) on the empty
+        // students collection), so the route this controller serves 500'd on every call. The real
+        // implementation is createParent: it resolves the request's student ids through the scoped
+        // loads and writes the join rows with them.
+        return createParent(request);
     }
 
     public ParentResponse createParentFromRequest(ParentRequest request, Parent parent) {
@@ -96,8 +96,13 @@ public class ParentServiceImpl implements ParentService {
     }
 
     @Override
-    public List<Parent> findBySchool() {
-        return parentRepository.findBySchoolId(TenantContext.schoolId());
+    public List<ParentResponse> findBySchool() {
+        // Responses, not entities: Parent carries a lazy user and a lazy students collection, and
+        // with open-in-view=false the message converter would meet them after the session closed.
+        // The mapping below runs inside the class-level transaction, while the proxies still load.
+        return parentRepository.findBySchoolId(TenantContext.schoolId()).stream()
+                .map(this::toResponse)
+                .collect(Collectors.toList());
     }
 
     @Override
