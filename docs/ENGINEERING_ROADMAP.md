@@ -1659,11 +1659,25 @@ named it as the binding constraint. The rule was opened for the duration of one 
 
 and `master`'s status-check protection reads `{contexts: ["Gate coverage"], strict: true, enforce_admins: true}` —
 identical to the state recorded at Stage 5 criterion 4. Nothing here is a fix; it is one merge paid for by a rule the
-owner set, borrowed for about ten seconds and returned. The standing question the episode leaves, and it is an owner
+owner set, borrowed for one merge call and returned — the script slept 6 s between the `PATCH` and the merge, then restored from the captured pre-state on `EXIT`; no independent timestamp for the window was kept, so "a few seconds, one call" is what is actually evidenced rather than a measured duration. The standing question the episode leaves, and it is an owner
 decision rather than an engineering one: with one account and these two rules, every future PR — including the
 documentation-only ones this programme now needs to record its own merges — will hit the same lock, and the three ways
 out are a second reviewer account, a permanent change to those two fields, or repeating exactly this manoeuvre each
 time. This document does not get to pick.
+
+**It has now been told, and the answer rules one of those three out.** On 2026-11-02 the owner directed that PR #29
+stays open and is **not** merged by temporarily weakening branch protection, and that `required_approving_review_count`,
+`require_last_push_approval` and every other protection setting are untouched without their explicit approval. So the
+manoeuvre recorded above is closed as a pattern: it happened once, under a decision the owner made in the moment for one
+specific pull, and it will not be repeated to make a green pull mergeable. Two consequences, both operational rather
+than editorial. **First, `master` no longer receives this programme's work by default** — PR #29 is
+`mergeable: MERGEABLE`, `mergeStateStatus: BLOCKED`, `reviewDecision: REVIEW_REQUIRED` with `Gate coverage` `success`, which
+is the lock demonstrating itself on the pull that describes it. **Second, "closed on branch" becomes a permanent state of
+this documentation rather than a phase that ends**: the registers will keep carrying the branch name and its head SHA for
+every completed card, and the §8 board's *merged* column will stay at `8145a31` until a human review exists to move it.
+What remains genuinely open, and is the owner's alone, is which of the other two ways out to take: a second reviewer
+account, or a deliberate permanent change to those fields. Until one of them happens, the correct posture is to keep
+shipping small, green, individually reviewable pulls and let them queue.
 
 ### Stage 6 — Deployment preparation (Oracle enters)
 
@@ -1726,7 +1740,7 @@ system, the remaining `DOC-*`).
 
 | Blocker | Needed | Gates which stage |
 |---|---|---|
-| Branch protection | **no longer blocked on the owner — applied 2026-11-02.** `master` requires `Gate coverage`, with `strict` and `enforce_admins`; the refusal was then demonstrated against an admin merge attempt. The row used to read "name the five checks, `strict`, `enforce_admins`, **review count 0**", and three of those four happened as written; the fourth did not and was not done quietly: the review rules were sent back **unchanged** (1 approval, `dismiss_stale_reviews`, `require_last_push_approval`, no code-owner reviews), because dropping the required approval count to 0 removes the owner's own last human gate and is a decision rather than a side effect of a CI task. *Corrected 2026-11-02, after PR #26:* that decision was taken, temporarily, for that one pull — and the discovery is that **the count is not the binding rule**. `require_last_push_approval: true` blocks the same merge on its own, and on a single-account repository the pair makes any pull the owner authored unmergeable without either an `--admin` override (ruled out, and refused in practice) or a temporary rule change. **The row is now an owner decision, not a CI task:** name a second reviewer, change these two fields permanently, or accept that every merge repeats the manoeuvre recorded in §"PR #26 merged, and the rule that actually blocked it". | Stage 5 (`DoD-4`) — **closed for the CI half; the review half is open as a policy question, not a missing API call** |
+| Branch protection | **no longer blocked on the owner — applied 2026-11-02.** `master` requires `Gate coverage`, with `strict` and `enforce_admins`; the refusal was then demonstrated against an admin merge attempt. The row used to read "name the five checks, `strict`, `enforce_admins`, **review count 0**", and three of those four happened as written; the fourth did not and was not done quietly: the review rules were sent back **unchanged** (1 approval, `dismiss_stale_reviews`, `require_last_push_approval`, no code-owner reviews), because dropping the required approval count to 0 removes the owner's own last human gate and is a decision rather than a side effect of a CI task. *Corrected 2026-11-02, after PR #26:* that decision was taken, temporarily, for that one pull — and the discovery is that **the count is not the binding rule**. `require_last_push_approval: true` blocks the same merge on its own, and on a single-account repository the pair makes any pull the owner authored unmergeable without either an `--admin` override (ruled out, and refused in practice) or a temporary rule change. **The row is now an owner decision, not a CI task:** name a second reviewer, change these two fields permanently, or accept that every merge repeats the manoeuvre recorded in §"PR #26 merged, and the rule that actually blocked it". *Answered 2026-11-02:* the third option is **refused** — protection settings are not to be touched, temporarily or otherwise, without explicit approval, so PR #29 and every pull after it stays open until option one or two happens. | Stage 5 (`DoD-4`) — **closed for the CI half; the review half is a standing owner action, and merges are therefore blocked by design, not by a missing API call** |
 | Dead `EC2_*` secrets | Delete `EC2_HOST`, `EC2_USER`, `EC2_SSH_KEY`, `EC2_SSH_KNOWN_HOSTS` from the repo/org | Housekeeping; recorded in `ADR-017` |
 | Neon ownership | Create **your own** project, verify the email | Stage 6 |
 | DNS | Where `bytendra.com` / `bytencia.com` are hosted | Stage 6 (TLS) |
