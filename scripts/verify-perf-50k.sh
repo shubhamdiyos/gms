@@ -30,12 +30,25 @@
 #   table answers every search in 5 ms and "passes" — the measurement would then
 #   certify performance that was never performed. So this script asserts the
 #   exact per-table counts that scripts/seed/perf_seed_50k.sql is designed to
-#   produce (6,000 students, 30,000 student_fees, 12,000 attendances, 12,000
-#   student_exams, 6,000 results, 7,680 users … — 100k+ rows in total across the
-#   4 tenant schools) BEFORE it starts the clock, refuses to measure anything if
-#   a single expected count is wrong, and cross-checks the API against the DB
-#   (search totalElements must equal the SQL count) so a backend wired to some
-#   other database cannot pass either.
+#   produce (101,800 students, 509,000 student_fees, 203,600 attendances, 203,600
+#   student_exams, 101,800 results, 103,480 users … — 1,840,468 rows in total
+#   across the 4 tenant schools) BEFORE it starts the clock, refuses to measure
+#   anything if a single expected count is wrong, and cross-checks the API against
+#   the DB (search totalElements must equal the roll the SQL says that endpoint is
+#   allowed to serve — see §3) so a backend wired to some other database cannot
+#   pass either.
+#
+#   The volume clause is asserted TWICE, because the two halves of it are not the
+#   same claim. NFR-01 says "≥50,000 records per school in the primary tables, 2
+#   schools" — a per-school floor — while the cross-table total is only this
+#   script's own headline, the "100k+ rows in total across the 4 tenant schools"
+#   line it has always printed. A sum can clear 50,000 with no single table
+#   anywhere near it, and until this card the sum was the only line standing
+#   between the repo and a "volume verified" claim: the seed it measured against
+#   summed past 125,000 rows while its largest tenant held 2,400 pupils, roughly
+#   eight times short of the clause the file was named for. So the per-school
+#   check below is the one that names NFR-01, and the total check stays as the
+#   separate assertion it has always been.
 #
 # WHAT THIS SCRIPT DOES *NOT* MEASURE — say it out loud before the roadmap does:
 #   * cold-cache behaviour: every run is a warm-cache run; there is no restart
@@ -50,12 +63,21 @@
 #
 # Prerequisites (in run order — the order matters, see the bootstrap note):
 #   * a backend on GMS_BASE_URL (default http://localhost:8080) started against
-#     the disposable database gms_perf_seed at V6, AFTER
+#     the disposable database gms_perf_seed at V7 — all seven migrations,
+#     V1__baseline_current_schema through V7__record_who_wrote_the_pupil, in the
+#     version order the seed's own HOW TO RUN lists — AFTER
 #     scripts/seed/perf_seed_50k.sql was loaded and `ANALYZE;` was run.
 #     The seed TRUNCATEs `users` and `schools`, so the backend must be RESTARTED
 #     after the load: SuperAdminBootstrapService re-creates the platform account
 #     and binds it to school id 1 via createOrGetSystemSchool()'s findById(1),
-#     which after the seed is 'Delhi Public Academy' (the 2,400-student tenant).
+#     which after the seed is 'Delhi Public Academy' — the first of the two
+#     50,000-pupil volume tenants NFR-01 is about. (V7 is the migration that adds
+#     created_by / updated_by to students, classrooms, subjects and
+#     student_admissions; a database left at V6 is a schema the current jar's
+#     entities no longer describe, and ddl-auto=validate fails before the first
+#     probe. The bootstrap account itself lands clean: the seed resyncs every
+#     identity sequence in its section 26, so it takes the id above the seeded
+#     blocks rather than colliding with one.)
 #     That binding is what makes GET /students, GET /students/{id} and
 #     GET /dashboard/school (which all 401 without a school claim) measurable
 #     with the superadmin token, against real volume;
@@ -145,11 +167,15 @@ check "psql is talking to the perf database" "$PERF_DB" "$CURRENT_DB"
 # ── 2. Assert the seed landed, per table, BEFORE any clock starts ────────────
 # The expectations are read off perf_seed_50k.sql itself (its SHAPE header and
 # the arithmetic of each section), and section 28 of the seed independently
-# pins students/student_fees/attendances. fee_payments and receipts are derived
-# rows (a WHERE clause over seeded data), so their expectation is the same WHERE
-# clause re-evaluated, and the two must agree.
+# pins students / student_fees / attendances / users and the per-school floor
+# below. fee_payments and receipts are derived rows (a WHERE clause over seeded
+# data), so their expectation is the same WHERE clause re-evaluated, and the two
+# must agree. Everything except the four fixed-per-school tables is a function of
+# the roll N = 101,800: 5N student_fees, 2N attendances, 2N student_exams, N
+# results, N invoices, N + 1,680 users. N is 101,800 and it is a multiple of 10,
+# which is what makes the derived halves exact (see the seed's DETERMINISM note).
 echo
-echo "=== 2. Seeded row counts (the >= 50,000 clause is decided here) ==="
+echo "=== 2. Seeded row counts (NFR-01's >= 50,000 PER SCHOOL is decided here) ==="
 COUNTS=$(sql "
 SELECT 'schools|' || count(*) FROM schools UNION ALL
 SELECT 'academic_years|' || count(*) FROM academic_years UNION ALL
@@ -174,26 +200,56 @@ SELECT 'student_fees|' || count(*) FROM student_fees UNION ALL
 SELECT 'fee_payments|' || count(*) FROM fee_payments UNION ALL
 SELECT 'invoices|' || count(*) FROM invoices UNION ALL
 SELECT 'receipts|' || count(*) FROM receipts UNION ALL
-SELECT 'users|' || count(*) FROM users UNION ALL
-SELECT 'user_roles|' || count(*) FROM user_roles UNION ALL
+-- users and user_roles are counted over the seeded block, not over the whole table.
+-- This run REQUIRES a backend restarted after the load (see the header), and that boot
+-- is not inert: SuperAdminBootstrapService inserts one platform account plus its
+-- SUPERADMIN role row, at an id above every seeded block because the seed's section 26
+-- resyncs the identity sequences. So the table holds 103,481 while the seed wrote
+-- 103,480, and the extra row is a precondition of the harness rather than a row the seed
+-- owes. The predicate below excludes exactly it — the seed writes no SUPERADMIN (its
+-- section 24 role split emits STUDENT / PARENT / TEACHER / ADMIN / ACCOUNTANT), so this
+-- is a named exclusion, not a tolerance — and section 3 asserts the account is present
+-- and bound to school 1, which is the claim that makes the school-scoped probes
+-- measurable at all.
+SELECT 'users|' || count(*) FROM users u
+  WHERE NOT EXISTS (SELECT 1 FROM user_roles r WHERE r.user_id = u.id AND r.role = 'SUPERADMIN') UNION ALL
+SELECT 'user_roles|' || count(*) FROM user_roles WHERE role <> 'SUPERADMIN' UNION ALL
 SELECT 'notifications|' || count(*) FROM notifications UNION ALL
 SELECT 'announcements|' || count(*) FROM announcements")
 [[ "$COUNTS" == *"ERROR"* || -z "$COUNTS" ]] && { echo "FATAL: count probe failed: $COUNTS"; exit 1; }
 
+# The contract of perf_seed_50k.sql at N = 101,800 pupils. Eight of the 27 counted
+# tables moved when the two volume tenants went from 2,400 and 1,800 pupils to 50,000
+# each; seventeen did not, because they are fixed per school (4 schools, 8
+# academic_years, 24 classrooms, 12 sections, 24 subjects, 180 employees, 1,500
+# parents, 3,000 parent links, 48 timetables, 288 teacher_assignments, 1,440
+# timetable_slots, 24 exams, 144 exam_subjects, 144 fees, 48 fee_structures, 4,000
+# notifications, 4,000 announcements). The eight that moved, with the arithmetic that
+# produces them:
+#   students        N                = 101,800
+#   student_fees    5 per pupil      = 509,000
+#   attendances     2 per pupil      = 203,600
+#   student_exams   2 per pupil      = 203,600
+#   results         half of those (the even row_number ids)     = 101,800
+#   invoices        one per pupil    = 101,800
+#   users           180 employees + N pupils + 1,500 parents    = 103,480
+#   user_roles      one row per user                            = 103,480
+# fee_payments and receipts stay derived — they are a WHERE clause over seeded rows and
+# are re-checked as such below, which is why they answer "" here.
 expected_count() { # bash-3.2-safe lookup: the contract of perf_seed_50k.sql
   case "$1" in
     schools) echo 4 ;;              academic_years) echo 8 ;;
     classrooms) echo 24 ;;          sections) echo 12 ;;
     subjects) echo 24 ;;            employees) echo 180 ;;
-    parents) echo 1500 ;;           students) echo 6000 ;;
+    parents) echo 1500 ;;           students) echo 101800 ;;
     parent_student) echo 3000 ;;    timetables) echo 48 ;;
     teacher_assignments) echo 288 ;; timetable_slots) echo 1440 ;;
-    attendances) echo 12000 ;;      exams) echo 24 ;;
-    exam_subjects) echo 144 ;;      student_exams) echo 12000 ;;
-    results) echo 6000 ;;           fees) echo 144 ;;
-    fee_structures) echo 48 ;;      student_fees) echo 30000 ;;
-    invoices) echo 6000 ;;          users) echo 7680 ;;
-    user_roles) echo 7680 ;;        notifications) echo 4000 ;;
+    attendances) echo 203600 ;;     exams) echo 24 ;;
+    exam_subjects) echo 144 ;;      student_exams) echo 203600 ;;
+    results) echo 101800 ;;         fees) echo 144 ;;
+    fee_structures) echo 48 ;;      student_fees) echo 509000 ;;
+    invoices) echo 101800 ;;        users) echo 103480 ;;
+    user_roles) echo 103480 ;;      notifications) echo 4000 ;;
     announcements) echo 4000 ;;     fee_payments) echo "" ;;  # derived, checked separately
     receipts) echo "" ;;            # derived, checked separately
     *) echo "?" ;;
@@ -216,8 +272,11 @@ done <<EOF
 $COUNTS
 EOF
 
-# A >= 50,000 gate, stated once so the DoD-2 clause has a named test — even
-# though the per-table assertions above already imply it.
+# The cross-table total, stated once so this script's own "100k+ rows in total" headline
+# has a named test. It is NOT the NFR-01 clause and must not be read as one: a sum can
+# clear 50,000 with no single table anywhere near it, which is precisely what the
+# 125,000-row seed did while this line passed. The clause itself is asserted PER SCHOOL
+# a few lines below, where the roll is counted tenant by tenant.
 check "the seed holds at least 50,000 rows in total" "yes" \
   "$([[ "$total" -ge 50000 ]] && echo yes || echo "no ($total)")"
 printf '      TOTAL ROWS MEASURED: %s across %s tables\n' "$total" 27
@@ -235,7 +294,23 @@ check "receipts equals its seed derivation (SUCCESS payments)" "$RC_WHERE" "$RC_
 TWO_SCHOOLS=$(sql "SELECT count(*) FROM schools WHERE school_name IN ('Delhi Public Academy','Riverside International School')" | tr -d '[:space:]')
 check "both probe schools exist (Delhi Public Academy, Riverside)" "2" "$TWO_SCHOOLS"
 S1_STUDENTS=$(sql "SELECT count(*) FROM students WHERE school_id = 1" | tr -d '[:space:]')
-check "school 1 carries its share of the roll (the 2,400-tenant)" "2400" "$S1_STUDENTS"
+S2_STUDENTS=$(sql "SELECT count(*) FROM students WHERE school_id = 2" | tr -d '[:space:]')
+check "school 1 carries its share of the roll (the first 50,000-pupil volume tenant)" "50000" "$S1_STUDENTS"
+check "school 2 carries its share of the roll (the second 50,000-pupil volume tenant)" "50000" "$S2_STUDENTS"
+
+# NFR-01 in its own words, so the clause has a line that says the clause.
+# PRODUCT_REQUIREMENTS.md:182 reads "≥50,000 records per school in the primary tables,
+# 2 schools", and its measurement column closes with "(ACD-08 makes this per-school)" —
+# the clause's own text, not a reading of it. docs/ENGINEERING_ROADMAP.md's DoD-2 runs
+# the latency budgets "on ≥50,000 records per school". `students` is the primary table
+# and schools 1 and 2 are the two tenants the seed sizes for it, so the test is a floor
+# on EACH tenant's own count. The cross-table sum above deliberately does not stand in
+# for it: the shape this card replaced cleared that sum with 2,400 pupils in its largest
+# tenant, roughly eight times short of the clause the seed file is named after.
+check "NFR-01: >= 50,000 students PER SCHOOL in both volume tenants (schools 1 and 2)" "yes" \
+  "$([[ "$S1_STUDENTS" -ge 50000 && "$S2_STUDENTS" -ge 50000 ]] \
+       && echo yes || echo "no (school 1 = $S1_STUDENTS, school 2 = $S2_STUDENTS)")"
+
 STUDENT_ID=$(sql "SELECT id FROM students WHERE school_id = 1 ORDER BY id LIMIT 1" | tr -d '[:space:]')
 CLASSROOM_ID=$(sql "SELECT id FROM classrooms WHERE school_id = 1 ORDER BY id LIMIT 1" | tr -d '[:space:]')
 
@@ -247,18 +322,49 @@ check "superadmin login accepted" "200" "$code"
 PLATFORM_TOKEN=$(field '.accessToken')
 [[ -z "$PLATFORM_TOKEN" ]] && { echo "FATAL: no platform token — is the backend running against $PERF_DB and RESTARTED after the seed (it TRUNCATEs users)?"; exit 1; }
 
-# totalElements is the seam between the two halves: the SQL said 6,000 rows; if
-# the API cannot see them, every latency number below belongs to some other
-# database and this run is void.
+# The other half of that restart: the bootstrap account the header says the school-scoped
+# probes depend on. Counted above as excluded from the seeded block, so it is asserted
+# here as present — otherwise section 2's exclusion would be hiding a missing account,
+# and a run whose platform user is bound to the wrong tenant measures the wrong school.
+BOOTSTRAP=$(sql "SELECT u.username || '|' || COALESCE(u.school_id::text,'NULL') FROM users u JOIN user_roles r ON r.user_id = u.id WHERE r.role = 'SUPERADMIN' ORDER BY u.id LIMIT 1" | tr -d '[:space:]')
+check "the bootstrap platform account exists and is bound to school 1" "$SUPERUSER|1" "$BOOTSTRAP"
+
+# totalElements is the seam between the two halves: if the API cannot see what the SQL
+# counted, every latency number below belongs to some other database and this run is
+# void. The roll the API can see is NOT the 101,800 the SQL counted, and that is the
+# endpoint's own contract, not a gap in the seed: StudentRepository.findStudents puts
+# `and s.status <> '0'` in both the page and the count query (so search agrees with
+# GET /students, which filters the same way), and the seed deactivates 5,357 pupils with
+# id % 19 = 18. 101,800 - 5,357 = 96,443 is therefore the number the API owes, and both
+# halves of it are asserted here: the SQL side against the pinned figure, the API side
+# against the SQL's own re-evaluation of that predicate — the same mechanism the derived
+# fee counts use above. Neither a shrunken seed nor a backend pointed at another
+# database can clear both.
+ACTIVE_STUDENTS=$(sql "SELECT count(*) FROM students WHERE status <> '0'" | tr -d '[:space:]')
+check "the seeded roll less its deactivated pupils is 96,443 (what search may serve)" "96443" "$ACTIVE_STUDENTS"
 code=$(call GET "/students/search?page=0&size=1" "$PLATFORM_TOKEN")
 TOTAL_ELEMENTS=$(field '.totalElements')
-check "the API sees exactly the seeded roll (search totalElements)" "6000" "$TOTAL_ELEMENTS"
+check "the API sees exactly the seeded active roll (search totalElements)" "$ACTIVE_STUDENTS" "$TOTAL_ELEMENTS"
 
 # Server-side cap (StudentServiceImpl.MAX_SEARCH_SIZE = 100) — behaviour probe,
 # not a latency probe: ask for 500, get the capped page.
 code=$(call GET "/students/search?page=0&size=500" "$PLATFORM_TOKEN")
 CAPPED=$(jq -r '.content | length' "$body")
 check "GET /students/search caps size server-side at MAX_SEARCH_SIZE" "100" "$CAPPED"
+
+# The same ceiling on the list endpoint that had none. This is the NFR-04 half of the
+# fix, asserted as behaviour rather than trusted from the code: ask for 500 pupils of a
+# 50,000-pupil tenant and the response must be 100 rows, not the roll. Before the
+# ceiling landed this call serialised all 47,369 active pupils of school 1 and measured
+# p95 378.5 ms on one run and 299.5 ms on the next — the same endpoint straddling the
+# 300 ms budget on run conditions, which is why the fix is a ceiling and not a re-run.
+code=$(call GET "/students?size=500" "$PLATFORM_TOKEN")
+LIST_ROWS=$(jq -r 'length' "$body")
+check "GET /students caps its list server-side at the search ceiling" "100" "$LIST_ROWS"
+# A capped read is only honest if it returns the newest pupils rather than an arbitrary
+# prefix; the dashboard's "recent admissions" panel depends on that ordering.
+LIST_ORDER=$(jq -r '[.[].id] | (if . == (sort | reverse) then "desc" else "not-desc" end)' "$body")
+check "GET /students returns the capped page newest-first" "desc" "$LIST_ORDER"
 
 ADMIN_TOKEN=""
 if [[ -n "$ADMIN_USER" && -n "$ADMIN_PASSWORD" ]]; then
@@ -317,29 +423,59 @@ measure() { # measure <label> <route> <token>
 # (all under /api/v1; search params exactly as the @GetMapping declares them:
 # query, classId, page, size, sort).
 #
-#  selective: 'student4173@' matches exactly one seeded email (StudentRepository
-#             findStudents does a lower-LIKE %…% over first/last/studentId/email);
-#  non-selective: 'er' is inside every last_name 'VermaNN' — all 6,000 rows match,
-#             so the page must still come back in budget while the count scan
-#             covers the whole roll;
-#  classId filter: school 1's first classroom (400 students);
-#  deep page: page=1000 at size 20 is past totalPages=300 for this dataset, so it
-#             returns empty content — that is still the honest deep-pagination
-#             measurement, because PostgreSQL pays the sort + OFFSET 20000 walk
-#             and the app runs the count query on every page either way;
+#  selective: 'student52000@' matches exactly one seeded row. The seed's email format
+#             is 'student' || student.id || '@pupil.school' || school_id || '.example',
+#             so 'student52000@' is pupil 52,000's address and nothing else's: the '@'
+#             tail rules out the same digits in a first_name ('Student52000') or an
+#             admission number ('STD020052000'), and no email can contain it as a prefix,
+#             because ids stop at six digits (the roll ends at 101,800) — findStudents
+#             does a lower-LIKE '%…%' over first/last/studentId/email, so the term has to
+#             be judged against all four. Pupil 52,000 is in school 2 — the second volume
+#             tenant, which the old 'student4173@' term never reached — and is one of the
+#             96,443 active rows search may serve (52,000 % 19 = 16, not 18). One match
+#             out of 96,443 is the selective end of the range; the term would stop being
+#             selective if the seed's email format ever lost the '@' or the digits moved.
+#  non-selective: 'er' is inside every last_name 'VermaNN' and every student email, so
+#             all 96,443 servable rows match — the page must still come back in budget
+#             while the count scan covers the whole 101,800-row table;
+#  classId filter: school 1's first classroom, 8,334 pupils of which search may serve
+#             7,896 (the grade-aligned block is ((n-1)*6)/50000, so the six classrooms of
+#             a 50,000-pupil tenant hold 8,334, 8,333, 8,333, 8,334, 8,333, 8,333);
+#  deep page: page=4000 at size 20 is OFFSET 80,000 over the 96,443-row roll search
+#             serves, i.e. page 4,000 of 4,823 — 83% of the way in, comfortably short of
+#             the last page, and still inside the data, so the response carries twenty
+#             real rows. That is what makes the probe deep rather than merely far: the
+#             sort and the OFFSET 80,000 walk are both paid for a page the caller can
+#             actually use, and the count query runs again as it does on every page.
+#             It replaces page=1000, which was written when the roll was 6,000 rows: at
+#             5,685 servable rows the last page was index 284, so that request sat PAST
+#             THE END and returned empty content — the line labelled "deep" had been
+#             measuring the cost of an out-of-range page. The offset walk was real, the
+#             pagination was not, and no budget proven that way is one this repo can
+#             quote. Re-run the arithmetic whenever the roll changes: the page index must
+#             stay under totalPages = ceil(servable rows / size), and page*size + size
+#             must fit inside the servable roll or the page comes back short or empty.
 #  max size: the server-side cap of 100 rows (StudentServiceImpl.MAX_SEARCH_SIZE);
-#  GET /students: StudentController.getAll takes NO paging params — it hands back
-#             the caller's whole school (the superadmin is bound to school 1, so
-#             this is the 2,400-row read the MVP frontend must not lean on; it is
-#             measured exactly as it is written, cap-less, on purpose);
+#  GET /students: bounded now, and the reason it is bounded is this script's own first
+#             measurement. StudentController.getAll used to take NO paging params and
+#             handed back the caller's whole school — for the superadmin, bound to
+#             school 1, that was all 47,369 active pupils of a 50,000-pupil tenant
+#             (a 2,274-row read at the old seed size). Measured twice on identical data
+#             it came back p95 378.5 ms and then 299.5 ms: over NFR-02's budget on one
+#             run, under it on the next, straddling the line on JVM and page-cache state.
+#             A number that flips with the weather is not a pass, so the endpoint got the
+#             ceiling NFR-04 already asks for and these two lines measure it: the default
+#             page, and a request for 500 that the server must refuse down to 100. The
+#             budget was not adjusted to make the old shape fit.
 #  by-id read: student $STUDENT_ID, inside the caller's school, so it is 200 and
 #             not the 403 the cross-tenant read would answer.
-measure 'search?query=<selective>'   "/students/search?query=student4173@&page=0&size=20" "$PLATFORM_TOKEN"
+measure 'search?query=<selective>'   "/students/search?query=student52000@&page=0&size=20" "$PLATFORM_TOKEN"
 measure 'search?query=<matches-all>' "/students/search?query=er&size=20"                  "$PLATFORM_TOKEN"
 measure 'search?classId=<filter>'    "/students/search?classId=${CLASSROOM_ID}&page=0&size=20" "$PLATFORM_TOKEN"
-measure 'search?page=1000 (deep)'    "/students/search?page=1000&size=20"                 "$PLATFORM_TOKEN"
+measure 'search?page=4000 (deep)'    "/students/search?page=4000&size=20"                 "$PLATFORM_TOKEN"
 measure 'search?size=100 (max)'      "/students/search?page=0&size=100"                   "$PLATFORM_TOKEN"
-measure 'GET /students (whole roll)' "/students"                                           "$PLATFORM_TOKEN"
+measure 'GET /students (default)'    "/students"                                          "$PLATFORM_TOKEN"
+measure 'GET /students (capped max)' "/students?size=500"                                 "$PLATFORM_TOKEN"
 measure 'GET /students/{id}'         "/students/${STUDENT_ID}"                            "$PLATFORM_TOKEN"
 measure 'GET /dashboard/school'      "/dashboard/school"                                  "$PLATFORM_TOKEN"
 measure 'GET /dashboard/platform'    "/dashboard/platform"                                "$PLATFORM_TOKEN"
@@ -364,6 +500,18 @@ cat "$results"
 echo
 echo "Not measured here (the roadmap must repeat this, not just the numbers):"
 echo "  cold cache, multiple instances, connection-pool saturation, concurrent load."
+echo
+echo "What this run decides about volume, stated at the size of the claim: NFR-01's floor"
+echo "is met PER SCHOOL (schools 1 and 2 hold 50,000 pupils each, asserted above), the"
+echo "deep-pagination line lands inside the roll instead of past its end, and the"
+echo "API-visible roll is asserted on its own terms — 96,443, because findStudents"
+echo "excludes the seed's 5,357 deactivated pupils — never by comparing it to the"
+echo "101,800 the SQL counted. It also decides GET /students: measured unbounded it ran"
+echo "47,369 pupils at p95 378.5 ms (over NFR-02's 300 ms) and then 299.5 ms (under it)"
+echo "on identical data, so the endpoint as written could not be certified either way."
+echo "It now has the ceiling NFR-04 asks for, and the two lines above — the row count and"
+echo "the newest-first order — are what makes the capped read an honest answer rather"
+echo "than a truncated one."
 echo
 
 echo "==================================================="

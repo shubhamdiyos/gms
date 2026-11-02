@@ -1,24 +1,27 @@
 -- ============================================================================
 -- perf_seed_50k.sql
 -- ============================================================================
--- Purpose : Build the >= 50,000-record, tenant-scoped performance dataset so the
---           read paths behind the V4 tenant indexes and the V5/V6 same-school
---           composite keys can be MEASURED at real volume, not against a demo
---           fixture. The five EXPLAIN (ANALYZE, BUFFERS) probes are listed in the footer.
+-- Purpose : Build the volume dataset NFR-01 asks for -- ">=50,000 records per school
+--           in the primary tables, 2 schools" (docs/PRODUCT_REQUIREMENTS.md:182) -- so
+--           the read paths behind the V4 tenant indexes and the V5/V6 same-school
+--           composite keys can be MEASURED at real volume, not against a demo fixture.
+--           The clause is PER SCHOOL, so schools 1 and 2 are each seeded with 50,000
+--           students; a cross-table sum that merely clears 50,000 would not satisfy it.
+--           The five EXPLAIN (ANALYZE, BUFFERS) probes are listed in the footer.
 --
 -- SAFETY  : This file TRUNCATEs and repopulates data. It runs ONLY against the
 --           disposable database `gms_perf_seed`. The guard below aborts if it is
 --           connected to any other database, so an operator cannot point it at
 --           `gms` or a live gms_c*_verify / gms_c4_* / gms_c7_* database by mistake.
 --
--- Schema  : The schema is Flyway's (V1..V6). This file creates NOTHING: no table,
+-- Schema  : The schema is Flyway's (V1..V7). This file creates NOTHING: no table,
 --           no index, no constraint, no ALTER. It only inserts rows that satisfy
 --           the schema as written, so `spring.jpa.hibernate.ddl-auto=validate`
 --           accepts the result. It lives outside gms_backend/src/main/resources
 --           on purpose, so it is never packaged into the jar.
 --
 -- HOW TO RUN
---   0) Recreate the disposable database and apply the six migrations in version order
+--   0) Recreate the disposable database and apply the seven migrations in version order
 --      (host files are not visible inside the container, so pipe them over stdin):
 --
 --        set -a && . ./.env && set +a
@@ -27,7 +30,8 @@
 --          -c "CREATE DATABASE gms_perf_seed OWNER gms_user;"
 --        cd gms_backend/src/main/resources/db/migration
 --        for f in V1__baseline_current_schema V2__materialise_tenant_key V3__natural_keys \
---                 V4__indexes V5__composite_tenant_keys V6__require_the_tenant_key; do
+--                 V4__indexes V5__composite_tenant_keys V6__require_the_tenant_key \
+--                 V7__record_who_wrote_the_pupil; do
 --          docker exec -i -e PGPASSWORD="$DB_PASSWORD" gms-postgres psql -U gms_user -d gms_perf_seed \
 --            -v ON_ERROR_STOP=1 -q -f /dev/stdin < $f.sql
 --        done
@@ -37,6 +41,12 @@
 --        docker exec -i -e PGPASSWORD="$DB_PASSWORD" gms-postgres psql -U gms_user -d gms_perf_seed \
 --          -v ON_ERROR_STOP=1 -f /dev/stdin < scripts/seed/perf_seed_50k.sql
 --
+--      One transaction, 1,840,468 rows over the 27 tables the footer counts. Section 20
+--      is the slow one -- an invoice per pupil whose total_amount is a LATERAL SUM over
+--      that pupil's five student_fees, so it runs 101,800 aggregations against a table
+--      with no statistics yet. Expect it to dominate the load; it is not a probe, and
+--      nothing in the harness's latency budget reads it.
+--
 --   2) Give the planner statistics, then run the footer probes:
 --
 --        docker exec -i -e PGPASSWORD="$DB_PASSWORD" gms-postgres psql -U gms_user -d gms_perf_seed -c "ANALYZE;"
@@ -45,20 +55,41 @@
 --               distribution come from integer arithmetic (id % n), never from
 --               random(), so they are identical on every run; random() only jitters
 --               money, which no count or probe depends on. Every id is explicit.
+--               Because the counts are arithmetic, they are also a FUNCTION of the
+--               student total N, and several of them are only exact when N divides
+--               cleanly: exactly half of the 2N student_exams rows have an even id
+--               (that half is `results`), exactly half of the 5N student_fees rows have
+--               an odd id, and the 20%-untouched cut (student_id % 5 = 1) removes the
+--               same fraction of that half only when N is a multiple of 10, which makes
+--               fee_payments exactly 2N. N = 101,800 is. Every derived count pinned in
+--               this file is recomputed from N, not carried over from the old shape.
 --
 -- SHAPE       : 4 schools, deliberately unequal the way real tenants are:
---               2400 / 1800 / 1200 / 600 students = 6,000.
+--               50000 / 50000 / 1200 / 600 students = 101,800. Schools 1 and 2 are the
+--               two volume tenants NFR-01 names, 50,000 students EACH; schools 3 and 4
+--               stay small on purpose, so the same code path is measured at a second
+--               scale and the multi-tenant probes keep meaning something.
 --               2 academic years each (exactly one is_current per school, because V3
 --               creates the partial unique index uq_academic_years_one_current),
 --               6 classrooms, 3 sections and 6 subjects each, 180 employees in total
 --               (135 of them teaching), 36 fee definitions per school.
---               30,000 student_fees = 5 per student, 12,000 attendances = 2 per
+--               509,000 student_fees = 5 per student, 203,600 attendances = 2 per
 --               student, plus the FK parents those require: fees, fee_structures,
 --               timetables, teacher_assignments, timetable_slots, exams,
 --               exam_subjects, student_exams, results, invoices, receipts.
+--               Everything that is fixed PER SCHOOL did not move with the scale-up:
+--               1,000 notifications and 1,000 announcements each (4,000 of both),
+--               1,500 parents, 2 children per parent (3,000 links), 180 employees,
+--               288 teacher_assignments, 1,440 timetable_slots, 144 fees, 144
+--               exam_subjects, 48 timetables, 48 fee_structures, 24 each of classrooms,
+--               subjects, exams, 12 sections, 8 academic_years, 4 schools.
 --               Every child row carries the SAME school_id as its parent so the
 --               V5/V6 composite keys accept it; the negative tests in section 27
 --               prove those constraints reject a row whose tenant disagrees.
+--               V7 put created_by / updated_by on students, classrooms, subjects and
+--               student_admissions: nullable integer FKs to users(id), left NULL here,
+--               because a raw SQL load is not an application write and V7 section 3
+--               reads a NULL author as "unknown" rather than as a lie.
 --
 -- STATUS CODES: the status domains are CODES, not words, wherever the entity
 --               defaults one in Java: schools.status, students.status,
@@ -76,15 +107,22 @@
 --               receipts.status ISSUED/CANCELLED (ReceiptServiceImpl.java:111).
 --
 -- IDs         : block-allocated from the perf_school staging table below:
---               students 1..6000, employees 1..180, parents 1..1500,
+--               students 1..101800, employees 1..180, parents 1..1500,
 --               classrooms (s-1)*6+c, sections (s-1)*3+n, subjects (s-1)*6+n,
 --               academic_years (s-1)*2+y, fees (s-1)*36+(g-1)*6+t, exams (s-1)*6+e,
 --               exam_subjects (s-1)*36+(e-1)*6+sub, timetables (classroom-1)*2+y,
 --               invoice.id = student.id, fee_payment.id = its student_fee.id,
---               receipt.id = its fee_payment.id. student_fees, attendances,
+--               receipt.id = its fee_payment.id. users take three disjoint blocks that
+--               section 22 derives -- 1..180 (employees), 1001..102800 (students),
+--               200001..201500 (parents). student_fees, attendances,
 --               student_exams, timetable_slots and teacher_assignments take ids from
 --               an explicitly ordered row_number(). Identity sequences are resynced in
 --               section 26 so the application cannot collide with a seeded id.
+--               Integer is still the right type at this size: the widest id this file
+--               writes is student_fees at 509,000 (fee_payments and receipts follow at
+--               508,999, users at 201,500), against an `integer` ceiling of
+--               2,147,483,647, and every block start is cast ::int for the reason it
+--               always was -- SUM() OVER yields bigint, generate_series() yields integer.
 -- ============================================================================
 
 -- ── Guard: refuse to run anywhere but gms_perf_seed ─────────────────────────
@@ -114,6 +152,19 @@ TRUNCATE TABLE
 --     Block starts are cumulative, so id ranges cannot overlap between schools.
 --     ON COMMIT DROP: this table exists only inside this transaction, and it is a
 --     temp table so it is never part of the Flyway-validated schema.
+--     n_students is the column NFR-01 counts: schools 1 and 2 are the "2 schools" of
+--     the clause and each carries 50,000, so the volume claim is true PER SCHOOL and
+--     not merely in aggregate. n_emp / n_teaching / n_parents are the staff and family
+--     shape and are deliberately NOT scaled with the roll: a real tenant's faculty and
+--     parent roster grow far slower than its student list, and the probes below
+--     (teacher_assignments, parent links, the role split) only stay meaningful if the
+--     faculty rows are a realistic minority. Schools 3 and 4 keep the old sizes so the
+--     same code path is measured at two scales.
+--     Widening n_students widens exactly one derived block start that anything else
+--     keys off: student_from, and through it the student user ids in section 22 --
+--     which is why that file's parent user block moved to 200,000. Keep the invariant
+--     in section 22 true whenever you change these numbers: 1,000 + SUM(n_students)
+--     must stay below the parent user block start.
 CREATE TEMP TABLE perf_school ON COMMIT DROP AS
 SELECT v.school_id,
        v.n_students, v.n_emp, v.n_teaching, v.n_parents,
@@ -132,10 +183,10 @@ SELECT v.school_id,
        ((v.school_id - 1) * 36 + 1)::int                  AS exam_subject_from, -- 6 exams x 6 subjects
        ((v.school_id - 1) * 12 + 1)::int                  AS fee_structure_from,
        ((v.school_id - 1) * 1000 + 1)::int                AS notice_from
-FROM (VALUES (1, 2400, 60, 45, 600),
-             (2, 1800, 50, 38, 450),
-             (3, 1200, 40, 30, 300),
-             (4,  600, 30, 22, 150))
+FROM (VALUES (1, 50000, 60, 45, 600),      -- volume tenant 1 (NFR-01)
+             (2, 50000, 50, 38, 450),      -- volume tenant 2 (NFR-01)
+             (3,  1200, 40, 30, 300),      -- small tenant: same code path, other scale
+             (4,   600, 30, 22, 150))
      AS v(school_id, n_students, n_emp, n_teaching, n_parents)
 WINDOW w AS (ORDER BY v.school_id ROWS BETWEEN UNBOUNDED PRECEDING AND CURRENT ROW);
 
@@ -253,12 +304,37 @@ SELECT s.parent_from + p.n - 1,
        now() - interval '200 days', now(), now(), now(), 0
 FROM perf_school s, generate_series(1, s.n_parents) AS p(n);
 
--- ── 8. students (6,000 across the 4 schools) ───────────────────────────────
+-- ── 8. students (101,800 across the 4 schools) ─────────────────────────────
 --     classroom_id and school_id are both NOT NULL, section_id is nullable (V1) and is
 --     populated. They come from the student's position inside its OWN school block, so
 --     students, timetables and attendance all resolve back to one tenant. student_id
 --     (the admission number) is unique per school (V3); email is nullable with a
 --     partial per-school unique index, so it gets one distinct value each.
+--     The student_from blocks this writes are 1..50000 (school 1), 50001..100000
+--     (school 2), 100001..101200 (school 3), 101201..101800 (school 4) -- contiguous and
+--     gapless, which is what lets every row_number()-keyed child table below be counted
+--     as a multiple of 101,800 instead of being tallied by hand.
+--     Widths at the new top of the range: student_id becomes 'STD020052000' (12 chars in
+--     a varchar(20)), and email becomes 'student101800@pupil.school4.example', comfortably
+--     inside varchar(150).
+--     The admission-number padding is 7 wide, and not for a cosmetic reason: lpad
+--     TRUNCATES. PostgreSQL's lpad(value, len) cuts value to len when value is already
+--     longer than len, so lpad('100780', 5) is '10078' and not '100780' -- verified with
+--     SELECT lpad('100780',5,'0'). This section padded to 5 on the strength of the belief
+--     that padding "simply stops" once the id outgrows it, and the load died on
+--     uq_students_school_student_id at (3, 'STD0310000'): every school-3 and school-4 pupil
+--     with a six-digit id collapsed onto its first five characters, ten pupils per admission
+--     number. Schools 1 and 2 never showed it because their ids stay under 100000.
+--     'SU' || lpad(st.id, 6) in section 22 now sits at exactly zero headroom -- 101,800 is
+--     six digits, so it is still unique but has no margin; widen it with the roll.
+--     The grade-aligned classroom split puts 8,334 pupils in school 1's first classroom
+--     and 8,333 in each of its others; the small tenants still hold 200 and 100.
+--     The deactivated roll: status '0' where (student_from + n) % 19 = 0, i.e. id % 19 =
+--     18, which is 5,357 of the 101,800 (2,631 in school 1, 2,632 in school 2). Neither
+--     the API search nor GET /students serves those rows (StudentRepository.findStudents
+--     and findAllBySchool_IdAndStatusNot both refuse status '0'), so the roll the harness
+--     can see through HTTP is 96,443 across all schools and 47,369 in school 1 -- the two
+--     numbers verify-perf-50k.sh quotes for the API side, while the SQL side stays 101,800.
 WITH seq AS (
   SELECT s.school_id, s.n_students, s.student_from, s.classroom_from, s.section_from, n.n
   FROM perf_school s, generate_series(1, s.n_students) AS n(n)
@@ -270,7 +346,7 @@ SELECT q.student_from + q.n - 1,
        q.school_id,
        q.classroom_from + (((q.n - 1) * 6) / q.n_students),   -- grade-aligned blocks, G1..G6
        q.section_from  + (((q.n - 1) * 3) / q.n_students),    -- SEC-A..SEC-C
-       'STD' || lpad(q.school_id::text, 2, '0') || lpad((q.student_from + q.n - 1)::text, 5, '0'),
+       'STD' || lpad(q.school_id::text, 2, '0') || lpad((q.student_from + q.n - 1)::text, 7, '0'),
        'Student' || (q.student_from + q.n - 1),
        'Verma' || ((q.student_from + q.n) % 200),
        CASE WHEN (q.student_from + q.n) % 19 = 0 THEN '0' ELSE '1' END,   -- ~5% inactive roll
@@ -283,6 +359,16 @@ FROM seq q;
 
 -- ── 9. parent_student (3,000 = 2 children per parent) ──────────────────────
 --     Placed here because invoices and the parent users below read it.
+--     The parent count did not scale with the roll (1,500 for 101,800 pupils), so this
+--     links 3,000 pupils: 1,200 in school 1, 900 in school 2, 600 and 300 in the small
+--     tenants. The link stays inside one tenant because the offset is taken modulo that
+--     school's own n_students, and it stays one-parent-per-child because 2 * n_parents
+--     (1,200 at most) is far below n_students (50,000 in the volume tenants), so the
+--     residues 2i and 2i+1 never wrap onto each other. Same property the 2,400-student
+--     shape had; the wider block only makes the wrap margin bigger. The visible
+--     consequence is in invoices: 98% of the volume tenants' pupils have no parent link,
+--     so their invoice and receipt rows carry a NULL parent_id -- nullable in both
+--     tables, and true to a roll that grew faster than its parent roster.
 --     Hibernate writes this join table from @ManyToMany, so it cannot write a third
 --     column (V6:76-97); the BEFORE trigger trg_parent_student_tenant_key (V6:115-117)
 --     derives and validates school_id. It is supplied here as the student's own school,
@@ -351,13 +437,18 @@ JOIN teacher_assignments ta
  AND ta.school_id     = tt.school_id
 CROSS JOIN generate_series(1, 5) AS d(n);
 
--- ── 13. attendances (12,000 = 2 per student) ───────────────────────────────
+-- ── 13. attendances (203,600 = 2 per student) ──────────────────────────────
 --     Two composite keys must agree at once: fk_attendance_student_same_school (V5:25)
 --     and fk_attendance_slot_same_school (V6:149). The slot is picked inside the
 --     student's own classroom's current-year timetable, so both are satisfied by
 --     construction. status is varchar(10): PRESENT / ABSENT / LATE.
 --     uq_attendance_student_slot_date (V3) needs a distinct (student, slot, date) triple;
 --     the two rows per student use different days AND different dates.
+--     The fan-out is exactly two rows per student at any size: every classroom has one
+--     2025-2026 timetable, every timetable has a slot for all six periods on both
+--     MONDAY and TUESDAY, and period = (st.id % 6) + 1 lands inside 1..6 whichever block
+--     the student id comes from. So 2 x 101,800 = 203,600, and the row_number() over
+--     (st.id, d.n) that gives them ids runs 1..203,600 contiguously.
 INSERT INTO attendances (id, school_id, student_id, timetable_slot_id, date, status, remarks,
                          created_on, updated_on, version)
 SELECT row_number() OVER (ORDER BY st.id, d.n),
@@ -412,7 +503,12 @@ SELECT s.exam_subject_from + (e.n - 1) * 6 + sub.n - 1,
        now() - interval '60 days', now(), 0
 FROM perf_school s, generate_series(1, 6) AS e(n), generate_series(1, 6) AS sub(n);
 
--- ── 15. student_exams (12,000 = 2 per student) and results (6,000) ─────────
+-- ── 15. student_exams (203,600 = 2 per student) and results (101,800) ──────
+--     Two rows per pupil on two distinct exam_subjects of its own school: the id is
+--     row_number() over (st.id, k), so se.id = 2*(st.id - 1) + k with k in {1,2} --
+--     contiguous 1..203,600, and the odd/even split is exactly one attempt each.
+--     (st.id % 30) + k picks offsets 1..31 inside the school's own 36 exam_subjects, so
+--     both attempts are valid rows and V3's one-result-per-attempt key has work to do.
 INSERT INTO student_exams (id, school_id, student_id, exam_subject_id, status, registration_date,
                            created_on, updated_on, version)
 SELECT row_number() OVER (ORDER BY st.id, k.n),
@@ -427,6 +523,11 @@ FROM students st, generate_series(1, 2) AS k(n);
 --     results is keyed to student_exams twice over: uq_result_student_exam (V3) means one
 --     result per attempt, and fk_result_student_exam_same_school (V5:33) the tenant check,
 --     which V6:40 had to backfill because the column did not exist in V1.
+--     The WHERE clause below is se.id % 2 = 0 over a CONTIGUOUS 1..203,600 row_number, so
+--     it selects exactly half -- 101,800 results, one per pupil (the k=2 attempt of each).
+--     Nothing about that depends on the old 12,000-row size; it depends on the numbering
+--     staying contiguous, which is why the harness re-evaluates the predicate instead of
+--     trusting a constant.
 INSERT INTO results (id, school_id, student_exam_id, obtained_marks, percentage, grade, status,
                      remarks, created_on, updated_on, version)
 SELECT se.id, se.school_id, se.id,
@@ -481,11 +582,19 @@ SELECT s.fee_structure_from + n.n - 1,
        now() - interval '200 days', now(), 0
 FROM perf_school s, generate_series(1, 12) AS n(n);
 
--- ── 18. student_fees (30,000 = 5 per student) ──────────────────────────────
+-- ── 18. student_fees (509,000 = 5 per student) ─────────────────────────────
 --     The big table. uq_student_fee (student_id, fee_id) is why a student cannot hold the
 --     same fee twice: five DIFFERENT fee types for the student's own grade. V6's
 --     fk_student_fee_fee_same_school requires (fee_id, school_id) to name one tenant, so
 --     the fee id is derived from the school the student already belongs to.
+--     The id shape matters downstream: row_number() over (student_id, k) with five rows
+--     per pupil over a contiguous roll gives sf.id = 5*(student_id - 1) + k, k in 1..5.
+--     That is why section 19's `sf.id % 2 = 1` selects 254,500 of the 509,000 rows (odd
+--     id <=> student_id and k have the same parity: three matching k values for an odd
+--     pupil, two for an even one, and 50,900 pupils of each kind in this roll), and why
+--     the % 5 = 1 cut below removes a clean 20% of those rather than a lopsided amount --
+--     101,800 is a multiple of 10, so the untouched pupils split evenly between the odd
+--     and even halves (10,180 each).
 WITH need AS (
   SELECT st.id AS student_id, st.school_id,
          replace(cl.grade, 'G', '')::int AS grade_idx,  -- classroom grade, 1..6
@@ -516,11 +625,20 @@ SELECT row_number() OVER (ORDER BY c.student_id, c.k),
        now() - interval '90 days', now(), 0
 FROM calc c;
 
--- ── 19. fee_payments (one per settled student_fee with a payment) ──────────
+-- ── 19. fee_payments (203,600 = one per settled student_fee with a payment) ─
 --     Rows are read back out of student_fees, so fk_fee_payment_student_fee_same_school
 --     (V5:35) holds by construction rather than by arithmetic. status SUCCESS/CANCELLED
 --     (FeePaymentServiceImpl:65,115). payment_reference has a PARTIAL unique index (V3),
 --     so a cancelled payment leaves it NULL instead of duplicating a sentinel.
+--     The count is the WHERE clause, not a constant: 254,500 odd-id rows minus the 50,900
+--     whose pupil holds nothing (sf.id % 2 = 1 and paid > 0) = 203,600, which equals 2 x
+--     the roll only because 101,800 is a multiple of 10 (see section 18).
+--     The CANCELLED cut is sf.id % 40 = 1. Every such id is odd, so the predicate is
+--     entirely inside the inserted set: id = 1 + 40j, j = 0..12724, is 12,725 candidates
+--     up to 509,000, and the ones whose pupil is unpaid are those with j = 0 mod 5
+--     (id = 1+40j puts k at 1 and the pupil at 8j+1, so 8j+1 % 5 = 1 <=> j % 5 = 0) --
+--     2,545 of them. 12,725 - 2,545 = 10,180 CANCELLED, 193,420 SUCCESS, and section 21
+--     turns exactly the SUCCESS rows into receipts.
 INSERT INTO fee_payments (id, school_id, student_fee_id, amount, payment_date, payment_method,
                           status, transaction_id, payment_reference, bank_name, cheque_number,
                           remarks, created_on, updated_on, version)
@@ -537,7 +655,7 @@ SELECT sf.id, sf.school_id, sf.id, sf.amount_paid,
 FROM student_fees sf
 WHERE sf.id % 2 = 1 AND sf.amount_paid > 0;
 
--- ── 20. invoices (6,000 = one per student) ─────────────────────────────────
+-- ── 20. invoices (101,800 = one per student) ───────────────────────────────
 --     invoice_number is unique PER SCHOOL now (V3 dropped the global key), invoice.id is
 --     deliberately equal to student.id because both are row_number() over students ordered
 --     by id, and V5's fk_invoice_student_same_school needs student_id + school_id to agree.
@@ -573,9 +691,15 @@ JOIN LATERAL (SELECT sum(sf.total_amount) AS total_amount
               FROM student_fees sf
               WHERE sf.student_id = st.id) tot ON true;
 
--- ── 21. receipts (one per successful fee payment) ──────────────────────────
+-- ── 21. receipts (193,420 = one per successful fee payment) ────────────────
 --     receipt_number unique per school (V3); invoice_id, fee_payment_id and parent_id are
 --     plain FKs and only student_id is tenant-keyed (V5:43).
+--     The WHERE clause is section 19's SUCCESS arm, so this is 203,600 payments minus the
+--     10,180 cancelled = 193,420 rows, each keyed to a payment id that is also a
+--     student_fee id (both are sf.id). The receipts' own status column cancels a further
+--     slice with fp.id % 29 = 0 -- that is a status split, not a row filter, so it moves
+--     no count. Neither JOIN drops a row: every payment's pupil has an invoice, because
+--     section 20 writes one per student.
 INSERT INTO receipts (id, school_id, receipt_number, receipt_date, amount, payment_method,
                       status, student_id, parent_id, invoice_id, fee_payment_id,
                       reference_number, received_by, description,
@@ -594,12 +718,34 @@ JOIN student_fees sf ON sf.id = fp.student_fee_id
 JOIN invoices inv    ON inv.id = sf.student_id AND inv.school_id = sf.school_id
 WHERE fp.status = 'SUCCESS';
 
--- ── 22. users (7,680 = one per employee, one per student, one per parent) ──
---     Three disjoint id blocks: employees 1..180, students 1001..7000, parents 20001..21500.
+-- ── 22. users (103,480 = one per employee, one per student, one per parent) ─
+--     Three disjoint id blocks in an `integer` column, and the disjointness is now a
+--     matter of arithmetic rather than of luck:
+--       * employees: 1..180, the employee's own id. It stays at the bottom of the range
+--         because section 24's role split tests u.id % 9 on these rows -- move the block
+--         and the ACCOUNTANT/ADMIN counts move with it, silently.
+--       * students: 1000 + student.id, so 1001..102800. The 1,000 offset clears the 180
+--         employee ids by 820 and reads as "a pupil's user row is its pupil id plus a
+--         thousand". It is also what makes notifications' recipient_ids '1001,1002' below
+--         name two real student accounts.
+--       * parents: 200000 + parent.id, so 200001..201500. This block MOVED, and it had
+--         to: the roll went from 6,000 to 101,800 pupils, so the student block now runs
+--         to 102,800 and the old 20001..21500 range lay inside it -- the third INSERT
+--         below would have collided with pupil 19,001's user row, whose id is exactly
+--         1,000 + 19,001 = 20,001, and hit users_pkey, aborting the whole load. 200,000
+--         sits above the tallest possible student user with 97,200 ids of headroom, so
+--         the roll may triple before the blocks touch again. If SUM(n_students) ever
+--         passes 199,000 this offset moves with it; the guard in section 28 refuses to
+--         commit a load in which a student user reached 200,000, so the collision cannot
+--         come back as a silent PK error.
+--     Only users.id was re-based. The identity strings keep the row's own id
+--     ('par' || p.id, 'PU' || lpad(p.id, 6)), so no username, email or user_id value
+--     changed shape at the new scale, and `integer` is nowhere near its ceiling.
 --     username is UNIQUE globally; (school_id, email) and (school_id, user_id) are UNIQUE
 --     per school (V3); employee_id / student_id / parent_id are each UNIQUE. user_status is
 --     the '1'/'0' CODE (User.java:77-78), and idx_users_school_status (V4:19) is the index
 --     the tenant reads want. The bcrypt-shaped string is a PLACEHOLDER, not a credential.
+--     Block 1: one account per employee, id = the employee's own id (1..180).
 INSERT INTO users (id, school_id, username, email, user_id, full_name, password, phone_number,
                    user_status, enabled, account_locked, email_verified, phone_verified,
                    password_expired, require_password_change, login_attempts, last_login_at,
@@ -614,6 +760,9 @@ SELECT e.id, e.school_id,
        now() - interval '400 days', now(), 0
 FROM employees e;
 
+--     Block 2: one account per pupil, ids 1001..102800 = 1000 + student.id. This is the
+--     block whose growth moved everything else: it is 101,800 rows wide now, not 6,000,
+--     which is what pushed block 3 out to 200,000.
 INSERT INTO users (id, school_id, username, email, user_id, full_name, password, phone_number,
                    user_status, enabled, account_locked, email_verified, phone_verified,
                    password_expired, require_password_change, login_attempts,
@@ -629,11 +778,13 @@ FROM students st;
 
 --     A parent is global but a user is not, so a parent account is anchored to the school of
 --     its first child; MIN/order is stable because parent_student is keyed by (parent, student).
+--     ids 200001..201500, i.e. 200000 + parent.id -- the offset that used to be 20000 and
+--     moved for the reason given at the head of this section.
 INSERT INTO users (id, school_id, username, email, user_id, full_name, password, phone_number,
                    user_status, enabled, account_locked, email_verified, phone_verified,
                    password_expired, require_password_change, login_attempts,
                    employee_id, student_id, parent_id, created_at, updated_at, version)
-SELECT 20000 + p.id, child.school_id,
+SELECT 200000 + p.id, child.school_id,
        'par' || p.id, 'paruser' || p.id || '@school' || child.school_id || '.example',
        'PU' || lpad(p.id::text, 6, '0'), p.first_name || ' ' || p.last_name,
        '$2a$10$00000000000000000000000000000000000000000000000000000', p.phone_number,
@@ -654,11 +805,21 @@ SET    user_id = u.id, updated_at = now()
 FROM   users u
 WHERE  u.parent_id = p.id;
 
--- ── 24. user_roles (7,680) — roles are a collection table, not a column ───
+-- ── 24. user_roles (103,480) — roles are a collection table, not a column ──
 --     User.java:48-51 maps Set<String> roles onto user_roles(user_id, role); V3 adds
 --     uq_user_roles_user_role because the @ElementCollection table had no key at all.
 --     The vocabulary is stored WITHOUT the ROLE_ prefix (RoleEnum.java:9-12,
 --     SecurityConfig.java:119-133; AuthController.java:88 strips ROLE_ on the way in).
+--     One row per user, so the count followed users: 103,480.
+--     The split the CASE below produces, stated because a probe reads it and a reader
+--     should not have to derive it: TEACHER 135 (the is_teaching employees), STUDENT
+--     101,800 (one per pupil, at the roll's new size), PARENT 1,500, and of the 45
+--     non-teaching employees ACCOUNTANT where u.id % 9 = 0 -- employee user ids 54, 99,
+--     108, 144 and 180, so 5 -- and ADMIN for the other 40.
+--     None of those staff numbers moved with the roll, and that is not an accident of the
+--     CASE: the employee arm tests u.id % 9, and section 22 left employee user ids at
+--     1..180 precisely so this split would keep meaning what it used to. Move block 1 and
+--     the ACCOUNTANT/ADMIN counts move with it.
 --     NOTE: user_roles carries no school_id, so V6's Rule I-1 does not cover it -- the
 --     only tenant path into it is users.school_id -> user_roles by user_id.
 INSERT INTO user_roles (user_id, role)
@@ -675,6 +836,10 @@ LEFT JOIN employees e ON e.id = u.employee_id;
 -- ── 25. notifications (4,000) and announcements (4,000) ────────────────────
 --     Both read newest-first and V4 indexes them on (school_id, created_on DESC) and
 --     (school_id, is_published, publish_date DESC), so those timestamps are populated.
+--     1,000 per school is the tenant's own feed volume, not a function of its pupil
+--     count, so these two did not move with the roll. The INDIVIDUAL rows' recipient_ids
+--     '1001,1002' still name two real accounts: student users begin at 1001 (section 22,
+--     block 2), and that offset was kept for exactly that reason.
 INSERT INTO notifications (id, school_id, title, message, channel, notification_type,
                            recipient_type, recipient_ids, delivery_status, read_status,
                            priority, is_important, scheduled_at, sent_at, created_on, updated_on, version)
@@ -714,6 +879,11 @@ FROM perf_school s, generate_series(1, 1000) AS n(n);
 --     students, V1:447 for fees), so the application's next INSERT takes the next sequence
 --     value; without this it would collide with a seeded id. The loop covers exactly the
 --     tables that have one -- user_roles (V1:1167) and parent_student (V1:677) do not.
+--     The values that now matter are students at 101,800, student_fees at 509,000 (its
+--     last row is pupil 101,800's fee 5), fee_payments and receipts at 508,999, and users
+--     at 201,500 -- the top of the PARENT block, not of the student block. Taking max(id)
+--     rather than a per-table constant is what keeps that three-block layout safe:
+--     whichever block ends up tallest is the one the application has to clear.
 DO $$
 DECLARE r record;
 BEGIN
@@ -739,6 +909,8 @@ DO $$ BEGIN
     -- school 2's, and names fee 37, which really is school 2's first fee. That makes
     -- fk_student_fee_student_same_school the constraint that refuses it, rather than
     -- uq_student_fee firing first on an already-seeded pair.
+    -- The sentinel id 900001 is still clear of the seeded block, which now runs to 509,000
+    -- (five fees per pupil across 101,800 pupils); a roll past 180,000 pupils moves it.
     INSERT INTO student_fees (id, school_id, student_id, fee_id, total_amount, amount_paid, status)
     VALUES (900001, 2, 1, 37, 100, 0, 'PENDING');
     RAISE WARNING 'NEGATIVE TEST (a) FAILED: cross-tenant student_fees row was accepted';
@@ -775,12 +947,30 @@ DO $$ BEGIN
     THEN RAISE EXCEPTION 'seed integrity: an attendance disagrees with its slot'; END IF;
   IF EXISTS (SELECT 1 FROM parent_student ps JOIN students st ON st.id = ps.student_id WHERE st.school_id <> ps.school_id)
     THEN RAISE EXCEPTION 'seed integrity: a parent link disagrees with its student'; END IF;
-  IF (SELECT count(*) FROM students) <> 6000
-    THEN RAISE EXCEPTION 'seed integrity: expected 6000 students, got %', (SELECT count(*) FROM students); END IF;
-  IF (SELECT count(*) FROM student_fees) <> 30000
-    THEN RAISE EXCEPTION 'seed integrity: expected 30000 student_fees, got %', (SELECT count(*) FROM student_fees); END IF;
-  IF (SELECT count(*) FROM attendances) <> 12000
-    THEN RAISE EXCEPTION 'seed integrity: expected 12000 attendances, got %', (SELECT count(*) FROM attendances); END IF;
+  IF (SELECT count(*) FROM students) <> 101800
+    THEN RAISE EXCEPTION 'seed integrity: expected 101800 students, got %', (SELECT count(*) FROM students); END IF;
+  IF (SELECT count(*) FROM student_fees) <> 509000
+    THEN RAISE EXCEPTION 'seed integrity: expected 509000 student_fees, got %', (SELECT count(*) FROM student_fees); END IF;
+  IF (SELECT count(*) FROM attendances) <> 203600
+    THEN RAISE EXCEPTION 'seed integrity: expected 203600 attendances, got %', (SELECT count(*) FROM attendances); END IF;
+  IF (SELECT count(*) FROM users) <> 103480
+    THEN RAISE EXCEPTION 'seed integrity: expected 103480 users (180 employees + 101800 pupils + 1500 parents), got %', (SELECT count(*) FROM users); END IF;
+  -- NFR-01 is a PER-SCHOOL clause, so the totals above are not the promise; these two
+  -- are. A dataset can hold a six-figure roll and still fail it by spreading it thin,
+  -- which is how the previous shape read as a pass: 6,000 pupils over four tenants, 2,400
+  -- in the largest, and only a cross-table sum tested.
+  IF (SELECT count(*) FROM students WHERE school_id = 1) < 50000
+    THEN RAISE EXCEPTION 'seed integrity: NFR-01 wants >= 50000 pupils PER SCHOOL, school 1 holds %', (SELECT count(*) FROM students WHERE school_id = 1); END IF;
+  IF (SELECT count(*) FROM students WHERE school_id = 2) < 50000
+    THEN RAISE EXCEPTION 'seed integrity: NFR-01 wants >= 50000 pupils PER SCHOOL, school 2 holds %', (SELECT count(*) FROM students WHERE school_id = 2); END IF;
+  -- The three user id blocks must not touch (section 22): employee users end at 180,
+  -- student users run 1001..102800, parent users start at 200000. A PK clash would abort
+  -- the load either way; naming the block turns the symptom into the cause, and turns a
+  -- future roll past 199,000 pupils from a crash into a sentence.
+  IF (SELECT count(*) FROM users WHERE student_id IS NOT NULL AND (id < 1001 OR id >= 200000)) <> 0
+    THEN RAISE EXCEPTION 'seed integrity: a student user left its 1001..199999 block'; END IF;
+  IF (SELECT count(*) FROM users WHERE parent_id IS NOT NULL AND id < 200000) <> 0
+    THEN RAISE EXCEPTION 'seed integrity: a parent user is inside the student id block'; END IF;
 END $$;
 
 COMMIT;
@@ -817,7 +1007,8 @@ WITH counts AS (
 )
 SELECT table_name, rows FROM counts ORDER BY rows DESC;
 
--- The number the Definition of Done asks about:
+-- The aggregate, which is the number that gets quoted; the per-school split printed below
+-- it is the one that decides NFR-01, because that clause is per school.
 WITH counts AS (
   SELECT count(*) AS rows FROM students UNION ALL SELECT count(*) FROM student_fees UNION ALL
   SELECT count(*) FROM attendances UNION ALL SELECT count(*) FROM student_exams UNION ALL
@@ -844,11 +1035,16 @@ FROM students st GROUP BY st.school_id ORDER BY st.school_id;
 
 -- ============================================================================
 -- MEASUREMENT PROBES (run after `ANALYZE;`, each with EXPLAIN (ANALYZE, BUFFERS)
--- prefixed; school 1 is the 2,400-student tenant):
+-- prefixed; schools 1 and 2 are the 50,000-pupil volume tenants NFR-01 names, so
+-- probes P1..P5 measure a tenant the clause actually describes):
 --
---  P1  deep page of the roster
+--  P1  deep page of the roster. OFFSET 40000 is 40,000 rows into school 1's 47,369
+--      active pupils -- a real deep walk, not a page past the end, and the same
+--      position verify-perf-50k.sh drives over HTTP (page 4000 at size 20). The old
+--      OFFSET 40 was written when the tenant held 2,400 pupils; at 50,000 it stopped
+--      being deep, so it is moved with the shape.
 --      SELECT id, first_name, last_name, status FROM students
---       WHERE school_id = 1 AND status = '1' ORDER BY id LIMIT 20 OFFSET 40;
+--       WHERE school_id = 1 AND status = '1' ORDER BY id LIMIT 20 OFFSET 40000;
 --  P2  head-count
 --      SELECT count(*) FROM students WHERE school_id = 1;
 --  P3  fee ledger joined to the roll
