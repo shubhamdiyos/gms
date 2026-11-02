@@ -1,10 +1,14 @@
 package com.gms.controller;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Result;
+import com.gms.model.entity.Student;
+import com.gms.model.entity.User;
 import com.gms.model.request.ResultRequest;
 import com.gms.model.response.ResultResponse;
 import com.gms.security.TenantContext;
 import com.gms.service.ResultService;
+import com.gms.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
@@ -20,9 +24,11 @@ import java.util.stream.Collectors;
 public class ResultController {
 
     private final ResultService resultService;
+    private final UserService userService;
 
-    public ResultController(ResultService resultService) {
+    public ResultController(ResultService resultService, UserService userService) {
         this.resultService = resultService;
+        this.userService = userService;
     }
 
     @PostMapping
@@ -53,6 +59,10 @@ public class ResultController {
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<ResultResponse>> getResultsForStudent(@PathVariable Integer studentId) {
+        // F-1 fix: STUDENT callers can only access their own results
+        if (TenantContext.roles().contains("STUDENT")) {
+            validateStudentIsSelf(TenantContext.username(), studentId);
+        }
         ResponseEntity<List<Result>> result = resultService.getResultsForStudent(studentId);
         if (result.getBody() != null) {
             List<ResultResponse> responses = result.getBody().stream()
@@ -61,6 +71,18 @@ public class ResultController {
             return ResponseEntity.ok(responses);
         }
         return ResponseEntity.ok(java.util.Collections.emptyList());
+    }
+
+    private void validateStudentIsSelf(String username, Integer studentId) {
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new TenantAccessDeniedException("User not found"));
+        Student student = user.getStudent();
+        if (student == null) {
+            throw new TenantAccessDeniedException("Student profile not found");
+        }
+        if (!student.getId().equals(studentId)) {
+            throw new TenantAccessDeniedException("Not authorized to access this student's results");
+        }
     }
 
     private ResultResponse mapToResponse(Result result) {

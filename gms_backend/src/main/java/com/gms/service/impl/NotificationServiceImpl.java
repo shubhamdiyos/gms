@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Notification;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
@@ -213,6 +214,14 @@ public class NotificationServiceImpl implements NotificationService {
         // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
+
+        // ADMIN/SUPERADMIN can mark any notification as read; everyone else must be a named
+        // recipient — otherwise a STUDENT could walk ids and clear another user's unread badge (finding F-2).
+        if (!TenantContext.roles().stream().anyMatch(r -> r.equals("ADMIN") || r.equals("SUPERADMIN"))) {
+            if (!addressesUser(notification.getRecipientIds(), TenantContext.userId())) {
+                throw new TenantAccessDeniedException("Not authorized to mark this notification as read");
+            }
+        }
 
         // Mark as read
         notification.setReadStatus("READ");
