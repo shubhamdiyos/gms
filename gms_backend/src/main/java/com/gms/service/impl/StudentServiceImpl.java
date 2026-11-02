@@ -66,8 +66,9 @@ public class StudentServiceImpl implements StudentService {
     private final SubjectService subjectService;
     private final NotificationService notificationService;
     private final TeacherAssignmentService teacherAssignmentService;
+    private final AttendanceService attendanceService;
 
-    public StudentServiceImpl(StudentRepository studentRepository, SchoolService schoolService, ClassroomService classroomService, SectionService sectionService, UserService userService, PasswordEncoder passwordEncoder, ResultService resultService, StudentFeeService studentFeeService, TimetableService timetableService, AnnouncementService announcementService, SubjectService subjectService, NotificationService notificationService, TeacherAssignmentService teacherAssignmentService) {
+    public StudentServiceImpl(StudentRepository studentRepository, SchoolService schoolService, ClassroomService classroomService, SectionService sectionService, UserService userService, PasswordEncoder passwordEncoder, ResultService resultService, StudentFeeService studentFeeService, TimetableService timetableService, AnnouncementService announcementService, SubjectService subjectService, NotificationService notificationService, TeacherAssignmentService teacherAssignmentService, AttendanceService attendanceService) {
         this.studentRepository = studentRepository;
         this.schoolService = schoolService;
         this.classroomService = classroomService;
@@ -81,6 +82,7 @@ public class StudentServiceImpl implements StudentService {
         this.subjectService = subjectService;
         this.notificationService = notificationService;
         this.teacherAssignmentService = teacherAssignmentService;
+        this.attendanceService = attendanceService;
     }
 
     @Override
@@ -428,11 +430,17 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Get subjects for the student's classroom using service
-        // Temporarily simplified - will be enhanced when proper service methods are available
-        List<Subject> subjects = subjectService.findBySchool();
-        return subjects.stream()
-                .map(this::toSubjectResponse)
+        Classroom classroom = student.getClassroom();
+        if (classroom == null) {
+            return Collections.emptyList();
+        }
+
+        // ACD-02: Return subjects assigned to the student's classroom (not all school subjects)
+        List<com.gms.model.response.TeacherAssignmentResponse> assignments = 
+                teacherAssignmentService.getAssignmentsByClassroom(classroom.getId());
+        return assignments.stream()
+                .map(com.gms.model.response.TeacherAssignmentResponse::getSubject)
+                .distinct()
                 .collect(Collectors.toList());
     }
 
@@ -447,9 +455,10 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // TODO: Implement attendance retrieval when circular dependency is resolved
-        // For now, return empty list to prevent circular dependency
-        return Collections.emptyList();
+        // ACD-02: Return last 30 days of attendance for the authenticated student
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(30);
+        return attendanceService.getAttendanceForStudent(student.getId(), startDate, endDate);
     }
 
     @Override
@@ -463,9 +472,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use result service to get student results (placeholder - need proper service method)
-        // Temporarily using a mock implementation since ResultService.findBySchool doesn't exist yet
-        List<Result> results = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return all results for the authenticated student
+        ResponseEntity<List<Result>> response = resultService.getResultsForStudent(student.getId());
+        List<Result> results = response.getBody();
+        if (results == null) {
+            return Collections.emptyList();
+        }
         return results.stream()
                 .map(this::toResultResponse)
                 .collect(Collectors.toList());
@@ -482,9 +494,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use student fee service to get fees (placeholder - need proper service method)
-        // Temporarily using a mock implementation since StudentFeeService.findBySchool doesn't exist yet
-        List<StudentFee> studentFees = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return all fees for the authenticated student
+        ResponseEntity<List<StudentFee>> response = studentFeeService.getStudentFeesByStudent(student.getId());
+        List<StudentFee> studentFees = response.getBody();
+        if (studentFees == null) {
+            return Collections.emptyList();
+        }
         return studentFees.stream()
                 .map(this::toStudentFeeResponse)
                 .collect(Collectors.toList());
@@ -524,11 +539,16 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use teacher assignment service to get classroom teachers
-        // Temporarily using a mock implementation since TeacherAssignmentService.findBySchool doesn't exist yet
-        List<TeacherAssignment> assignments = Collections.emptyList(); // TODO: Implement proper service method
+        Classroom classroom = student.getClassroom();
+        if (classroom == null) {
+            return Collections.emptyList();
+        }
+
+        // ACD-02: Return teachers assigned to the student's classroom
+        List<com.gms.model.response.TeacherAssignmentResponse> assignments = 
+                teacherAssignmentService.getAssignmentsByClassroom(classroom.getId());
         return assignments.stream()
-                .map(assignment -> toEmployeeResponse(assignment.getTeacher()))
+                .map(com.gms.model.response.TeacherAssignmentResponse::getTeacher)
                 .distinct()
                 .collect(Collectors.toList());
     }
@@ -544,9 +564,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use announcement service to get school announcements
-        // Temporarily using a mock implementation since AnnouncementService.findBySchool doesn't exist yet
-        List<Announcement> announcements = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return active (published, non-expired) announcements for the student's school
+        ResponseEntity<List<Announcement>> response = announcementService.getActiveAnnouncements();
+        List<Announcement> announcements = response.getBody();
+        if (announcements == null) {
+            return Collections.emptyList();
+        }
         return announcements.stream()
                 .map(this::toAnnouncementResponse)
                 .collect(Collectors.toList());
@@ -563,9 +586,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use notification service to get user notifications
-        // Temporarily using a mock implementation since NotificationService.findBySchool doesn't exist yet
-        List<Notification> notifications = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return notifications addressed to the authenticated student's user account
+        ResponseEntity<List<Notification>> response = notificationService.getNotificationsByUserId(user.getId());
+        List<Notification> notifications = response.getBody();
+        if (notifications == null) {
+            return Collections.emptyList();
+        }
         return notifications.stream()
                 .map(this::toNotificationResponse)
                 .collect(Collectors.toList());

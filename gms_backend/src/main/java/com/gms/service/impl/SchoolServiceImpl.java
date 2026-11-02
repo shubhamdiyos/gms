@@ -95,7 +95,10 @@ public class SchoolServiceImpl implements SchoolService {
         String[] nameParts = request.getAdminFullName() != null ? request.getAdminFullName().trim().split("\\s+", 2) : new String[]{"Admin", "User"};
         String base = (nameParts[0].substring(0, 1) + (nameParts.length > 1 ? nameParts[1] : "")).toLowerCase().replaceAll("[^a-z0-9]", "");
         String username = generateUniqueUsername(base);
-        String tempPassword = base + "@123"; // simple; replace with stronger generator later
+        // ACD-13 fix: derive temporary password from the FINAL username, not the base.
+        // If base="jsmith" is taken, generateUniqueUsername returns "jsmith1", so the password
+        // must be "jsmith1@123" (matching the username), not "jsmith@123" (which would fail auth).
+        String tempPassword = username + "@123";
 
         User admin = new User();
         admin.setSchool(saved);
