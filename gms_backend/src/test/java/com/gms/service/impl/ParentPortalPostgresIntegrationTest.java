@@ -41,6 +41,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.transaction.support.TransactionTemplate;
 
 import java.time.LocalDateTime;
+import java.time.temporal.ChronoUnit;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Set;
@@ -132,7 +133,9 @@ class ParentPortalPostgresIntegrationTest extends BasePostgresIntegrationTest {
             teacherAssignmentRepository.save(
                     assignment(schoolOne, unlinkedTeacher, history, unlinkedClassroom));
 
-            LocalDateTime now = LocalDateTime.now();
+            // PostgreSQL `timestamp` stores microseconds, so a nanosecond-precision `now()` would make the
+            // read-back assertions below compare 895530734 ns against the server's 895531 µs.
+            LocalDateTime now = LocalDateTime.now().truncatedTo(ChronoUnit.MICROS);
             parentAnnouncement = announcementRepository.save(announcement(
                     schoolOne, "Parent meeting", "PARENTS", now.minusHours(3), true));
             parentAnnouncement.setContent("Meet the class teachers on Friday.");
