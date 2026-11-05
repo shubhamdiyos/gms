@@ -214,7 +214,9 @@ jobs:
         # a source file and duplicates no assertion: when it goes red the fix is build configuration —
         # an `<include>` for the class, or binding failsafe to the `verify` phase — and the message
         # says which. The abstract-base exemption is not a loophole: a base class has no test of its
-        # own, and its concrete subclasses are each enumerated in full.
+        # own, and its concrete subclasses are each enumerated in full. A `@Nested` class is likewise
+        # not a skip: its tests run under `Outer$Inner` reports, so `class_tally` sums the family and a
+        # nested class with no tests of its own still reports zero.
         #
         # Run 2026-11-02 against `mvn -B clean verify` on JDK 21: 16 classes, 104 tests, 0 skipped,
         # step green. Four controls against doctored copies of that same output, each exit 1 naming the
@@ -222,6 +224,13 @@ jobs:
         # its report deleted (the `<excludes>` case), `tests="0"` (the emptied case), and a
         # `StudentTenantIsolationIT` source with no failsafe bound. A fifth control — an
         # `abstract class AbstractLiveProbeTest` — stayed silent, as designed.
+        #
+        # PR #33 found the gap the 2026-11-02 controls could not: `ProductionSecurityIntegrationTest`
+        # holds all of its tests in `@Nested` classes, so surefire writes `Outer` with `tests="0"` and
+        # `Outer$CsrfProtection` and friends with the real counts. The guard read only the outer report
+        # and refused a class that had in fact run — 352 tests executed, one name reported as empty. The
+        # emptied-class control is still honoured, because zero children plus the disabled ones would
+        # only ever add to zero.
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -259,6 +268,21 @@ jobs:
           def tally(suite):
               return (int(suite.get("tests") or 0), int(suite.get("skipped") or 0),
                       int(suite.get("failures") or 0), int(suite.get("errors") or 0))
+
+          def class_tally(fqcn):
+              # `@Nested` classes run under their own names (`Outer$Inner`) and write their own reports,
+              # while surefire also writes an `Outer` report whose `tests` attribute is 0 because every
+              # test lives one level down. Counting the outer report alone would refuse a class that did
+              # run — the shape PR #33 first hit, on `ProductionSecurityIntegrationTest`. The children are
+              # folded in here, and never counted twice: the source loop below enumerates one top-level
+              # type per file, so a nested class is not visited on its own.
+              n = sk = fa = er = 0
+              prefix = fqcn + "$"
+              for name, suite in reports.items():
+                  if name == fqcn or name.startswith(prefix):
+                      cn, csk, cfa, cer = tally(suite)
+                      n, sk, fa, er = n + cn, sk + csk, fa + cfa, er + cer
+              return n, sk, fa, er
 
           bad, checked, executed, skipped = [], 0, 0, 0
           for path in sorted(glob.glob("src/test/java/**/*.java", recursive=True)):
@@ -311,7 +335,7 @@ jobs:
                              f"it did not execute (excluded, disabled, emptied, or its package does not "
                              f"match its directory)")
                   continue
-              n, sk, fa, er = tally(suite)
+              n, sk, fa, er = class_tally(fqcn)
               executed += n
               skipped += sk
               if n == 0:
