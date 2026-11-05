@@ -407,6 +407,8 @@ public class StudentServiceImpl implements StudentService {
                 s.getDateOfBirth(),
                 s.getGender(),
                 s.getStatus(),
+                null,
+                null,
                 null
         );
     }

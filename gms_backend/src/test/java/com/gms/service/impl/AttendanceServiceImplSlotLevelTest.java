@@ -105,7 +105,8 @@ class AttendanceServiceImplSlotLevelTest {
         teacher.setEmployee(new Employee());
         teacher.getEmployee().setId(500);
 
-        testDate = LocalDate.of(2026, 11, 3);
+        // A Monday, matching the MONDAY slots below: attendance may only name a slot that runs that day.
+        testDate = LocalDate.of(2026, 11, 2);
     }
 
     @Test
