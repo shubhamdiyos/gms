@@ -83,6 +83,7 @@ jobs:
         ports:
           - 127.0.0.1:5432:5432
         options: >-
+          --name gms-ci-db
           --health-cmd "pg_isready -U ci_user -d postgres"
           --health-interval 10s
           --health-timeout 5s
@@ -94,6 +95,15 @@ jobs:
       GMS_N1_DB_URL: jdbc:postgresql://127.0.0.1:5432/gms_n_plus_1
       DB_USERNAME: ci_user
       DB_PASSWORD: ci_password
+      # The PostgreSQL-backed integration tests (BasePostgresIntegrationTest subclasses and
+      # PasswordChangeEnforcementFilterTest) read these through application-test.properties. They exist
+      # because those tests used to point at a developer's `localhost:5433/gms_test`, a port the runner
+      # never has — 36 errors on the first PR that added the classes. The database is created by the
+      # step below in the same throwaway sidecar, so the suite runs against a real PostgreSQL instead of
+      # being skipped.
+      TEST_DB_URL: jdbc:postgresql://127.0.0.1:5432/gms_test
+      TEST_DB_USERNAME: ci_user
+      TEST_DB_PASSWORD: ci_password
     defaults:
       run:
         working-directory: gms_backend
@@ -105,6 +115,15 @@ jobs:
           distribution: temurin
           java-version: '21'                     # the project targets 21; JDK 24 breaks Lombok
           cache: maven
+
+      - name: Create the integration-test database
+        # The sidecar above initialises one database (`postgres`). The profile-driven integration tests
+        # need their own, and `application-test.properties` names it `gms_test` (through TEST_DB_URL).
+        # `docker exec` uses the container's own psql, so this step adds no runner package to depend on
+        # and no network surface: the database lives inside the same throwaway container the health check
+        # already watches. `CREATE DATABASE` fails if it already exists, which would mean the service was
+        # not fresh — the correct outcome for a gate that should only ever measure a clean cluster.
+        run: docker exec gms-ci-db psql -U ci_user -d postgres -c 'CREATE DATABASE gms_test'
 
       - name: Compile, test and package
         # `clean` is not decoration. The roadmap records a schema run that "logged no Flyway line at

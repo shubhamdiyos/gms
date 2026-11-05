@@ -198,7 +198,7 @@ const FeePaymentsPage = () => {
         <Typography variant="body2" color="text.secondary">
           Recorded payments cannot be edited or deleted; corrections require a reversal workflow.
           {outstandingFees.length > 0
-            ? ` ${outstandingFees.length} student fee${outstandingFees.length === 1 ? '' : 's'} still owe a balance.`
+            ? ` ${outstandingFees.length} student fee${outstandingFees.length === 1 ? ' still owes' : 's still owe'} a balance.`
             : ' Every student fee is fully paid.'}
         </Typography>
         {outstandingFees.length > 0 && (

@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.config.TenantContextAuditorAware;
 import com.gms.model.entity.FeePayment;
 import com.gms.model.entity.StudentFee;
 import com.gms.model.entity.School;
@@ -8,6 +9,7 @@ import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
 import com.gms.repository.FeePaymentRepository;
 import com.gms.repository.StudentFeeRepository;
+import com.gms.repository.UserRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
@@ -27,15 +29,18 @@ public class FeePaymentServiceImpl implements FeePaymentService {
     private final StudentFeeRepository studentFeeRepository;
     private final SchoolService schoolService;
     private final UserService userService;
+    private final UserRepository userRepository;
 
     public FeePaymentServiceImpl(FeePaymentRepository feePaymentRepository,
                                 StudentFeeRepository studentFeeRepository,
                                 SchoolService schoolService,
-                                UserService userService) {
+                                UserService userService,
+                                UserRepository userRepository) {
         this.feePaymentRepository = feePaymentRepository;
         this.studentFeeRepository = studentFeeRepository;
         this.schoolService = schoolService;
         this.userService = userService;
+        this.userRepository = userRepository;
     }
 
     @Transactional
@@ -50,8 +55,14 @@ public class FeePaymentServiceImpl implements FeePaymentService {
 
         School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
-        User creator = userService.findByEmployee_Id()
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
+        // BKL-08: attribute the payment to the account the verified token names, not to the employee
+        // pointer. An accountant may have a users row and no employees row at all, which made every
+        // payment they recorded answer 404 "Creator user not found".
+        User employeeCreator = userService.findByEmployee_Id().orElse(null);
+        User creator = TenantContextAuditorAware.currentAuditor(userRepository).orElse(employeeCreator);
+        if (creator == null) {
+            throw new EntityNotFoundException("Creator user not found");
+        }
 
         StudentFee studentFee = studentFeeRepository.findByIdForUpdate(
                         request.getStudentFeeId(), TenantContext.schoolId())

@@ -8,14 +8,17 @@ import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
+import com.gms.model.entity.Fee;
 import com.gms.model.entity.FeePayment;
 import com.gms.model.entity.School;
+import com.gms.model.entity.Student;
 import com.gms.model.entity.StudentFee;
 import com.gms.model.entity.User;
 import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
 import com.gms.repository.FeePaymentRepository;
 import com.gms.repository.StudentFeeRepository;
+import com.gms.repository.UserRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.SchoolService;
 import com.gms.service.UserService;
@@ -49,6 +52,9 @@ class FeePaymentServiceImplTest {
     @Mock
     private UserService userService;
 
+    @Mock
+    private UserRepository userRepository;
+
     @InjectMocks
     private FeePaymentServiceImpl feePaymentService;
 
@@ -68,6 +74,15 @@ class FeePaymentServiceImplTest {
 
         studentFee = new StudentFee();
         studentFee.setId(42);
+        Student student = new Student();
+        student.setId(7);
+        student.setFirstName("Leila");
+        student.setLastName("Farouk");
+        studentFee.setStudent(student);
+        Fee fee = new Fee();
+        fee.setId(3);
+        fee.setFeeType("TUITION");
+        studentFee.setFee(fee);
         studentFee.setTotalAmount(new BigDecimal("1000.00"));
         studentFee.setAmountPaid(new BigDecimal("250.00"));
         studentFee.setBalanceAmount(new BigDecimal("750.00"));
