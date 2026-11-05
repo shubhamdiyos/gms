@@ -836,7 +836,7 @@ jobs:
 
       - name: Boot the application and run the nine live steps
         # One command, and the same command an operator types on a laptop:
-        # `scripts/ci-live-tenancy.sh` owns the boot, the wait on /actuator/health/liveness,
+        # `scripts/ci-live-tenancy.sh` owns the boot, the wait on /actuator/health/readiness,
         # the suite list, the per-suite skip ceilings and the teardown. It boots with no
         # profile, so `StartupSecurityValidator` and the Flyway chain are themselves part of
         # what has to pass before any suite runs. Its exit code is this step's.
@@ -1029,7 +1029,7 @@ jobs:
       - name: Boot the application and run the browser journey
         # One command, and the same command an operator types on a laptop:
         # `scripts/ci-playwright-e2e.sh` owns the boot of the jar, the wait on
-        # `/actuator/health/liveness`, the Playwright invocation and the teardown. It boots with no
+        # `/actuator/health/readiness`, the Playwright invocation and the teardown. It boots with no
         # profile, so `StartupSecurityValidator` and the Flyway chain are themselves part of what has
         # to pass before the browser navigates. Its exit code is this step's, and a non-zero one is a
         # finding rather than something to retry. Note what the job deliberately does NOT do: run

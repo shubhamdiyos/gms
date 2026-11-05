@@ -350,8 +350,10 @@ echo "== boot =="
 # out of this log): nothing here parses SQL, and the browser suite's transcript is E2E_LOG.
 java -jar "$JAR" --server.port="$API_PORT" >"$APP_LOG" 2>&1 &
 APP_PID=$!
-echo "pid $APP_PID; waiting for $API_ORIGIN/actuator/health/liveness (max ${BOOT_TIMEOUT}s)"
+echo "pid $APP_PID; waiting for $API_ORIGIN/actuator/health/readiness (max ${BOOT_TIMEOUT}s)"
 
+# Readiness, not liveness: liveness turns UP while the CommandLineRunners are still running,
+# and the platform account the suite logs in with is created by one of them.
 ready=""
 for ((waited = 0; waited < BOOT_TIMEOUT; waited += 3)); do
   if ! kill -0 "$APP_PID" 2>/dev/null; then
@@ -359,12 +361,12 @@ for ((waited = 0; waited < BOOT_TIMEOUT; waited += 3)); do
     tail -n 60 "$APP_LOG"
     exit 1
   fi
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$API_ORIGIN/actuator/health/liveness" || echo 000)
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$API_ORIGIN/actuator/health/readiness" || echo 000)
   if [[ "$code" == "200" ]]; then ready=yes; break; fi
   sleep 3
 done
 if [[ -z "$ready" ]]; then
-  echo "FATAL: nothing answered GET $API_ORIGIN/actuator/health/liveness within ${BOOT_TIMEOUT}s."
+  echo "FATAL: nothing answered GET $API_ORIGIN/actuator/health/readiness within ${BOOT_TIMEOUT}s."
   tail -n 60 "$APP_LOG"
   exit 1
 fi
