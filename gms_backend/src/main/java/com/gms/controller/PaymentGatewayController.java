@@ -43,13 +43,13 @@ public class PaymentGatewayController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<PaymentGateway>> getAllPaymentGateways() {
         return paymentGatewayService.getAllPaymentGateways();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<PaymentGateway> getPaymentGatewayById(@PathVariable Integer id) {
         return paymentGatewayService.getPaymentGatewayById(id);
     }

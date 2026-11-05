@@ -43,13 +43,13 @@ public class GradingSchemeController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<GradingScheme>> getAllGradingSchemes() {
         return gradingSchemeService.getAllGradingSchemes();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<GradingScheme> getGradingSchemeById(@PathVariable Integer id) {
         return gradingSchemeService.getGradingSchemeById(id);
     }

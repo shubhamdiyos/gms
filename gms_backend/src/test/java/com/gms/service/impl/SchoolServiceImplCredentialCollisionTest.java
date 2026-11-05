@@ -22,14 +22,17 @@ import org.mockito.junit.jupiter.MockitoExtension;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
 /**
- * ACD-13: Generated school administrator username/password collision.
+ * ACD-13 + SEC-CRED-03: Username collision resolution and secure credential generation.
  *
- * <p>When two schools are provisioned with administrators having the same name base (e.g., "John Smith"
- * → "jsmith"), the second administrator's username gets a suffix ("jsmith1") to avoid collision. The
- * temporary password must be derived from the FINAL username ("jsmith1@123"), not the original base
- * ("jsmith@123"), otherwise the administrator receives credentials that cannot authenticate.</p>
+ * When two schools are provisioned with administrators having the same name base (e.g., "John Smith"
+ * → "jsmith"), the second administrator's username gets a suffix ("jsmith1") to avoid collision.
  *
- * <p>This test verifies that the password generation uses the final username after collision resolution.</p>
+ * Passwords are now generated using SecureCredentialGenerator (cryptographically secure random)
+ * instead of the old predictable pattern (username + "@123"). This test verifies:
+ * 1. Username collision resolution still works correctly
+ * 2. Passwords are randomly generated (not derived from username)
+ * 3. Passwords are encoded before storage
+ * 4. requirePasswordChange flag is set to enforce first-login rotation
  */
 @ExtendWith(MockitoExtension.class)
 class SchoolServiceImplCredentialCollisionTest {
@@ -61,7 +64,7 @@ class SchoolServiceImplCredentialCollisionTest {
     }
 
     @Test
-    void whenUsernameCollides_thenPasswordMatchesFinalUsername() {
+    void whenUsernameCollides_thenUsernameResolvedAndSecurePasswordSet() {
         // Arrange: first school with "jsmith" already exists
         SchoolRequest request = new SchoolRequest();
         request.setSchoolName("Test School 2");
@@ -94,14 +97,16 @@ class SchoolServiceImplCredentialCollisionTest {
             User finalUser = savedUsers.get(savedUsers.size() - 1); // get the last saved state
 
             assertThat(finalUser.getUsername()).isEqualTo("jsmith1"); // final username with suffix
-            assertThat(finalUser.getPassword()).isEqualTo("encoded_jsmith1@123"); // password derived from final username
-            // The password encoder receives "jsmith1@123", NOT "jsmith@123"
-            // This proves the fix: tempPassword = username + "@123", not base + "@123"
+            // Password is randomly generated (not derived from username)
+            assertThat(finalUser.getPassword()).startsWith("encoded_");
+            assertThat(finalUser.getPassword()).hasSize(20); // "encoded_" (8) + 12-char random password
+            assertThat(finalUser.getPassword()).doesNotContain("@123"); // NOT the old predictable pattern
+            assertThat(finalUser.isRequirePasswordChange()).isTrue();
         }
     }
 
     @Test
-    void whenNoCollision_thenPasswordMatchesBaseUsername() {
+    void whenNoCollision_thenUsernameBaseAndSecurePasswordSet() {
         // Arrange: no collision, "jsmith" is available
         SchoolRequest request = new SchoolRequest();
         request.setSchoolName("Test School 1");
@@ -133,7 +138,11 @@ class SchoolServiceImplCredentialCollisionTest {
             User finalUser = savedUsers.get(savedUsers.size() - 1); // get the last saved state
 
             assertThat(finalUser.getUsername()).isEqualTo("jsmith"); // base username, no suffix
-            assertThat(finalUser.getPassword()).isEqualTo("encoded_jsmith@123"); // password derived from username
+            // Password is randomly generated (not derived from username)
+            assertThat(finalUser.getPassword()).startsWith("encoded_");
+            assertThat(finalUser.getPassword()).hasSize(20); // "encoded_" (8) + 12-char random password
+            assertThat(finalUser.getPassword()).doesNotContain("@123"); // NOT the old predictable pattern
+            assertThat(finalUser.isRequirePasswordChange()).isTrue();
         }
     }
 }

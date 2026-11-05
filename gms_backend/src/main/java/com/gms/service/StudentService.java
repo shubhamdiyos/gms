@@ -2,6 +2,7 @@ package com.gms.service;
 
 import com.gms.model.entity.Student;
 import com.gms.model.request.StudentRequest;
+import com.gms.model.request.StudentSelfUpdateRequest;
 import com.gms.model.response.*;
 import org.springframework.data.domain.Page;
 import org.springframework.http.ResponseEntity;
@@ -43,8 +44,10 @@ public interface StudentService {
      * The login account every registered pupil has: a {@code STUDENT}-only user in the pupil's school, with
      * a forced password change. An admitted pupil that skipped this would exist on the register but could
      * never sign in.
+     *
+     * @return the generated plaintext temporary password (ACD-13-02: unique per account)
      */
-    void createUserForStudent(Student student);
+    String createUserForStudent(Student student);
     
     // Service-to-service communication method
     java.util.Optional<Student> findById(Integer id);
@@ -52,6 +55,12 @@ public interface StudentService {
     // Student-specific methods
     StudentResponse getStudentProfile(String username);
     StudentResponse getMyProfile();
+
+    /**
+     * A pupil editing their own contact details. Only the name and phone number are writable here: the
+     * school office owns enrolment data, and the e-mail is the login identity.
+     */
+    StudentResponse updateMyProfile(StudentSelfUpdateRequest request);
     
     // Enhanced student role methods
     ClassroomResponse getMyClassroom(String username);

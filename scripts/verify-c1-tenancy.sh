@@ -32,12 +32,15 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
-# The school administrator's password is derived by SchoolServiceImpl from the
-# administrator's full name: lowercase first-initial + surname + "@123".
+# The administrators' full names decide their usernames. Their passwords do not follow from the
+# names any more: school creation issues a random temporary password and returns it once, so the
+# value below is only what each account rotates to before this suite's business calls.
 ADMIN_A_NAME=${GMS_SCHOOL_A_ADMIN_NAME:-Alice Principal}
 ADMIN_B_NAME=${GMS_SCHOOL_B_ADMIN_NAME:-Bob Principal}
+ROTATED_ADMIN_PASSWORD=${GMS_ROTATED_ADMIN_PASSWORD:-Test_Admin_2026!}
 # The password policy (PasswordValidator) accepts letters, digits and
 # @$!%*?&.#_ only — a hyphen fails it, which is what the first run of this
 # script got wrong.
@@ -75,20 +78,16 @@ refused() { # refused <name> <code>
 call() { # call <method> <path> [token] [json]
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
 }
 
-token_of() { jq -r '.accessToken // empty' "$body"; }
-
-# The administrator username the school-creation flow generates.
-admin_username() { # admin_username <full name>
-  local first last
-  first=$(printf '%s' "$1" | awk '{print $1}')
-  last=$(printf '%s' "$1" | awk '{print $2}')
-  printf '%s%s' "${first:0:1}" "$last" | tr 'A-Z' 'a-z'
-}
+token_of() { local t; t=$(jq -r '.accessToken // empty' "$body"); printf '%s' "${t:-$(csrf_auth_token)}"; }
 
 echo "=== 1. Platform login ==="
 code=$(call POST /auth/login "" "{\"username\":\"$SUPERUSER\",\"password\":\"$SUPERPASSWORD\"}")
@@ -101,24 +100,34 @@ echo "=== 2. The platform creates two schools ==="
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Northgate High","schoolCode":"NGH001","adminFullName":"'"$ADMIN_A_NAME"'","adminEmail":"alice@northgate.test"}')
 check "school A created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_A_USER=$ISSUED_ADMIN
+ADMIN_A_ISSUED=$ISSUED_ADMIN_PASSWORD
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Southbank Academy","schoolCode":"SBA002","adminFullName":"'"$ADMIN_B_NAME"'","adminEmail":"bob@southbank.test"}')
 check "school B created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_B_USER=$ISSUED_ADMIN
+ADMIN_B_ISSUED=$ISSUED_ADMIN_PASSWORD
 
 echo
-echo "=== 3. Both school administrators log in ==="
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_USER@123\"}")
+echo "=== 3. Both school administrators log in and rotate the issued password ==="
+# Rotation is not ceremony: `PasswordChangeEnforcementFilter` refuses every business route with
+# 403 while `requirePasswordChange` is set, and every issued credential carries that flag.
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_ISSUED\"}")
 check "school A admin login" "200" "$code"
 TOKEN_A=$(token_of)
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_USER@123\"}")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_ISSUED\"}")
 check "school B admin login" "200" "$code"
 TOKEN_B=$(token_of)
 if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
   echo "FATAL: could not obtain both school administrator tokens"
   exit 1
 fi
+check "school A admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_A" "$ADMIN_A_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
+check "school B admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_B" "$ADMIN_B_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
 
 echo
 echo "=== 4. School A builds its own tenant data ==="

@@ -95,10 +95,8 @@ public class SchoolServiceImpl implements SchoolService {
         String[] nameParts = request.getAdminFullName() != null ? request.getAdminFullName().trim().split("\\s+", 2) : new String[]{"Admin", "User"};
         String base = (nameParts[0].substring(0, 1) + (nameParts.length > 1 ? nameParts[1] : "")).toLowerCase().replaceAll("[^a-z0-9]", "");
         String username = generateUniqueUsername(base);
-        // ACD-13 fix: derive temporary password from the FINAL username, not the base.
-        // If base="jsmith" is taken, generateUniqueUsername returns "jsmith1", so the password
-        // must be "jsmith1@123" (matching the username), not "jsmith@123" (which would fail auth).
-        String tempPassword = username + "@123";
+        // SEC-CRED-03: Use cryptographically secure random password instead of predictable pattern.
+        String tempPassword = com.gms.util.SecureCredentialGenerator.generate();
 
         User admin = new User();
         admin.setSchool(saved);
@@ -153,6 +151,10 @@ public class SchoolServiceImpl implements SchoolService {
         log.info("School created id={} code={}, admin username={} email={}", saved.getId(), saved.getSchoolCode(), username, request.getAdminEmail());
 
         SchoolResponse response = new SchoolResponse(saved.getId(), saved.getSchoolId(), saved.getSchoolName(), saved.getSchoolCode(), saved.getStatus(), saved.isEnabled());
+        // The plaintext credential exists only here. The email above may be undeliverable, and the
+        // stored row is a hash, so the creating SUPERADMIN is handed it once — see SchoolResponse.
+        response.setAdminUsername(username);
+        response.setTemporaryPassword(tempPassword);
         return ResponseEntity.ok(response);
     }
 

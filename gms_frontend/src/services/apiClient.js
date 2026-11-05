@@ -1,6 +1,9 @@
 import axios from 'axios';
 import { toast } from 'react-toastify';
 
+const CSRF_COOKIE_NAME = 'XSRF-TOKEN';
+const CSRF_HEADER_NAME = 'X-XSRF-TOKEN';
+
 // Get API base URL from environment variable or use default
 const getApiBaseUrl = () => {
   const customUrl = import.meta.env.VITE_API_BASE_URL;
@@ -13,20 +16,38 @@ const getApiBaseUrl = () => {
   return 'http://localhost:8080/api/v1';
 };
 
+// Read CSRF token from cookie
+const getCsrfTokenFromCookie = () => {
+  const cookies = document.cookie.split(';');
+  for (let cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME) {
+      return decodeURIComponent(value);
+    }
+  }
+  return null;
+};
+
 // Create axios instance
 const apiClient = axios.create({
   baseURL: getApiBaseUrl(),
   headers: {
     'Content-Type': 'application/json',
   },
+  // Enable credentials for cookie-based authentication
+  withCredentials: true,
 });
 
-// Request interceptor to add auth token
+// Request interceptor to add CSRF token header
 apiClient.interceptors.request.use(
   (config) => {
-    const token = localStorage.getItem('gms_token');
-    if (token) {
-      config.headers.Authorization = `Bearer ${token}`;
+    // Read CSRF token from cookie and add to header for state-changing requests
+    const method = config.method?.toUpperCase();
+    if (method === 'POST' || method === 'PUT' || method === 'PATCH' || method === 'DELETE') {
+      const csrfToken = getCsrfTokenFromCookie();
+      if (csrfToken) {
+        config.headers[CSRF_HEADER_NAME] = csrfToken;
+      }
     }
     return config;
   },
@@ -53,13 +74,17 @@ apiClient.interceptors.response.use(
     }
 
     if (error.response?.status === 401) {
-      // Token expired or invalid
-      localStorage.removeItem('gms_token');
+      // Cookie-based auth: clear local user state and redirect
       localStorage.removeItem('gms_user');
       window.location.href = '/login';
       toast.error('Session expired. Please login again.');
     } else if (error.response?.status === 403) {
-      toast.error('Access denied. You do not have permission to perform this action.');
+      // Check if it's a CSRF error (403 with CSRF message)
+      if (error.response?.data?.error?.toLowerCase().includes('csrf')) {
+        toast.error('Security token mismatch. Please refresh the page and try again.');
+      } else {
+        toast.error('Access denied. You do not have permission to perform this action.');
+      }
     } else if (error.response?.status >= 500) {
       toast.error('Server error. Please try again later.');
     } else if (error.response?.data?.message) {

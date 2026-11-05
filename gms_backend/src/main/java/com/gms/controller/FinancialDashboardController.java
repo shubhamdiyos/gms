@@ -22,7 +22,7 @@ public class FinancialDashboardController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FinancialDashboardResponse> getFinancialDashboard() {
         return financialDashboardService.getFinancialDashboardData();
     }

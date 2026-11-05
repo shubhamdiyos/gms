@@ -33,6 +33,7 @@ import {
   Grade,
   AttachMoney,
   EventNote,
+  Receipt,
 } from '@mui/icons-material';
 import { useAuth, ROLE_PRECEDENCE } from '../../hooks/useAuth';
 import { ROLES, ROUTES, ROLE_LABELS } from '../../constants';
@@ -112,9 +113,29 @@ const NAV_SECTIONS = {
 
   [ROLES.ACCOUNTANT]: [
     {
-      text: 'Fees',
+      text: 'Dashboard',
+      icon: <Dashboard />,
+      path: ROUTES.ACCOUNTANT.DASHBOARD,
+    },
+    {
+      text: 'Payments',
       icon: <Payment />,
-      path: ROUTES.ADMIN.FEES,
+      path: ROUTES.ACCOUNTANT.PAYMENTS,
+    },
+    {
+      text: 'Outstanding Fees',
+      icon: <AttachMoney />,
+      path: ROUTES.ACCOUNTANT.OUTSTANDING,
+    },
+    {
+      text: 'Reports',
+      icon: <BarChart />,
+      path: ROUTES.ACCOUNTANT.REPORTS,
+    },
+    {
+      text: 'Fee Structures',
+      icon: <Receipt />,
+      path: ROUTES.ACCOUNTANT.FEE_STRUCTURES,
     },
   ],
 

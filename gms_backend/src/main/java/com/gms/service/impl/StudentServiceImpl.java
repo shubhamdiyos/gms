@@ -5,6 +5,7 @@ import com.gms.model.entity.*;
 import com.gms.enums.RoleEnum;
 import com.gms.exception.NotFoundException;
 import com.gms.model.request.StudentRequest;
+import com.gms.model.request.StudentSelfUpdateRequest;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.model.response.StudentResponse;
 import com.gms.model.response.SubjectResponse;
@@ -18,6 +19,7 @@ import com.gms.model.response.NotificationResponse;
 import com.gms.repository.StudentRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
+import com.gms.util.SecureCredentialGenerator;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
@@ -94,18 +96,22 @@ public class StudentServiceImpl implements StudentService {
         Student student = createStudentFromRequest(request, new Student());
         Student savedStudent = studentRepository.save(student);
 
-        // Create a corresponding User for the Student
-        createUserForStudent(savedStudent);
+        // ACD-13-02: generate a unique secure temporary password instead of a shared hardcoded one.
+        // The plaintext is returned once in the creation response so the admin can relay it out-of-band.
+        String temporaryPassword = createUserForStudent(savedStudent);
 
-        return ResponseEntity.ok(toResponse(savedStudent));
+        StudentResponse response = toResponse(savedStudent);
+        response.setTemporaryPassword(temporaryPassword);
+        return ResponseEntity.ok(response);
     }
 
     @Override
-    public void createUserForStudent(Student student) {
+    public String createUserForStudent(Student student) {
         if (userService.existsByEmail(student.getEmail())) {
-            // Or link to existing user if that's a desired feature
             throw new IllegalStateException("A user with this email already exists.");
         }
+
+        String temporaryPassword = SecureCredentialGenerator.generate();
 
         User user = new User();
         user.setSchool(student.getSchool());
@@ -113,12 +119,13 @@ public class StudentServiceImpl implements StudentService {
         user.setFullName(student.getFullName());
         user.setEmail(student.getEmail());
         user.setUsername(UsernameGenerator.generateUsername(student.getFirstName(), student.getLastName(), userService));
-        user.setPassword(passwordEncoder.encode("welcome123")); // Default temporary password
+        user.setPassword(passwordEncoder.encode(temporaryPassword));
         user.setRoles(Collections.singleton(RoleEnum.STUDENT.name()));
         user.setRequirePasswordChange(true);
         user.setEnabled(true);
 
         userService.save(user);
+        return temporaryPassword;
     }
 
     @Override
@@ -355,6 +362,25 @@ public class StudentServiceImpl implements StudentService {
     }
 
     @Override
+    @Transactional
+    public StudentResponse updateMyProfile(StudentSelfUpdateRequest request) {
+        String username = TenantContext.username();
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
+
+        Student student = user.getStudent();
+        if (student == null) {
+            throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
+        }
+
+        student.setFirstName(request.getFirstName().trim());
+        student.setLastName(request.getLastName().trim());
+        student.setPhoneNumber(request.getPhoneNumber() == null ? null : request.getPhoneNumber().trim());
+
+        return toResponse(studentRepository.save(student));
+    }
+
+    @Override
     public String nextStudentId() {
         int counter = (int) (studentRepository.count() + 1); // coarse; acceptable for now
         String candidate;
@@ -380,7 +406,8 @@ public class StudentServiceImpl implements StudentService {
                 s.getPhoneNumber(),
                 s.getDateOfBirth(),
                 s.getGender(),
-                s.getStatus()
+                s.getStatus(),
+                null
         );
     }
 
@@ -631,49 +658,77 @@ public class StudentServiceImpl implements StudentService {
     }
 
     private ResultResponse toResultResponse(Result result) {
-        // Simplified response to avoid field access issues
         ResultResponse response = new ResultResponse();
         response.setId(result.getId());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setStudentExamId(result.getStudentExam().getId());
+        response.setStudentName(result.getStudentExam().getStudent().getFullName());
+        response.setExamName(result.getStudentExam().getExamSubject().getExam().getName());
+        response.setSubjectName(result.getStudentExam().getExamSubject().getSubject().getName());
+        response.setObtainedMarks(result.getObtainedMarks());
+        response.setGrade(result.getGrade());
+        response.setPercentage(result.getPercentage());
+        response.setRemarks(result.getRemarks());
+        response.setStatus(result.getStatus());
         return response;
     }
 
     private StudentFeeResponse toStudentFeeResponse(StudentFee studentFee) {
-        // Simplified response to avoid field access issues
-        StudentFeeResponse response = new StudentFeeResponse();
-        response.setId(studentFee.getId());
-        response.setStudentId(studentFee.getStudent().getId());
-        // TODO: Map other fields when entity structure is confirmed
-        return response;
+        return StudentFeeResponseMapper.toResponse(studentFee);
     }
 
     private EmployeeResponse toEmployeeResponse(Employee employee) {
-        // Simplified response to avoid field access issues
         EmployeeResponse response = new EmployeeResponse();
         response.setId(employee.getId());
         response.setFullName(employee.getFullName());
         response.setEmail(employee.getEmail());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setDesignation(employee.getDesignation());
+        response.setDepartment(employee.getDepartment());
         return response;
     }
 
     private AnnouncementResponse toAnnouncementResponse(Announcement announcement) {
-        // Simplified response to avoid field access issues
         AnnouncementResponse response = new AnnouncementResponse();
         response.setId(announcement.getId());
+        response.setSchoolId(announcement.getSchool() != null ? announcement.getSchool().getId() : null);
         response.setTitle(announcement.getTitle());
         response.setContent(announcement.getContent());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setAnnouncementType(announcement.getAnnouncementType());
+        response.setTargetAudience(announcement.getTargetAudience());
+        response.setTargetIds(announcement.getTargetIds());
+        response.setPublishDate(announcement.getPublishDate());
+        response.setExpiryDate(announcement.getExpiryDate());
+        response.setIsPublished(announcement.getIsPublished());
+        response.setPublishedAt(announcement.getPublishedAt());
+        response.setPublishedBy(announcement.getPublishedBy());
+        response.setPriority(announcement.getPriority());
+        response.setCategory(announcement.getCategory());
+        response.setAttachmentUrls(announcement.getAttachmentUrls());
+        response.setClickActionUrl(announcement.getClickActionUrl());
+        response.setIsPinned(announcement.getIsPinned());
+        response.setViewCount(announcement.getViewCount());
         return response;
     }
 
     private NotificationResponse toNotificationResponse(Notification notification) {
-        // Simplified response to avoid field access issues
         NotificationResponse response = new NotificationResponse();
         response.setId(notification.getId());
+        response.setSchoolId(notification.getSchool() != null ? notification.getSchool().getId() : null);
         response.setTitle(notification.getTitle());
         response.setMessage(notification.getMessage());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setNotificationType(notification.getNotificationType());
+        response.setChannel(notification.getChannel());
+        response.setPriority(notification.getPriority());
+        response.setRecipientType(notification.getRecipientType());
+        response.setRecipientIds(notification.getRecipientIds());
+        response.setScheduledAt(notification.getScheduledAt());
+        response.setSentAt(notification.getSentAt());
+        response.setDeliveryStatus(notification.getDeliveryStatus());
+        response.setReadStatus(notification.getReadStatus());
+        response.setRelatedEntityType(notification.getRelatedEntityType());
+        response.setRelatedEntityId(notification.getRelatedEntityId());
+        response.setIsImportant(notification.getIsImportant());
+        response.setExpiresAt(notification.getExpiresAt());
+        response.setClickActionUrl(notification.getClickActionUrl());
         return response;
     }
 }

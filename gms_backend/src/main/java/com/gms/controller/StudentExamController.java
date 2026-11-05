@@ -36,13 +36,13 @@ public class StudentExamController {
     }
 
     @GetMapping("/exam-subject/{examSubjectId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<StudentExam>> getStudentsForExamSubject(@PathVariable Integer examSubjectId) {
         return studentExamService.getStudentsForExamSubject(examSubjectId);
     }
 
     @GetMapping("/student/{studentId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<StudentExam>> getExamsForStudent(@PathVariable Integer studentId) {
         return studentExamService.getExamsForStudent(studentId);
     }

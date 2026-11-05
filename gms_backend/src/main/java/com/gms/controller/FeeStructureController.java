@@ -43,19 +43,19 @@ public class FeeStructureController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeeStructure>> getAllFeeStructures() {
         return feeStructureService.getAllFeeStructures();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FeeStructure> getFeeStructureById(@PathVariable Integer id) {
         return feeStructureService.getFeeStructureById(id);
     }
 
     @GetMapping("/academic-year")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeeStructure>> getFeeStructuresByAcademicYear(@RequestParam String academicYear) {
         return feeStructureService.getFeeStructuresByAcademicYear(academicYear);
     }

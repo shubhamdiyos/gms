@@ -3,7 +3,9 @@ import AuthService from '../../services/authService';
 
 const initialState = {
   user: AuthService.getUser(),
-  token: AuthService.getToken(),
+  // Token is no longer stored in Redux state (it's in HttpOnly cookie)
+  // We keep this field for backward compatibility but it will always be null in production
+  token: null,
   isAuthenticated: AuthService.isAuthenticated(),
   loading: false,
   error: null,
@@ -20,7 +22,8 @@ const authSlice = createSlice({
     loginSuccess: (state, action) => {
       state.loading = false;
       state.user = action.payload.user;
-      state.token = action.payload.token;
+      // Token is not stored in Redux (it's in HttpOnly cookie)
+      state.token = null;
       state.isAuthenticated = true;
       state.error = null;
     },

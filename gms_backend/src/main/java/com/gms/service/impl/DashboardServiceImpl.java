@@ -4,11 +4,12 @@ import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.response.PlatformDashboardResponse;
 import com.gms.model.response.SchoolDashboardResponse;
 import com.gms.repository.DashboardStatisticsRepository;
+import com.gms.repository.StudentFeeRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.DashboardService;
-import com.gms.service.StudentFeeService;
 import java.math.BigDecimal;
 import java.time.Instant;
+import java.time.LocalDate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -25,12 +26,12 @@ import org.springframework.transaction.annotation.Transactional;
 public class DashboardServiceImpl implements DashboardService {
 
     private final DashboardStatisticsRepository dashboardStatisticsRepository;
-    private final StudentFeeService studentFeeService;
+    private final StudentFeeRepository studentFeeRepository;
 
     public DashboardServiceImpl(DashboardStatisticsRepository dashboardStatisticsRepository,
-                                StudentFeeService studentFeeService) {
+                                StudentFeeRepository studentFeeRepository) {
         this.dashboardStatisticsRepository = dashboardStatisticsRepository;
-        this.studentFeeService = studentFeeService;
+        this.studentFeeRepository = studentFeeRepository;
     }
 
     /**
@@ -62,13 +63,11 @@ public class DashboardServiceImpl implements DashboardService {
         response.setTotalSections(dashboardStatisticsRepository.countSectionsBySchool(schoolId));
         response.setTotalExams(dashboardStatisticsRepository.countExamsBySchool(schoolId));
 
-        // The two money fields are the financial dashboard's own sums, reached through the service
-        // that owns them so a fee number cannot mean one thing here and another thing there. Both read
-        // TenantContext.schoolId() internally.
+        String academicYear = getCurrentAcademicYear();
         response.setFeesCollectedAmount(zeroOrSelf(
-                studentFeeService.getTotalCollectedFeesBySchoolId()));
+                studentFeeRepository.getTotalCollectedFeesBySchoolIdAndAcademicYear(schoolId, academicYear)));
         response.setFeesUncollectedAmount(zeroOrSelf(
-                studentFeeService.getTotalOutstandingFeesBySchoolId()));
+                studentFeeRepository.getTotalOutstandingFeesBySchoolIdAndAcademicYear(schoolId, academicYear)));
 
         response.setGeneratedAt(Instant.now());
         return response;
@@ -99,6 +98,11 @@ public class DashboardServiceImpl implements DashboardService {
         response.setTotalEmployees(dashboardStatisticsRepository.countEmployeesAcrossTenants());
         response.setGeneratedAt(Instant.now());
         return response;
+    }
+
+    private static String getCurrentAcademicYear() {
+        int currentYear = LocalDate.now().getYear();
+        return currentYear + "-" + (currentYear + 1);
     }
 
     /** A {@code SUM} over no rows is {@code null}; a dashboard card is not. */

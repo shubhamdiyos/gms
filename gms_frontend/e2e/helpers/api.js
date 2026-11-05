@@ -13,10 +13,11 @@
  * `scripts/ci-playwright-e2e.sh` exports them from the `GMS_SUPERADMIN_USERNAME` /
  * `GMS_SUPERADMIN_PASSWORD` pair the live-tenancy harness already requires, and feeds the same
  * pair to the boot as `APP_SUPERADMIN_*` — the two names application.properties actually bind.
- * The administrator credential this file returns is derived, not invented: see
- * `initialPasswordFor`, which restates the server's own rule. That restatement is exactly why
- * `provisionTenant` decodes the JWT and refuses the run unless the token's `schoolId` is the
- * school it just created — `ACD-13` records the case where the rule and the stored row diverge.
+ * The administrator credential this file returns is the one the creation response hands the
+ * platform owner (`SchoolResponse.adminUsername` / `temporaryPassword`, populated only on create
+ * because the stored row is a hash and the email may be undeliverable). `provisionTenant` still
+ * decodes the JWT and refuses the run unless the token's `schoolId` is the school it just
+ * created — a credential that names another tenant must not drive a browser at this one.
  */
 
 export const API_ORIGIN = (process.env.GMS_E2E_API_ORIGIN ?? 'http://localhost:8080').replace(/\/$/, '');
@@ -43,27 +44,97 @@ function requireEnv(name) {
 }
 
 /**
- * The username the server will have given this school's administrator.
+ * The double-submit handshake `SecurityConfig` requires of every state-changing call.
  *
- * `<first initial><surname>`, lowercased, with anything outside `[a-z0-9]` removed —
- * `SchoolServiceImpl.java:97-98`. `scripts/verify-mvp-e2e.sh:211` keeps the same rule in bash
- * for the same reason: the provisioning response does not carry the credential, so the only way
- * to ask for it afterwards is to derive it the way the writer does. Restating a rule the server
- * owns is a coupling, and it is a deliberate one — if that line ever changes, the fixture fails
- * loudly at `signInWithIssuedPassword` rather than quietly testing some other account.
+ * The boot this suite drives has CSRF enabled, so a POST without the `XSRF-TOKEN` cookie and
+ * the matching `X-XSRF-TOKEN` header is answered 403 before any controller runs. Playwright's
+ * `APIRequestContext` keeps cookies on its own, so the GET below is all the state this needs;
+ * the token is cached per context because a new test gets a new context and therefore a new
+ * cookie jar. Keying the cache by context rather than module-wide is the part that matters:
+ * a token from a previous test's jar would be compared against this test's cookie and refused.
  */
-export function initialPasswordFor(fullName) {
-  const parts = fullName.trim().split(/\s+/);
-  const base = `${parts[0].charAt(0)}${parts.length > 1 ? parts[1] : ''}`
-    .toLowerCase()
-    .replace(/[^a-z0-9]/g, '');
-  return { username: base, password: `${base}@123` };
+const csrfTokens = new WeakMap();
+
+async function csrfTokenFor(request) {
+  const cached = csrfTokens.get(request);
+  if (cached) return cached;
+
+  const response = await request.get(`${API_ROOT}/auth/csrf-token`);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok() || !payload?.token) {
+    throw new Error(
+      `the CSRF handshake failed (answered ${response.status()}); every state-changing call ` +
+        'needs the XSRF-TOKEN cookie this route issues',
+    );
+  }
+  csrfTokens.set(request, payload.token);
+  return payload.token;
+}
+
+/** A JSON POST with the CSRF handshake already done. Every write in this file goes through it. */
+export async function postJson(request, route, data, token) {
+  const headers = {
+    'Content-Type': 'application/json',
+    'X-XSRF-TOKEN': await csrfTokenFor(request),
+  };
+  if (token) headers.Authorization = `Bearer ${token}`;
+  return request.post(`${API_ROOT}${route}`, { data, headers });
 }
 
 async function post(request, route, body, token) {
-  const headers = { 'Content-Type': 'application/json' };
-  if (token) headers.Authorization = `Bearer ${token}`;
-  const response = await request.post(`${API_ROOT}${route}`, { data: body, headers });
+  const response = await postJson(request, route, body, token);
+  return { status: response.status(), payload: await response.json().catch(() => null) };
+}
+
+/**
+ * The JWT a successful login issues.
+ *
+ * `AuthController.login` no longer echoes the token in the response body: the credential is
+ * issued as the HttpOnly `gms_auth` cookie, which the cookie-authenticated SPA and Flutter
+ * client read implicitly. The fixture needs an explicit credential because it acts as several
+ * identities at once (owner and intruder in the same test), so it lifts the token out of the
+ * `Set-Cookie` header and sends it as a bearer token — a shape `JwtAuthenticationFilter`
+ * still accepts for API clients. Reading the body first keeps this working against a build
+ * that has not migrated yet.
+ */
+function tokenFromLogin(response, payload) {
+  if (payload?.accessToken) return payload.accessToken;
+  const cookies = response.headers()['set-cookie'] ?? '';
+  const match = cookies.match(/(?:^|[,\s])gms_auth=([^;,\s]+)/);
+  return match ? match[1] : null;
+}
+
+/** Signs in over the API and returns the credential the rest of the fixture will use. */
+export async function login(request, credentials) {
+  const response = await postJson(request, '/auth/login', credentials);
+  const payload = await response.json().catch(() => null);
+  return { status: response.status(), payload, token: tokenFromLogin(response, payload) };
+}
+
+/**
+ * The password the fixture sets on an administrator whose rotation it performs itself.
+ *
+ * `PasswordChangeEnforcementFilter` blocks every business call from an account still carrying
+ * `requirePasswordChange`, so a tenant whose classroom is arranged by the fixture cannot use
+ * the issued password for that write. Journeys that drive the rotation screen keep the issued
+ * credential (`keepIssuedPassword: true`); the rest are rotated here and handed the new one.
+ */
+const TENANT_ADMIN_PASSWORD = 'Tenant_Admin_2026!';
+
+/** Completes the forced rotation over the API, the same call the SPA's screen makes. */
+export async function changePassword(request, currentPassword, newPassword, token) {
+  const response = await postJson(
+    request,
+    '/auth/change-password',
+    { oldPassword: currentPassword, newPassword },
+    token,
+  );
+  return { status: response.status() };
+}
+
+/** Creates the classroom a journey registers pupils into. */
+export async function createClassroom(request, token, body = { name: 'Grade 9 A', grade: '9', section: 'A' }) {
+  const response = await postJson(request, '/classrooms/create', body, token);
   return { status: response.status(), payload: await response.json().catch(() => null) };
 }
 
@@ -104,7 +175,7 @@ function claimOf(token, claim) {
  * rotates a password spends that credential, and two tests signing in as the same account with
  * two different passwords is a race dressed up as a fixture.
  */
-export async function provisionTenant(request, label) {
+export async function provisionTenant(request, label, { keepIssuedPassword = false } = {}) {
   const tag = requireEnv('GMS_E2E_TAG');
   const schoolCode = `E2E${tag}${++tenantsIssued}${label}`;
   // The tag is in the administrator's name as well as the school code, and that is not decoration:
@@ -116,16 +187,16 @@ export async function provisionTenant(request, label) {
   // below is the guard for the general case.
   const adminFullName = `Playwright ${label}${tag}${tenantsIssued}`;
 
-  const platform = await post(request, '/auth/login', {
+  const platform = await login(request, {
     username: requireEnv('GMS_E2E_PLATFORM_USERNAME'),
     password: requireEnv('GMS_E2E_PLATFORM_PASSWORD'),
   });
-  if (platform.status !== 200 || !platform.payload?.accessToken) {
+  if (platform.status !== 200 || !platform.token) {
     throw new Error(
       `the platform account could not log in (answered ${platform.status}); is the backend on ${API_ORIGIN}?`,
     );
   }
-  const platformToken = platform.payload.accessToken;
+  const platformToken = platform.token;
 
   const created = await post(
     request,
@@ -148,21 +219,33 @@ export async function provisionTenant(request, label) {
     throw new Error(arrangeFailed(`school ${schoolCode}`, created, { schoolCode, adminFullName }));
   }
 
-  const admin = initialPasswordFor(adminFullName);
+  const admin = {
+    username: created.payload.adminUsername,
+    password: created.payload.temporaryPassword,
+  };
+  if (!admin.username || !admin.password) {
+    throw new Error(
+      `school ${schoolCode} was created but the response carried no administrator credential ` +
+        `(${JSON.stringify(created.payload).slice(0, 240)}); the fixture cannot sign in as the ` +
+        'admin it just provisioned',
+    );
+  }
 
-  // The account the server just provisioned can already hold a token: `requirePasswordChange`
-  // is a flag the login response carries and the SPA obeys, and it is the SPA's own rule, not
-  // the API's (no server route refuses a write for it). So the classroom below is created with
-  // the issued password, and the browser then does the rotation a human would have done first.
-  const asAdmin = await post(request, '/auth/login', admin);
-  if (asAdmin.status !== 200 || !asAdmin.payload?.accessToken) {
+  // The account the server just provisioned is issued a temporary password and flagged
+  // `requirePasswordChange`; `PasswordChangeEnforcementFilter` refuses every business call
+  // until that flag clears. A journey that clicks through the rotation screen therefore keeps
+  // the issued credential and arranges its classroom after rotating (`keepIssuedPassword`),
+  // while a journey that only needs a tenant rotates over the API here, the same call the
+  // screen makes, and continues with the new credential.
+  const asAdmin = await login(request, admin);
+  if (asAdmin.status !== 200 || !asAdmin.token) {
     throw new Error(
       `the provisioned administrator could not log in with the server's own rule ` +
         `(answered ${asAdmin.status}) — has SchoolServiceImpl's password derivation changed?`,
     );
   }
-  // `AuthTokenResponse` carries the flag at the top level, beside the token — the SPA decodes the
-  // rest of the user from the JWT itself (authService.js:28-38), so this is the whole contract.
+  // `AuthTokenResponse` carries the flag at the top level — the SPA decodes the rest of the
+  // user from the JWT itself (authService.js:28-38), so this is the whole contract.
   if (asAdmin.payload?.requirePasswordChange !== true) {
     throw new Error(
       'the provisioned administrator was not asked to change its password, so the rotation this ' +
@@ -175,7 +258,7 @@ export async function provisionTenant(request, label) {
   // username arranges one tenant and drives the browser at another — which is what the second run
   // of this suite did, and it surfaced as a 400 on a classroom name that only collided in the
   // wrong tenant.
-  const tokenSchoolId = claimOf(asAdmin.payload.accessToken, 'schoolId');
+  const tokenSchoolId = claimOf(asAdmin.token, 'schoolId');
   if (tokenSchoolId !== created.payload.id) {
     throw new Error(
       `the derived credential signed into school ${tokenSchoolId}, not school ${created.payload.id} ` +
@@ -184,16 +267,49 @@ export async function provisionTenant(request, label) {
     );
   }
 
+  if (keepIssuedPassword) {
+    return {
+      schoolCode,
+      schoolId: created.payload.id,
+      admin,
+      adminToken: asAdmin.token,
+      classroomId: null,
+      pupilSurname: `${label}Pupil`,
+    };
+  }
+
+  const rotated = await changePassword(
+    request,
+    admin.password,
+    TENANT_ADMIN_PASSWORD,
+    asAdmin.token,
+  );
+  if (rotated.status !== 200) {
+    throw new Error(
+      `the issued administrator password could not be rotated (answered ${rotated.status}); ` +
+        'every write below would be refused while the flag is set',
+    );
+  }
+
+  const adminCredential = { username: admin.username, password: TENANT_ADMIN_PASSWORD };
+  const afterRotation = await login(request, adminCredential);
+  if (afterRotation.status !== 200 || !afterRotation.token) {
+    throw new Error(
+      `the rotated administrator credential did not sign in (answered ${afterRotation.status})`,
+    );
+  }
+
   const classroomBody = { name: 'Grade 9 A', grade: '9', section: 'A' };
-  const classroom = await post(request, '/classrooms/create', classroomBody, asAdmin.payload.accessToken);
+  const classroom = await createClassroom(request, afterRotation.token, classroomBody);
   if (classroom.status !== 200) {
     throw new Error(arrangeFailed('classroom', classroom, classroomBody));
   }
 
   return {
     schoolCode,
-    admin,
-    adminToken: asAdmin.payload.accessToken,
+    schoolId: created.payload.id,
+    admin: adminCredential,
+    adminToken: afterRotation.token,
     classroomId: classroom.payload?.id,
     pupilSurname: `${label}Pupil`,
   };
@@ -235,10 +351,7 @@ export { claimOf };
  * before it reaches any dashboard.
  */
 export async function createStudentAccount(request, adminToken, studentData) {
-  const response = await request.post(`${API_ROOT}/students/create`, {
-    data: studentData,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-  });
+  const response = await postJson(request, '/students/create', studentData, adminToken);
   const payload = await response.json().catch(() => null);
   return { status: response.status(), payload };
 }
@@ -248,15 +361,13 @@ export async function createStudentAccount(request, adminToken, studentData) {
  *
  * `ParentServiceImpl.createParent` resolves the student ids through the school-scoped query,
  * then `createUserForParent` mints a login the same way the student path does — generated
- * username, `welcome123` password, `requirePasswordChange` set. The `studentIds` field on
+ * username, a randomly issued temporary password returned once in the create response
+ * (`ParentResponse.temporaryPassword`), and `requirePasswordChange` set. The `studentIds` field on
  * `ParentRequest` is what builds the `parent_student` link rows the backend later consults
  * to decide whether a parent may read a child's attendance, results, and fees (F-3).
  */
 export async function createParentAccount(request, adminToken, parentData) {
-  const response = await request.post(`${API_ROOT}/parents/create`, {
-    data: parentData,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-  });
+  const response = await postJson(request, '/parents/create', parentData, adminToken);
   const payload = await response.json().catch(() => null);
   return { status: response.status(), payload };
 }
@@ -271,39 +382,32 @@ export async function createParentAccount(request, adminToken, parentData) {
  * without the rotation step that student and parent accounts demand.
  */
 export async function createTeacherAccount(request, adminToken, employeeData, schoolId, username, password) {
-  const empResponse = await request.post(`${API_ROOT}/employees/create`, {
-    data: employeeData,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-  });
+  const empResponse = await postJson(request, '/employees/create', employeeData, adminToken);
   const empPayload = await empResponse.json().catch(() => null);
   if (empResponse.status() !== 200 || !empPayload?.id) {
     return { status: empResponse.status(), payload: empPayload, empId: null, username };
   }
 
-  const regResponse = await request.post(`${API_ROOT}/auth/self-register`, {
-    data: { empId: empPayload.id, schoolId, username, password },
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-  });
+  const regResponse = await postJson(
+    request,
+    '/auth/self-register',
+    { empId: empPayload.id, schoolId, username, password },
+    adminToken,
+  );
   const regPayload = await regResponse.json().catch(() => null);
   return { status: regResponse.status(), payload: regPayload, empId: empPayload.id, username };
 }
 
 /** Creates a subject the teacher can be assigned to teach. */
 export async function createSubject(request, adminToken, subjectData) {
-  const response = await request.post(`${API_ROOT}/subjects/create`, {
-    data: subjectData,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-  });
+  const response = await postJson(request, '/subjects/create', subjectData, adminToken);
   const payload = await response.json().catch(() => null);
   return { status: response.status(), payload };
 }
 
 /** Assigns a teacher to a classroom/subject pair for an academic year. */
 export async function createTeacherAssignment(request, adminToken, assignmentData) {
-  const response = await request.post(`${API_ROOT}/teacher-assignments`, {
-    data: assignmentData,
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${adminToken}` },
-  });
+  const response = await postJson(request, '/teacher-assignments', assignmentData, adminToken);
   const payload = await response.json().catch(() => null);
   return { status: response.status(), payload };
 }

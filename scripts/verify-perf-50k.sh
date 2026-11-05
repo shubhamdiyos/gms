@@ -97,6 +97,7 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
 
@@ -160,6 +161,10 @@ skip() { # skip <name> <reason>
 call() { # call <method> <path> [token] [json]
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
@@ -346,7 +351,7 @@ echo
 echo "=== 3. Platform login and API-vs-DB cross-check ==="
 code=$(call POST /auth/login "" "{\"username\":\"$SUPERUSER\",\"password\":\"$SUPERPASSWORD\"}")
 check "superadmin login accepted" "200" "$code"
-PLATFORM_TOKEN=$(field '.accessToken')
+PLATFORM_TOKEN=$(field '.accessToken'); [[ -n "$PLATFORM_TOKEN" ]] || PLATFORM_TOKEN=$(csrf_auth_token)
 [[ -z "$PLATFORM_TOKEN" ]] && { echo "FATAL: no platform token — is the backend running against $PERF_DB and RESTARTED after the seed (it TRUNCATEs users)?"; exit 1; }
 
 # The other half of that restart: the bootstrap account the header says the school-scoped
@@ -397,7 +402,7 @@ ADMIN_TOKEN=""
 if [[ -n "$ADMIN_USER" && -n "$ADMIN_PASSWORD" ]]; then
   code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_USER\",\"password\":\"$ADMIN_PASSWORD\"}")
   if [[ "$code" == "200" ]]; then
-    ADMIN_TOKEN=$(field '.accessToken')
+    ADMIN_TOKEN=$(field '.accessToken'); [[ -n "$ADMIN_TOKEN" ]] || ADMIN_TOKEN=$(csrf_auth_token)
   else
     printf '      note: the school admin login answered %s; its probes will report SKIP\n' "$code"
   fi

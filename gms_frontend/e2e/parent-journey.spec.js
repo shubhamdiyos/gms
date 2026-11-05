@@ -1,6 +1,7 @@
 import { expect, expectCleanConsole, test } from './console-guard.fixture.js';
 import {
   API_ROOT,
+  login,
   provisionTenant,
   createStudentAccount,
   createParentAccount,
@@ -12,9 +13,9 @@ import {
  *
  * A parent account is created by the administrator (`POST /parents/create`), which links
  * the parent to one or more students and auto-provisions a user login. The username is
- * generated from the parent's name, the password is the default `welcome123`, and the
- * account is flagged `requirePasswordChange`. The browser journey clicks through the
- * rotation screen before the parent reaches its dashboard.
+ * generated from the parent's name, the password is randomly issued and handed back once as
+ * `ParentResponse.temporaryPassword`, and the account is flagged `requirePasswordChange`. The
+ * browser journey clicks through the rotation screen before the parent reaches its dashboard.
  *
  * The parent portal is read-only: children list, attendance, results, fees. The backend
  * enforces parent-child validation on every scoped endpoint (F-3 fix): a parent can read
@@ -32,9 +33,6 @@ import {
 // eight characters, upper, lower, digit, one of `@$!%*?&.#_`) and this satisfies it.
 const ROTATED_PASSWORD = 'Par_Journey_2026!';
 
-// The default password the server mints for every parent account.
-const DEFAULT_PASSWORD = 'welcome123';
-
 async function signIn(page, { username, password }) {
   await page.goto('/login');
   await page.getByLabel('Username').fill(username);
@@ -50,10 +48,10 @@ async function rotatePassword(page, { issued, next }) {
   await expect(page.getByText('Password changed successfully')).toBeVisible();
 }
 
-async function signInAndRotate(page, username) {
-  await signIn(page, { username, password: DEFAULT_PASSWORD });
+async function signInAndRotate(page, username, issued) {
+  await signIn(page, { username, password: issued });
   await expect(page).toHaveURL(/\/change-password$/);
-  await rotatePassword(page, { issued: DEFAULT_PASSWORD, next: ROTATED_PASSWORD });
+  await rotatePassword(page, { issued, next: ROTATED_PASSWORD });
 }
 
 test('a provisioned parent reaches its dashboard and views child information', async ({
@@ -66,10 +64,11 @@ test('a provisioned parent reaches its dashboard and views child information', a
   // Create a student in the tenant's classroom. The parent will be linked to this student.
   const studentFirstName = 'Anaya';
   const studentLastName = tenant.pupilSurname;
+  const studentEmail = `${studentFirstName.toLowerCase()}.${tenant.schoolCode.toLowerCase()}@e2e.invalid`;
   const student = await createStudentAccount(request, tenant.adminToken, {
     firstName: studentFirstName,
     lastName: studentLastName,
-    email: `${studentFirstName.toLowerCase()}.${tenant.schoolCode.toLowerCase()}@e2e.invalid`,
+    email: studentEmail,
     phoneNumber: '9710005001',
     dateOfBirth: '2010-09-10',
     gender: 'FEMALE',
@@ -79,8 +78,8 @@ test('a provisioned parent reaches its dashboard and views child information', a
   expect(student.status, `student creation must succeed (answered ${student.status})`).toBe(200);
   expect(student.payload?.id, 'the student must have an id for the parent link').toBeTruthy();
 
-  // Create a parent linked to the student. The server auto-provisions a user account with
-  // username = generated(firstName, lastName) and password = "welcome123".
+  // Create a parent linked to the student. The server auto-provisions a user account and returns
+  // its one-time credential in the creation response; the row stores only a hash.
   const parentFirstName = 'Sunita';
   const parentLastName = 'JParent';
   const parent = await createParentAccount(request, tenant.adminToken, {
@@ -92,28 +91,33 @@ test('a provisioned parent reaches its dashboard and views child information', a
   });
   expect(parent.status, `parent creation must succeed (answered ${parent.status})`).toBe(200);
 
-  // The username the server generated for this parent.
+  // The username the server generated for this parent, and the password it issued.
   const parentUsername = generatedUsername(parentFirstName, parentLastName);
+  const issuedPassword = parent.payload?.temporaryPassword;
+  expect(issuedPassword, 'the create response must carry the issued password').toBeTruthy();
 
   // Sign in and rotate the password. The SPA forces the rotation before any dashboard.
-  await signInAndRotate(page, parentUsername);
+  await signInAndRotate(page, parentUsername, issuedPassword);
 
   // The parent dashboard loads after rotation.
   await expect(page).toHaveURL(/\/parent\/dashboard$/);
   await expect(page.getByRole('heading', { name: 'Parent Dashboard' })).toBeVisible();
 
-  // The dashboard shows the parent's name and the child's information.
-  await expect(page.getByText('My Children')).toBeVisible();
-  await expect(page.getByText(studentFirstName)).toBeVisible();
-  await expect(page.getByText(studentLastName)).toBeVisible();
+  // The dashboard shows the parent's name and the child's information. `My Children` is both
+  // the card's overline and the panel's heading, so the assertion names the heading; the child
+  // is asserted by full name, which is how the dashboard renders it.
+  await expect(page.getByRole('heading', { name: 'My Children' })).toBeVisible();
+  await expect(page.getByText(`${studentFirstName} ${studentLastName}`)).toBeVisible();
 
   // Navigate to the children page via the sidebar.
   await page.getByRole('listitem').filter({ hasText: 'Children' }).click();
   await expect(page).toHaveURL(/\/parent\/children$/);
   await expect(page.getByRole('heading', { name: 'My Children' })).toBeVisible();
 
-  // The children page shows the child's card with personal information.
-  await expect(page.getByText(studentFirstName)).toBeVisible();
+  // The children page shows the child's card with personal information. The full name renders
+  // twice here — the list card's heading and the detail panel's heading — so the assertion uses
+  // the email, which the page prints once, in the child's own detail row.
+  await expect(page.getByText(studentEmail)).toBeVisible();
 
   // The page has tabs for Overview, Attendance, Grades, and Fees. The Overview tab is
   // active by default and shows the child's personal information and quick stats.
@@ -181,12 +185,22 @@ test('a parent API call for another student in the same school is refused with 4
 
   // Sign in as Parent A.
   const parentAUsername = generatedUsername(parentAFirstName, parentALastName);
-  await signInAndRotate(page, parentAUsername);
+  await signInAndRotate(page, parentAUsername, parentA.payload?.temporaryPassword);
   await expect(page).toHaveURL(/\/parent\/dashboard$/);
 
-  // Read the session token the SPA stored after login.
-  const token = await page.evaluate(() => localStorage.getItem('gms_token'));
-  expect(token, 'the session token must be present after login').toBeTruthy();
+  // Sign in over the API with the password the browser just set. The SPA keeps its credential
+  // in the HttpOnly `gms_auth` cookie, so there is no `localStorage` token to read; the fixture
+  // obtains its own credential the same way the page does, then sends it as a bearer token.
+  const signedInAsParentA = await login(request, {
+    username: parentAUsername,
+    password: ROTATED_PASSWORD,
+  });
+  expect(
+    signedInAsParentA.status,
+    'the rotated parent credential must sign in over the API',
+  ).toBe(200);
+  const token = signedInAsParentA.token;
+  expect(token, 'the parent login must issue a credential').toBeTruthy();
 
   // Attempt to access Student B's attendance via the API. The backend enforces parent-child
   // validation (F-3 fix): Parent A is not linked to Student B, so the call must be refused
@@ -263,7 +277,7 @@ test('a parent cannot reach the admin or student dashboards via direct URL', asy
   expect(parent.status).toBe(200);
 
   const parentUsername = generatedUsername(parentFirstName, parentLastName);
-  await signInAndRotate(page, parentUsername);
+  await signInAndRotate(page, parentUsername, parent.payload?.temporaryPassword);
   await expect(page).toHaveURL(/\/parent\/dashboard$/);
 
   // Attempt to navigate to the admin dashboard by direct URL.

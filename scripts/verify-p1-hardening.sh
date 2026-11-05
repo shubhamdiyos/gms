@@ -28,6 +28,7 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
 ADMIN=${GMS_ADMIN_USERNAME:?set GMS_ADMIN_USERNAME}
@@ -70,6 +71,10 @@ check() { # check <name> <expected> <actual>
 call() { # call <method> <path> [token] [json] -> http code; body in $body
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
@@ -78,7 +83,13 @@ call() { # call <method> <path> [token] [json] -> http code; body in $body
 login() { # login <username> <password> -> token (empty on failure)
   local code
   code=$(call POST /auth/login "" "{\"username\":\"$1\",\"password\":\"$2\"}")
-  if [[ "$code" == "200" ]]; then jq -r '.accessToken // .token // empty' "$body"; else echo ""; fi
+  if [[ "$code" == "200" ]]; then
+    local t
+    t=$(jq -r '.accessToken // .token // empty' "$body")
+    printf '%s' "${t:-$(csrf_auth_token)}"
+  else
+    echo ""
+  fi
 }
 
 sql() { # sql <statement> — SELECT only per the header

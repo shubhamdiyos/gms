@@ -3,10 +3,12 @@ package com.gms.service.impl;
 import com.gms.model.entity.Classroom;
 import com.gms.model.entity.Employee;
 import com.gms.model.entity.School;
+import com.gms.model.entity.TeacherAssignment;
 import com.gms.model.entity.User;
 import com.gms.model.request.ClassroomRequest;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.repository.ClassroomRepository;
+import com.gms.repository.TeacherAssignmentRepository;
 import com.gms.repository.UserRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
@@ -18,6 +20,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Optional;
 import java.util.stream.Collectors;
@@ -29,11 +32,14 @@ public class ClassroomServiceImpl implements ClassroomService {
     private final ClassroomRepository classroomRepository;
     private final SchoolService schoolService;
     private final UserService userService;
+    private final TeacherAssignmentRepository teacherAssignmentRepository;
 
-    public ClassroomServiceImpl(ClassroomRepository classroomRepository, SchoolService schoolService, UserService userService) {
+    public ClassroomServiceImpl(ClassroomRepository classroomRepository, SchoolService schoolService,
+                                UserService userService, TeacherAssignmentRepository teacherAssignmentRepository) {
         this.classroomRepository = classroomRepository;
         this.schoolService = schoolService;
         this.userService = userService;
+        this.teacherAssignmentRepository = teacherAssignmentRepository;
     }
 
     @Override
@@ -179,10 +185,19 @@ public class ClassroomServiceImpl implements ClassroomService {
         if (teacher == null) {
             return Collections.emptyList();
         }
+        Integer schoolId = TenantContext.schoolId();
+        if (schoolId == null) {
+            return Collections.emptyList();
+        }
 
-        // For now, using a simpler approach - return empty list
-        // This method needs to be enhanced when proper service methods are available
-        return Collections.emptyList();
+        return teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(schoolId, teacher.getId()).stream()
+                .map(TeacherAssignment::getClassroom)
+                .filter(classroom -> classroom != null && schoolId.equals(classroom.getSchoolId()))
+                .collect(Collectors.toMap(Classroom::getId, classroom -> classroom, (first, duplicate) -> first,
+                        LinkedHashMap::new))
+                .values().stream()
+                .map(this::toResponse)
+                .toList();
     }
 
     private ClassroomResponse toResponse(Classroom classroom) {

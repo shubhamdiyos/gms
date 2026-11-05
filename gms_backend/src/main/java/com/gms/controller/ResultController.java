@@ -51,13 +51,13 @@ public class ResultController {
     }
 
     @GetMapping("/student-exam/{studentExamId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<Result>> getResultsForStudentExam(@PathVariable Integer studentExamId) {
         return resultService.getResultsForStudentExam(studentExamId);
     }
 
     @GetMapping("/student/{studentId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<ResultResponse>> getResultsForStudent(@PathVariable Integer studentId) {
         // F-1 fix: STUDENT callers can only access their own results
         if (TenantContext.roles().contains("STUDENT")) {

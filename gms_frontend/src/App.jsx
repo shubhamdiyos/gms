@@ -53,6 +53,12 @@ import StudentTimetablePage from './features/student/StudentTimetablePage';
 // Parent Pages
 import ParentChildrenPage from './features/parent/ParentChildrenPage';
 
+// Accountant Pages
+import AccountantDashboardPage from './features/accountant/AccountantDashboardPage';
+import FeePaymentsPage from './features/accountant/FeePaymentsPage';
+import OutstandingFeesPage from './features/accountant/OutstandingFeesPage';
+import FinancialReportsPage from './features/accountant/FinancialReportsPage';
+
 // Fee Management
 import FeesPage from './features/fees/FeesPage';
 
@@ -260,6 +266,48 @@ const AppRouter = () => {
           element={
             <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
               <AnnouncementsPage />
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Accountant Routes */}
+        <Route
+          path="accountant/dashboard"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ACCOUNTANT]}>
+              <AccountantDashboardPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="accountant/payments"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ACCOUNTANT]}>
+              <FeePaymentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="accountant/outstanding"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ACCOUNTANT]}>
+              <OutstandingFeesPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="accountant/reports"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ACCOUNTANT]}>
+              <FinancialReportsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="accountant/fee-structures"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN, ROLES.ACCOUNTANT]}>
+              <FeesPage />
             </ProtectedRoute>
           }
         />

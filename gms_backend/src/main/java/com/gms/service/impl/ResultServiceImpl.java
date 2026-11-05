@@ -1,6 +1,8 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Result;
+import com.gms.model.entity.Student;
 import com.gms.model.entity.StudentExam;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
@@ -136,9 +138,20 @@ public class ResultServiceImpl implements ResultService {
 
     @Override
     public ResponseEntity<List<Result>> getResultsForStudentExam(Integer studentExamId) {
-        // Validate student exam exists
+        // Validate student exam exists (tenant-scoped via TenantScopedRepository)
         StudentExam studentExam = studentExamRepository.findById(studentExamId)
                 .orElseThrow(() -> new EntityNotFoundException("Student exam not found"));
+
+        // SEC-F1-02: STUDENT callers can only access their own student-exam results
+        if (TenantContext.roles() != null && TenantContext.roles().contains("STUDENT")) {
+            User caller = userRepository.findByUsername(TenantContext.username())
+                    .orElseThrow(() -> new TenantAccessDeniedException("User not found"));
+            Student callerStudent = caller.getStudent();
+            if (callerStudent == null
+                    || !callerStudent.getId().equals(studentExam.getStudent().getId())) {
+                throw new TenantAccessDeniedException("Not authorized to access this student-exam's results");
+            }
+        }
 
         // There should be at most one Result per StudentExam; repository returns Optional
         Optional<Result> resultOpt = resultRepository.findByStudentExam_Student_School_IdAndStudentExam_Id(TenantContext.schoolId(), studentExamId);

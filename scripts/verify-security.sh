@@ -21,6 +21,8 @@
 set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
+API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 USER_NAME=${GMS_TEST_USERNAME:?set GMS_TEST_USERNAME}
 PASSWORD=${GMS_TEST_PASSWORD:?set GMS_TEST_PASSWORD}
 DB_CONTAINER=${GMS_DB_CONTAINER:-gms-postgres}
@@ -34,6 +36,8 @@ RETIRED_DEFAULT_SECRET='change-me-please-change-me-please-change-me-please'
 
 failures=0
 checks=0
+
+csrf_prepare "$API" || exit 2
 
 record() { # record <name> <expected> <actual>
   checks=$((checks + 1))
@@ -52,13 +56,15 @@ body() {
 }
 
 login_token() {
-  local response
-  response=$(curl -s -X POST -H 'Content-Type: application/json' -d "$(body "$PASSWORD")" \
-    "$BASE/api/v1/auth/login")
-  printf '%s' "$response" | python3 -c 'import sys,json;print(json.load(sys.stdin).get("accessToken",""))' 2>/dev/null || {
-    printf '      login response: %s\n' "$response"
+  local token
+  curl -s -o /dev/null -X POST -H 'Content-Type: application/json' "${CSRF_ARGS[@]}" \
+    -d "$(body "$PASSWORD")" "$API/auth/login"
+  token=$(csrf_auth_token)
+  if [[ -z "$token" ]]; then
+    printf '      login issued no gms_auth cookie\n' >&2
     return 1
-  }
+  fi
+  printf '%s' "$token"
 }
 
 # A previous run of section 5 deliberately locks this account. The matrix reads
@@ -95,12 +101,12 @@ record "GET /api/v1/ping is reachable"          "200" "$(code "$BASE/api/v1/ping
 record "GET /actuator/info requires a role"     "401" "$(code "$BASE/actuator/info")"
 record "GET /api/v1/students requires a token"  "401" "$(code "$BASE/api/v1/students")"
 record "POST /auth/self-register is closed"     "401" \
-  "$(code -X POST -H 'Content-Type: application/json' -d '{}' "$BASE/api/v1/auth/self-register")"
+  "$(code -X POST -H 'Content-Type: application/json' "${CSRF_ARGS[@]}" -d '{}' "$API/auth/self-register")"
 
 echo "2. Credential handling"
 unlock_test_user
 record "wrong password is refused"              "401" \
-  "$(code -X POST -H 'Content-Type: application/json' -d "$(body 'definitely-not-the-password')" "$BASE/api/v1/auth/login")"
+  "$(code -X POST -H 'Content-Type: application/json' "${CSRF_ARGS[@]}" -d "$(body 'definitely-not-the-password')" "$API/auth/login")"
 TOKEN=$(login_token)
 if [[ -n "$TOKEN" ]]; then
   printf '  PASS  %-46s obtained\n' "correct password issues a token"
@@ -124,8 +130,9 @@ printf '%s' "$LEAK" | grep -qiE 'exception|stack|caused by|jdbc|hibernate' \
   || record "denied body leaks no internals" "clean" "clean"
 
 echo "4. Error shape"
-BAD=$(curl -s -X POST -H 'Content-Type: application/json' -H "Authorization: Bearer $TOKEN" \
-  -d '{"fullName":"x","username":"y","email":"not-an-email"}' "$BASE/api/v1/users/create")
+BAD=$(curl -s -X POST -H 'Content-Type: application/json' "${CSRF_ARGS[@]}" \
+  -H "Authorization: Bearer $TOKEN" \
+  -d '{"fullName":"x","username":"y","email":"not-an-email"}' "$API/users/create")
 printf '%s' "$BAD" | grep -q '"fields"' \
   && record "validation reports per-field errors" "fields" "fields" \
   || record "validation reports per-field errors" "fields" "absent"
@@ -136,12 +143,13 @@ printf '%s' "$BAD" | grep -qiE 'exception|stackTrace|rootCause' \
 echo "5. Brute-force throttling"
 unlock_test_user
 for _ in 1 2 3 4 5 6 7 8 9 10; do
-  code -X POST -H 'Content-Type: application/json' -d "$(body 'throttling-probe')" "$BASE/api/v1/auth/login" >/dev/null
+  code -X POST -H 'Content-Type: application/json' "${CSRF_ARGS[@]}" \
+    -d "$(body 'throttling-probe')" "$API/auth/login" >/dev/null
 done
 STATE=$(psql "select account_locked||'|'||login_attempts from users where username='$USER_NAME';")
 record "ten failures set account_locked"        "true" "${STATE%%|*}"
 record "correct password after lock is refused" "401" \
-  "$(code -X POST -H 'Content-Type: application/json' -d "$(body "$PASSWORD")" "$BASE/api/v1/auth/login")"
+  "$(code -X POST -H 'Content-Type: application/json' "${CSRF_ARGS[@]}" -d "$(body "$PASSWORD")" "$API/auth/login")"
 unlock_test_user
 
 echo

@@ -14,6 +14,8 @@ import org.springframework.validation.BindException;
 import org.springframework.validation.FieldError;
 import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
+import org.springframework.web.bind.MissingServletRequestParameterException;
+import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
@@ -132,6 +134,22 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(response);
     }
 
+    /**
+     * A required query parameter was omitted, or the body is not the JSON the handler declares.
+     * Both reached the catch-all and answered <b>500</b> — measured live on 2026-11-05:
+     * {@code GET /api/v1/attendance/student/1} without {@code from}/{@code to} reported a server
+     * fault for what is a malformed request.
+     */
+    @ExceptionHandler({MissingServletRequestParameterException.class, HttpMessageNotReadableException.class})
+    public ResponseEntity<Map<String, Object>> handleUnreadableRequest(Exception ex, HttpServletRequest request) {
+        log.warn("Invalid request [traceId={}] {} {}: {}", traceId(request),
+                request.getMethod(), request.getRequestURI(), ex.getMessage());
+        Map<String, Object> response = base(request);
+        response.put("error", "Invalid request");
+        response.put("message", "The request is missing a required value or is not valid JSON.");
+        return ResponseEntity.badRequest().body(response);
+    }
+
     @ExceptionHandler(Exception.class)
     public ResponseEntity<Map<String, Object>> handleGeneral(Exception ex, HttpServletRequest request) {
         String traceId = traceId(request);
@@ -179,6 +197,13 @@ public class GlobalExceptionHandler {
                                                               HttpServletRequest request) {
         String detail = String.valueOf(ex.getMostSpecificCause().getMessage());
         Map<String, Object> response = base(request);
+        if (detail.contains("uq_fee_payment_school_reference")) {
+            log.warn("Duplicate payment reference [traceId={}] {} {}", traceId(request),
+                    request.getMethod(), request.getRequestURI());
+            response.put("error", "Conflict");
+            response.put("message", "Payment reference already exists for this school.");
+            return ResponseEntity.status(HttpStatus.CONFLICT).body(response);
+        }
         if (isCrossTenantWrite(detail)) {
             log.warn("Refused [traceId={}] {} {}: {}", traceId(request),
                     request.getMethod(), request.getRequestURI(), detail);

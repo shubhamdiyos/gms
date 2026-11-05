@@ -50,10 +50,14 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
 ADMIN_A_NAME=${GMS_SCHOOL_A_ADMIN_NAME:-Nadia Okonjo}
 ADMIN_B_NAME=${GMS_SCHOOL_B_ADMIN_NAME:-Tomas Wilder}
+# School creation issues a random temporary password (ACD-13); this is only what each
+# administrator rotates to before the suite's business calls.
+ROTATED_ADMIN_PASSWORD=${GMS_ROTATED_ADMIN_PASSWORD:-Test_Admin_2026!}
 ACADEMIC_YEAR=${GMS_ACADEMIC_YEAR:-2026-2027}
 CROSS_YEAR=${GMS_CROSS_TENANT_ACADEMIC_YEAR:-2027-2028}
 TODAY=${GMS_VERIFY_DATE:-2026-06-11}
@@ -106,13 +110,17 @@ skip() { # skip <name> <reason>
 call() { # call <method> <path> [token] [json]
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
 }
 
 field() { jq -r "$1 // empty" "$body"; }
-token_of() { field '.accessToken'; }
+token_of() { local t; t=$(field '.accessToken'); printf '%s' "${t:-$(csrf_auth_token)}"; }
 
 require_id() { # require_id <what created the row> <id>
   checks=$((checks + 1))
@@ -122,44 +130,6 @@ require_id() { # require_id <what created the row> <id>
     printf 'FAIL  %s returned no id\n' "$1"
     failures=$((failures + 1))
   fi
-}
-
-admin_username() { # admin_username <full name> — the base the service derives the password from
-  local first last
-  first=$(printf '%s' "$1" | awk '{print $1}')
-  last=$(printf '%s' "$1" | awk '{print $2}')
-  printf '%s%s' "${first:0:1}" "$last" | tr 'A-Z' 'a-z'
-}
-
-admin_login_for() { # admin_login_for <school code> <full name> — the username the service actually wrote
-  # SchoolServiceImpl mints the administrator's login from their name and appends a counter when that
-  # name is already taken (`generateUniqueUsername`), so the name in the request is not always the name
-  # in `users`. C-4 registers "Nadia Okonjo" first in the same database this card runs against, so the
-  # derived guess silently authenticated as C-4's administrator — a 200, a valid token, the wrong
-  # school — and every write below failed as that other tenant (`Classroom already exists with same
-  # name/grade/section`), which is how 42 failures arrived with no tenancy leak anywhere: the measured
-  # rows were `nokonjo1` in school 4 while the token in the requests belonged to school 2. The database
-  # is the only place the generated name is certain, so this reads it back.
-  local resolved=""
-  if have_db; then
-    # The argument is one of this script's own two school codes, interpolated exactly as the
-    # `SELECT id FROM schools WHERE school_code='NGS701'` below it does — the first draft used psql's
-    # `:'code'` binding and silently returned nothing, because psql does not substitute a variable into
-    # a `-c` string; a lookup that reads as empty is worse than one that reads as wrong.
-    resolved=$(sql "SELECT u.username FROM users u JOIN schools s ON s.id = u.school_id \
-                    WHERE s.school_code = '$1' ORDER BY u.id LIMIT 1" \
-                  | tr -d '[:space:]')
-    # `sql` merges stderr into its output, so a failed statement arrives here as text that is not a
-    # username. Anything that is not shaped like one is treated as no answer at all.
-    [[ "$resolved" =~ ^[a-z0-9_]{1,100}$ ]] || resolved=""
-  fi
-  if [[ -z "$resolved" ]]; then
-    printf 'NOTE  school %s could not be read from the database: falling back to the derived name, ' \
-      "$1" >&2
-    printf 'which only matches while that name is still unused\n' >&2
-    resolved=$(admin_username "$2")
-  fi
-  printf '%s' "$resolved"
 }
 
 sql() { # sql <statement> — SELECT and rolled-back probes only
@@ -194,28 +164,37 @@ PLATFORM_TOKEN=$(token_of)
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Northgate Secondary","schoolCode":"NGS701","adminFullName":"'"$ADMIN_A_NAME"'","adminEmail":"nadia@northgate.test"}')
 check "school A created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_A_USER=$ISSUED_ADMIN
+ADMIN_A_ISSUED=$ISSUED_ADMIN_PASSWORD
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Selborne College","schoolCode":"SEL702","adminFullName":"'"$ADMIN_B_NAME"'","adminEmail":"tomas@selborne.test"}')
 check "school B created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_B_USER=$ISSUED_ADMIN
+ADMIN_B_ISSUED=$ISSUED_ADMIN_PASSWORD
 
 SCHOOL_A=$(sql "SELECT id FROM schools WHERE school_code='NGS701'" 2>/dev/null | tr -d '[:space:]')
 SCHOOL_B=$(sql "SELECT id FROM schools WHERE school_code='SEL702'" 2>/dev/null | tr -d '[:space:]')
 
-# The temporary password keeps the *base* name, without the uniqueness counter; the login does not.
-ADMIN_A_PASS="$(admin_username "$ADMIN_A_NAME")@123"
-ADMIN_B_PASS="$(admin_username "$ADMIN_B_NAME")@123"
-ADMIN_A_USER=$(admin_login_for NGS701 "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_login_for SEL702 "$ADMIN_B_NAME")
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_PASS\"}")
+# The creation response names the account and carries its one-time password. Reading both from there
+# replaces the two guesses this card used to make — a derived username (wrong whenever the name was
+# already taken, which is exactly what happened against C-4's "Nadia Okonjo") and a derived password
+# (wrong since ACD-13 made it random).
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_ISSUED\"}")
 check "school A admin login" "200" "$code"
 TOKEN_A=$(token_of)
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_PASS\"}")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_ISSUED\"}")
 check "school B admin login" "200" "$code"
 TOKEN_B=$(token_of)
 if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
   echo "FATAL: could not obtain both school administrator tokens"
   exit 1
 fi
+check "school A admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_A" "$ADMIN_A_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
+check "school B admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_B" "$ADMIN_B_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
 
 # The property every check below rests on: the token in hand belongs to the school this card created.
 # Worth two lines of its own because signing in with a name that exists in two schools answers 200 and
@@ -298,7 +277,7 @@ STUDENT_FEE_A=$(field '.id')
 require_id "the student fee" "$STUDENT_FEE_A"
 
 code=$(call POST /fee-payments "$TOKEN_A" \
-  "{\"studentFeeId\":$STUDENT_FEE_A,\"amount\":500,\"paymentDate\":\"$TODAY\",\"paymentMethod\":\"CASH\",\"transactionId\":\"TXN-C7-1\",\"status\":\"PAID\"}")
+  "{\"studentFeeId\":$STUDENT_FEE_A,\"amount\":500,\"paymentDate\":\"$TODAY\",\"paymentMethod\":\"CASH\",\"transactionId\":\"TXN-C7-1\",\"paymentReference\":\"PAY-C7-1\",\"status\":\"PAID\"}")
 check "fee payment created" "200" "$code"
 
 code=$(call POST /teacher-assignments "$TOKEN_A" \

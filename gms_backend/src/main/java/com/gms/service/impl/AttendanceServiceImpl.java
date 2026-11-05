@@ -9,11 +9,17 @@ import com.gms.model.entity.User;
 import com.gms.exception.NotFoundException;
 import com.gms.model.request.AttendanceRequest;
 import com.gms.model.request.BulkAttendanceRequest;
+import com.gms.model.entity.TeacherAssignment;
 import com.gms.model.response.AttendanceResponse;
+import com.gms.model.response.ClassroomResponse;
+import com.gms.model.response.EmployeeResponse;
 import com.gms.model.response.StudentResponse;
+import com.gms.model.response.SubjectResponse;
+import com.gms.model.response.TeacherAssignmentResponse;
 import com.gms.model.response.TimetableSlotResponse;
 import com.gms.repository.AttendanceRepository;
 import com.gms.repository.SchoolRepository;
+import com.gms.repository.StudentRepository;
 import com.gms.repository.TimetableSlotRepository;
 import com.gms.repository.UserRepository;
 import com.gms.security.TenantContext;
@@ -33,20 +39,20 @@ public class AttendanceServiceImpl implements AttendanceService {
     private final AttendanceRepository attendanceRepository;
     private final SchoolRepository schoolRepository;
     private final TimetableSlotRepository timetableSlotRepository;
-    private final StudentService studentService;
+    private final StudentRepository studentRepository;
     private final TimetableService timetableService;
     private final UserService userService;
 
     public AttendanceServiceImpl(AttendanceRepository attendanceRepository,
                                SchoolRepository schoolRepository,
                                TimetableSlotRepository timetableSlotRepository,
-                               StudentService studentService,
+                               StudentRepository studentRepository,
                                TimetableService timetableService,
                                UserService userService) {
         this.attendanceRepository = attendanceRepository;
         this.schoolRepository = schoolRepository;
         this.timetableSlotRepository = timetableSlotRepository;
-        this.studentService = studentService;
+        this.studentRepository = studentRepository;
         this.timetableService = timetableService;
         this.userService = userService;
     }
@@ -59,7 +65,7 @@ public class AttendanceServiceImpl implements AttendanceService {
         }
 
         // The load is scoped to the caller's school, so a foreign id yields nothing
-        Student student = studentService.findById(request.getStudentId())
+        Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
         // The DTO calls this field optional; the schema does not — attendances.timetable_slot_id is
@@ -72,30 +78,40 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
                         "Timetable slot not found for the current school"));
 
-        // Check if attendance already exists for this student on this date
-        List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
-                request.getStudentId(), request.getDate(), request.getDate());
-        
-        if (!existingAttendance.isEmpty()) {
-            return ResponseEntity.badRequest().body(null);
-        }
-
-        // Create attendance record
-        Attendance attendance = new Attendance();
-        attendance.setSchool(schoolRepository.getReferenceById(TenantContext.schoolId()));
-        attendance.setStudent(student);
-        attendance.setTimetableSlot(timetableSlot);
-        attendance.setDate(request.getDate());
-        attendance.setStatus(request.getStatus());
-        attendance.setRemarks(request.getRemarks());
-        
-        // Set creator/updated by
+        // Fetch creator user for audit fields
         User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
-        attendance.setCreatedBy(creator);
-        attendance.setUpdatedBy(creator);
 
-        Attendance savedAttendance = attendanceRepository.save(attendance);
+        // Stage H: Replace check-then-act race with atomic upsert (consistent with bulk path).
+        // INSERT ... ON CONFLICT DO NOTHING is atomic at the database level, eliminating the
+        // race condition where concurrent requests could both pass the existsBy check.
+        // Returns 1 if inserted, 0 if duplicate (constraint already exists).
+        int rowsInserted = attendanceRepository.insertIgnoreDuplicate(
+                TenantContext.schoolId(),
+                request.getStudentId(),
+                request.getTimetableSlotId(),
+                request.getDate(),
+                request.getStatus(),
+                request.getRemarks(),
+                creator.getId(),
+                creator.getId()
+        );
+
+        if (rowsInserted == 0) {
+            // Duplicate detected at database level — return 400 Bad Request (preserves API contract)
+            return ResponseEntity.badRequest().build();
+        }
+
+        // Query the inserted record to return the AttendanceResponse (preserves API contract)
+        Attendance savedAttendance = attendanceRepository
+                .findByStudent_School_IdAndStudent_IdAndTimetableSlot_IdAndDate(
+                        TenantContext.schoolId(),
+                        request.getStudentId(),
+                        request.getTimetableSlotId(),
+                        request.getDate()
+                )
+                .orElseThrow(() -> new EntityNotFoundException("Attendance record not found after insert"));
+
         return ResponseEntity.ok(mapToResponse(savedAttendance));
     }
 
@@ -114,38 +130,73 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         School school = schoolRepository.getReferenceById(TenantContext.schoolId());
 
+        // ATT-06 fix: validate ALL students before writing ANY records.
+        // A normal return from inside the loop would not trigger @Transactional rollback,
+        // so earlier saves would be committed even though the overall request failed.
+        // Throwing unchecked exceptions here ensures the transaction rolls back cleanly.
+        Integer expectedClassroomId = timetableSlot.getTimetable().getClassroom().getId();
+        List<Student> validatedStudents = new java.util.ArrayList<>();
         for (var item : request.getAttendance()) {
-            Student student = studentService.findById(item.getStudentId())
+            Student student = studentRepository.findById(item.getStudentId())
                     .orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND", "Student not found"));
 
-            if (!student.getClassroomId().equals(timetableSlot.getTimetable().getClassroom().getId())) {
-                return ResponseEntity.badRequest().build();
+            if (!student.getClassroomId().equals(expectedClassroomId)) {
+                throw new IllegalArgumentException(
+                        "Student " + student.getId() + " does not belong to the classroom for this timetable slot");
             }
 
-            // Check if attendance already exists for this student on this date
-            List<Attendance> existingAttendance = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(),
-                    item.getStudentId(), request.getDate(), request.getDate());
-            
-            if (existingAttendance.isEmpty()) {
-                Attendance attendance = new Attendance();
-                attendance.setSchool(school);
-                attendance.setStudent(student);
-                attendance.setTimetableSlot(timetableSlot);
-                attendance.setDate(request.getDate());
-                attendance.setStatus(item.getStatus());
-                attendance.setRemarks(item.getRemarks());
-                
-                // Set creator/updated by
-                User creator = userService.findByEmployee_Id()
+            validatedStudents.add(student);
+        }
+
+        int createdCount = 0;
+        java.util.List<Integer> skippedStudentIds = new java.util.ArrayList<>();
+
+        // Fetch creator user lazily (only if there are students to process)
+        User creator = null;
+
+        for (int i = 0; i < request.getAttendance().size(); i++) {
+            var item = request.getAttendance().get(i);
+            Student student = validatedStudents.get(i);
+
+            // Lazy-load creator user on first iteration
+            if (creator == null) {
+                creator = userService.findByEmployee_Id()
                         .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
-                attendance.setCreatedBy(creator);
-                attendance.setUpdatedBy(creator);
-                
-                attendanceRepository.save(attendance);
+            }
+
+            // Use atomic upsert to eliminate check-then-act race condition.
+            // INSERT ... ON CONFLICT DO NOTHING is atomic at the database level,
+            // so concurrent identical submissions are handled safely without exceptions.
+            // Returns 1 if inserted, 0 if duplicate (constraint already exists).
+            int rowsInserted = attendanceRepository.insertIgnoreDuplicate(
+                    TenantContext.schoolId(),
+                    item.getStudentId(),
+                    request.getTimetableSlotId(),
+                    request.getDate(),
+                    item.getStatus(),
+                    item.getRemarks(),
+                    creator.getId(),
+                    creator.getId()
+            );
+
+            if (rowsInserted > 0) {
+                createdCount++;
+            } else {
+                // Duplicate detected at database level, treat as skipped
+                skippedStudentIds.add(item.getStudentId());
             }
         }
-        
-        return ResponseEntity.ok().build();
+
+        // ATT-01 fix: Return detailed summary so the client can reconcile created vs. skipped records
+        com.gms.model.response.BulkAttendanceResponse response = new com.gms.model.response.BulkAttendanceResponse();
+        response.setTotalStudents(request.getAttendance().size());
+        response.setCreatedCount(createdCount);
+        response.setSkippedCount(skippedStudentIds.size());
+        response.setSkippedStudentIds(skippedStudentIds);
+        response.setMessage(String.format("Attendance recorded for %d students, %d skipped (already exists)",
+                createdCount, skippedStudentIds.size()));
+
+        return ResponseEntity.ok(response);
     }
 
     @Override
@@ -159,7 +210,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new EntityNotFoundException("Attendance record not found"));
 
         // The load is scoped to the caller's school, so a foreign id yields nothing
-        Student student = studentService.findById(request.getStudentId())
+        Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
         // The register already has a slot, and the column is NOT NULL, so an update that does not name
@@ -254,9 +305,56 @@ public class AttendanceServiceImpl implements AttendanceService {
     
     public TimetableSlotResponse mapToSlotResponse(TimetableSlot slot) {
         return new TimetableSlotResponse(
+                slot.getId(),
                 slot.getDayOfWeek(),
                 slot.getPeriod(),
-                null // In a complete implementation, we would map the assignment
+                mapToAssignmentResponse(slot.getAssignment())
+        );
+    }
+
+    private TeacherAssignmentResponse mapToAssignmentResponse(TeacherAssignment assignment) {
+        if (assignment == null) {
+            return null;
+        }
+
+        EmployeeResponse teacherResponse = null;
+        if (assignment.getTeacher() != null) {
+            teacherResponse = new EmployeeResponse(
+                    assignment.getTeacher().getId(),
+                    assignment.getTeacher().getFullName(),
+                    assignment.getTeacher().getEmail(),
+                    assignment.getTeacher().getDesignation(),
+                    assignment.getTeacher().getDepartment()
+            );
+        }
+
+        SubjectResponse subjectResponse = null;
+        if (assignment.getSubject() != null) {
+            subjectResponse = new SubjectResponse(
+                    assignment.getSubject().getId(),
+                    assignment.getSubject().getSchoolId(),
+                    assignment.getSubject().getName(),
+                    assignment.getSubject().getCode()
+            );
+        }
+
+        ClassroomResponse classroomResponse = null;
+        if (assignment.getClassroom() != null) {
+            classroomResponse = new ClassroomResponse(
+                    assignment.getClassroom().getId(),
+                    assignment.getClassroom().getSchoolId(),
+                    assignment.getClassroom().getName(),
+                    assignment.getClassroom().getGrade(),
+                    assignment.getClassroom().getSection()
+            );
+        }
+
+        return new TeacherAssignmentResponse(
+                assignment.getId(),
+                teacherResponse,
+                subjectResponse,
+                classroomResponse,
+                assignment.getAcademicYear()
         );
     }
 }

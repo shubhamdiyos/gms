@@ -46,25 +46,25 @@ public class FeeController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Fee>> getAllFees() {
         return feeService.getAllFees();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Fee> getFeeById(@PathVariable Integer id) {
         return feeService.getFeeById(id);
     }
 
     @GetMapping("/academic-year")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Fee>> getFeesByAcademicYear(@RequestParam String academicYear) {
         return feeService.getFeesByAcademicYear(academicYear);
     }
 
     @GetMapping("/total-amount")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<BigDecimal> getTotalFeeAmountBySchoolIdAndAcademicYear(@RequestParam String academicYear) {
         BigDecimal totalAmount = feeService.getTotalFeeAmountBySchoolIdAndAcademicYear(academicYear);
         return ResponseEntity.ok(totalAmount);

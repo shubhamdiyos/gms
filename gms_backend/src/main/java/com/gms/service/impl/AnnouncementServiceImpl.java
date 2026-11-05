@@ -102,15 +102,9 @@ public class AnnouncementServiceImpl implements AnnouncementService {
         Announcement announcement = announcementRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Announcement not found"));
 
-        // Validate updater exists
-        User updater = userService.findByEmployee_Id()
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
-
-        // Soft delete by setting isPublished to false
-        announcement.setIsPublished(false);
-        announcement.setUpdatedBy(updater);
-
-        announcementRepository.save(announcement);
+        // Unpublishing was not a delete: the row stayed in the admin list, so a draft "deleted"
+        // successfully and never disappeared. The table has no child rows yet (C-8), so the row goes.
+        announcementRepository.delete(announcement);
         return ResponseEntity.ok("Announcement deleted successfully");
     }
 

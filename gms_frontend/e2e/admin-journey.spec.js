@@ -1,5 +1,12 @@
 import { expect, expectCleanConsole, test } from './console-guard.fixture.js';
-import { API_ORIGIN, API_ROOT, provisionTenant, searchStudents } from './helpers/api.js';
+import {
+  API_ORIGIN,
+  API_ROOT,
+  login,
+  postJson,
+  provisionTenant,
+  searchStudents,
+} from './helpers/api.js';
 
 /**
  * The core admin journey, in a browser, against the real backend.
@@ -54,7 +61,7 @@ test('a provisioned administrator reaches its dashboard only after rotating the 
   page,
   consoleErrors,
 }) => {
-  const tenant = await provisionTenant(request, 'A');
+  const tenant = await provisionTenant(request, 'A', { keepIssuedPassword: true });
 
   await signIn(page, tenant.admin);
 
@@ -86,8 +93,18 @@ test('the administrator registers a pupil through the dialog and the roll shows 
   page,
   consoleErrors,
 }) => {
+  // Provisioned with the fixture's rotation, so the classroom exists before the browser opens
+  // the dashboard. It has to: `AdminDashboard` reads the classroom list on mount, and RTK Query
+  // then serves that cached (empty) list to the Students page — creating the classroom after
+  // the dashboard had loaded left the dialog's Classroom select with no options at all, which
+  // is the timeout this test used to spend ten seconds on. The forced rotation is test one's
+  // claim; this test is about the dialog.
   const tenant = await provisionTenant(request, 'B');
-  await signInAndRotate(page, tenant);
+  expect(tenant.classroomId, 'the fixture must hand back the classroom it created').toBeTruthy();
+
+  await signIn(page, tenant.admin);
+  await expect(page).toHaveURL(/\/admin\/dashboard$/);
+  await expect(page.getByRole('heading', { name: 'Admin Dashboard' })).toBeVisible();
 
   await page.getByRole('button', { name: 'Students', exact: true }).click();
   await expect(page).toHaveURL(/\/admin\/students$/);
@@ -107,7 +124,8 @@ test('the administrator registers a pupil through the dialog and the roll shows 
   await dialog.getByRole('combobox', { name: 'Gender' }).click();
   // `exact` because 'Male' is a substring of 'Female', and MUI renders both as options.
   await page.getByRole('option', { name: 'Male', exact: true }).click();
-  // The one classroom this tenant owns, created with it by the fixture.
+  // The one classroom this tenant owns, created once the rotation above cleared the
+  // password-change gate.
   await dialog.getByRole('combobox', { name: 'Classroom' }).click();
   await page.getByRole('option', { name: 'Grade 9 A' }).click();
 
@@ -128,9 +146,7 @@ test('the administrator registers a pupil through the dialog and the roll shows 
 
   // Reconciled against the API the page does not control: same tenant, same surname, one result.
   // A row that exists only in the grid's local state would pass everything above and fail here.
-  const tokens = await page.evaluate(() => localStorage.getItem('gms_token'));
-  expect(tokens, 'the session token is what proves the search ran as this tenant').toBeTruthy();
-  const audit = await searchStudents(request, tokens, tenant.pupilSurname);
+  const audit = await searchStudents(request, tenant.adminToken, tenant.pupilSurname);
   expect(audit.status).toBe(200);
   expect(audit.payload?.totalElements).toBe(1);
 
@@ -145,11 +161,13 @@ test("a second school's administrator searches for the first school's pupil and 
   // School A's pupil, created over HTTP by A's own administrator: the registration path is proven
   // in the browser by the test above, and what is under test here is what a stranger can retrieve.
   const owner = await provisionTenant(request, 'C');
-  const intruder = await provisionTenant(request, 'D');
+  const intruder = await provisionTenant(request, 'D', { keepIssuedPassword: true });
   expect(owner.classroomId, 'the fixture must hand back the classroom it created').toBeTruthy();
 
-  const registered = await request.post(`${API_ROOT}/students/create`, {
-    data: {
+  const registered = await postJson(
+    request,
+    '/students/create',
+    {
       firstName: 'Kiran',
       lastName: owner.pupilSurname,
       email: `kiran.${owner.schoolCode.toLowerCase()}@e2e.invalid`,
@@ -162,8 +180,8 @@ test("a second school's administrator searches for the first school's pupil and 
       classId: owner.classroomId,
       sectionId: null,
     },
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${owner.adminToken}` },
-  });
+    owner.adminToken,
+  );
   expect(registered.status(), 'school C must be able to register its own pupil').toBe(200);
 
   // Now the same words, typed by school D's administrator into the same screen.
@@ -181,11 +199,11 @@ test("a second school's administrator searches for the first school's pupil and 
   // selector is wrong, so the same search string is run twice more over the API below — once as
   // the school that owns the pupil, once as the stranger. The owner's 1 is what turns the
   // intruder's 0 from a tautology into a measurement.
-  const asIntruder = await request.post(`${API_ROOT}/auth/login`, {
-    data: { username: intruder.admin.username, password: ROTATED_PASSWORD },
-    headers: { 'Content-Type': 'application/json' },
+  const asIntruder = await login(request, {
+    username: intruder.admin.username,
+    password: ROTATED_PASSWORD,
   });
-  const intruderToken = (await asIntruder.json()).accessToken;
+  const intruderToken = asIntruder.token;
   const ownRoll = await searchStudents(request, owner.adminToken, owner.pupilSurname);
   const crossTenant = await searchStudents(request, intruderToken, owner.pupilSurname);
   expect(ownRoll.status).toBe(200);

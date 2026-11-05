@@ -190,6 +190,12 @@ export APP_SUPERADMIN_USERNAME="$SUPERADMIN_USER"
 export APP_SUPERADMIN_PASSWORD="$SUPERADMIN_PASSWORD"
 export APP_SUPERADMIN_EMAIL="${APP_SUPERADMIN_EMAIL:-ci@invalid.example}"
 export APP_SUPERADMIN_FULL_NAME="${APP_SUPERADMIN_FULL_NAME:-Platform Administrator}"
+# The bootstrap default is true, and the filter it feeds blocks every write until the
+# account rotates. That is the right production posture — the password there is an issued
+# temporary — but this account's password comes from a CI secret the suite already holds,
+# and there is no operator to rotate it. Left true, `/schools/create` answers 403
+# PASSWORD_CHANGE_REQUIRED and every tenant fixture dies on its first write.
+export APP_SUPERADMIN_FORCE_PASSWORD_CHANGE=false
 
 # Not decoration: the fixture's first act is a platform login, and without an account it
 # fails as `the platform account could not log in (answered 401)` in every test.
@@ -372,8 +378,16 @@ STARTUP_VALIDATION_LINE=$(grep -m1 "Startup security validation passed" "$APP_LO
        echo "       is not the hardened boot the CORS refusal in test four is measured against."; \
        tail -n 40 "$APP_LOG"; exit 1; }
 # Checked rather than assumed, because the alternative is four tests that each fail at their
-# first login and none of them naming the reason.
-SUPERADMIN_BOOTSTRAP_LINE=$(grep -m1 "SuperAdmin bootstrap completed successfully" "$APP_LOG") \
+# first login and none of them naming the reason. Awaited rather than read once: the bootstrap is
+# an ApplicationRunner, and liveness answers from the servlet container before the runners have
+# executed — a single read here saw "bootstrap starting" and declared the boot unusable on a run
+# whose account was minted 4 ms later.
+for ((held = 0; held < BOOT_TIMEOUT; held += 1)); do
+  SUPERADMIN_BOOTSTRAP_LINE=$(grep -m1 "SuperAdmin bootstrap completed successfully" "$APP_LOG" || true)
+  [[ -n "$SUPERADMIN_BOOTSTRAP_LINE" ]] && break
+  sleep 1
+done
+[[ -n "$SUPERADMIN_BOOTSTRAP_LINE" ]] \
   || { echo "FATAL: no platform account was minted by this boot; every fixture login would 401."; \
        grep -i "SuperAdmin bootstrap" "$APP_LOG" | tail -5; exit 1; }
 BOOT_SECONDS=$waited

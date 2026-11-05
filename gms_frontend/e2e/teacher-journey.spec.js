@@ -1,9 +1,7 @@
 import { expect, expectCleanConsole, test } from './console-guard.fixture.js';
 import {
-  API_ROOT,
   provisionTenant,
   claimOf,
-  generatedUsername,
   createTeacherAccount,
   createSubject,
   createTeacherAssignment,
@@ -115,7 +113,9 @@ test('a provisioned teacher reaches its dashboard and loads the attendance page'
 
   // The dashboard shows the teacher's name and the assigned classroom. The class count card
   // reads from `useGetTeacherClassesQuery`, which resolves to the assignment created above.
-  await expect(page.getByText('My Classes')).toBeVisible();
+  // Scoped to the heading: the same words are also the sidebar item's label and the card's
+  // overline, and a bare text locator resolves to several elements.
+  await expect(page.getByRole('heading', { name: 'My Classes' })).toBeVisible();
 
   // Navigate to the attendance page via the sidebar.
   await page.getByRole('listitem').filter({ hasText: 'Attendance' }).click();

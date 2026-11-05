@@ -34,13 +34,13 @@ public class ParentStudentController {
     }
 
     @GetMapping("/parent/{parentId}/students")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'PARENT')")
     public ResponseEntity<List<Student>> getStudentsForParent(@PathVariable Integer parentId) {
         return parentStudentService.getStudentsForParent(parentId);
     }
 
     @GetMapping("/student/{studentId}/parents")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<ParentResponse>> getParentsForStudent(@PathVariable Integer studentId) {
         return parentStudentService.getParentsForStudent(studentId);
     }

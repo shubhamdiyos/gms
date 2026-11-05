@@ -11,9 +11,10 @@ import {
  * The student self-service journey, in a browser, against the real backend.
  *
  * A student account is created by the administrator (`POST /students/create`), which
- * auto-provisions a user login with the generated username and the default password
- * `welcome123`. The account is flagged `requirePasswordChange`, so the first sign-in
- * lands on the rotation screen before the student reaches its dashboard.
+ * auto-provisions a user login with a generated username and a randomly issued temporary
+ * password the creation response hands back once (`StudentResponse.temporaryPassword`). The
+ * account is flagged `requirePasswordChange`, so the first sign-in lands on the rotation
+ * screen before the student reaches its dashboard.
  *
  * The student portal is read-only: profile, attendance, results, fees, timetable. The
  * backend enforces self-service through token-based endpoints (`/students/my-*`) that
@@ -31,9 +32,6 @@ import {
 // eight characters, upper, lower, digit, one of `@$!%*?&.#_`) and this satisfies it.
 const ROTATED_PASSWORD = 'Stu_Journey_2026!';
 
-// The default password the server mints for every student account.
-const DEFAULT_PASSWORD = 'welcome123';
-
 async function signIn(page, { username, password }) {
   await page.goto('/login');
   await page.getByLabel('Username').fill(username);
@@ -49,10 +47,10 @@ async function rotatePassword(page, { issued, next }) {
   await expect(page.getByText('Password changed successfully')).toBeVisible();
 }
 
-async function signInAndRotate(page, username) {
-  await signIn(page, { username, password: DEFAULT_PASSWORD });
+async function signInAndRotate(page, username, issued) {
+  await signIn(page, { username, password: issued });
   await expect(page).toHaveURL(/\/change-password$/);
-  await rotatePassword(page, { issued: DEFAULT_PASSWORD, next: ROTATED_PASSWORD });
+  await rotatePassword(page, { issued, next: ROTATED_PASSWORD });
 }
 
 test('a provisioned student reaches its dashboard and views profile and attendance', async ({
@@ -62,8 +60,8 @@ test('a provisioned student reaches its dashboard and views profile and attendan
 }) => {
   const tenant = await provisionTenant(request, 'G');
 
-  // Create a student in the tenant's classroom. The server auto-provisions a user account
-  // with username = generated(firstName, lastName) and password = "welcome123".
+  // Create a student in the tenant's classroom. The server auto-provisions a user account and
+  // returns its one-time credential in the creation response; the row stores only a hash.
   const studentFirstName = 'Ishaan';
   const studentLastName = tenant.pupilSurname;
   const student = await createStudentAccount(request, tenant.adminToken, {
@@ -78,12 +76,14 @@ test('a provisioned student reaches its dashboard and views profile and attendan
   });
   expect(student.status, `student creation must succeed (answered ${student.status})`).toBe(200);
 
-  // The username the server generated for this student. The derivation is the same rule as
-  // `initialPasswordFor` in the admin journey: first initial + last name, lowercased.
+  // The username the server generated for this student, and the temporary password it issued.
+  // The password is random per account (SEC-CRED-03) and only the creation response carries it.
   const studentUsername = generatedUsername(studentFirstName, studentLastName);
+  const issuedPassword = student.payload?.temporaryPassword;
+  expect(issuedPassword, 'the create response must carry the issued password').toBeTruthy();
 
   // Sign in and rotate the password. The SPA forces the rotation before any dashboard.
-  await signInAndRotate(page, studentUsername);
+  await signInAndRotate(page, studentUsername, issuedPassword);
 
   // The student dashboard loads after rotation.
   await expect(page).toHaveURL(/\/student\/dashboard$/);
@@ -94,9 +94,14 @@ test('a provisioned student reaches its dashboard and views profile and attendan
   await expect(page).toHaveURL(/\/student\/profile$/);
   await expect(page.getByRole('heading', { name: 'My Profile' })).toBeVisible();
 
-  // The profile page shows the student's name and ID.
-  await expect(page.getByText(studentFirstName)).toBeVisible();
-  await expect(page.getByText(studentLastName)).toBeVisible();
+  // The profile page shows the student's name and ID. `getByText('Ishaan')` resolves to three
+  // elements here — the card's full-name heading, the First Name field, and the email that
+  // starts with it — so the name is asserted where the page states it once: the heading, plus
+  // the ID chip the server's own numbering produced.
+  await expect(
+    page.getByRole('heading', { name: `${studentFirstName} ${studentLastName}` }),
+  ).toBeVisible();
+  await expect(page.getByText(`Student ID: ${student.payload.studentId}`)).toBeVisible();
 
   // Navigate to the attendance page via the sidebar.
   await page.getByRole('listitem').filter({ hasText: 'Attendance' }).click();
@@ -109,7 +114,9 @@ test('a provisioned student reaches its dashboard and views profile and attendan
   await expect(page.getByText('Absent Days')).toBeVisible();
 
   // A newly created student has no attendance records, so the page shows the empty state.
-  await expect(page.getByText('No Attendance Records')).toBeVisible();
+  // Scoped to the heading: the same words open the sentence "No attendance records found for
+  // November 2026" below it, and a bare text locator matches both.
+  await expect(page.getByRole('heading', { name: 'No Attendance Records' })).toBeVisible();
 
   expectCleanConsole(consoleErrors);
 });
@@ -136,7 +143,7 @@ test('a student cannot reach the admin or parent dashboards via direct URL', asy
   });
   expect(student.status).toBe(200);
   const studentUsername = generatedUsername(studentFirstName, studentLastName);
-  await signInAndRotate(page, studentUsername);
+  await signInAndRotate(page, studentUsername, student.payload?.temporaryPassword);
   await expect(page).toHaveURL(/\/student\/dashboard$/);
 
   // Attempt to navigate to the admin dashboard by direct URL. The `ProtectedRoute` component
@@ -183,14 +190,19 @@ test('a student API call to another tenant is refused at the CORS layer', async 
   });
   expect(student.status).toBe(200);
   const studentUsername = generatedUsername(studentFirstName, studentLastName);
-  await signIn(page, { username: studentUsername, password: DEFAULT_PASSWORD });
+  const issuedPassword = student.payload?.temporaryPassword;
+  await signIn(page, { username: studentUsername, password: issuedPassword });
   await expect(page).toHaveURL(/\/change-password$/);
-  await rotatePassword(page, { issued: DEFAULT_PASSWORD, next: ROTATED_PASSWORD });
+  await rotatePassword(page, { issued: issuedPassword, next: ROTATED_PASSWORD });
   await expect(page).toHaveURL(/\/student\/dashboard$/);
 
-  // Read the session token the SPA stored after login.
-  const token = await page.evaluate(() => localStorage.getItem('gms_token'));
-  expect(token, 'the session token must be present after login').toBeTruthy();
+  // The SPA keeps its credential in the HttpOnly `gms_auth` cookie, not in `localStorage` (the
+  // whole point of the migration is that script cannot read it). Assert the session exists by
+  // the cookie's presence; the cross-origin fetch below is deliberately uncredentialed, so the
+  // refusal it measures is the CORS layer's, not a missing login.
+  const authCookie = (await page.context().cookies()).find((cookie) => cookie.name === 'gms_auth');
+  expect(authCookie, 'the browser must hold the session cookie after login').toBeTruthy();
+  expect(authCookie.httpOnly, 'the session cookie must not be readable by page scripts').toBe(true);
 
   // Attempt a cross-origin API call from the page. The `vite preview` proxy strips the
   // `Origin` header, so a same-origin call through the proxy would succeed. This test goes

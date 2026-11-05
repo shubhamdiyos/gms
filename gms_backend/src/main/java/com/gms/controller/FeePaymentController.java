@@ -1,14 +1,9 @@
 package com.gms.controller;
 
-import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.FeePayment;
-import com.gms.model.entity.Parent;
-import com.gms.model.entity.User;
 import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
-import com.gms.security.TenantContext;
 import com.gms.service.FeePaymentService;
-import com.gms.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -25,15 +20,13 @@ import java.util.List;
 public class FeePaymentController {
 
     private final FeePaymentService feePaymentService;
-    private final UserService userService;
 
-    public FeePaymentController(FeePaymentService feePaymentService, UserService userService) {
+    public FeePaymentController(FeePaymentService feePaymentService) {
         this.feePaymentService = feePaymentService;
-        this.userService = userService;
     }
 
     @PostMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FeePaymentResponse> createFeePayment(@Valid @RequestBody FeePaymentRequest request) {
         return feePaymentService.createFeePayment(request);
     }
@@ -52,43 +45,25 @@ public class FeePaymentController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<FeePayment>> getAllFeePayments() {
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
+    public ResponseEntity<List<FeePaymentResponse>> getAllFeePayments() {
         return feePaymentService.getAllFeePayments();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FeePayment> getFeePaymentById(@PathVariable Integer id) {
         return feePaymentService.getFeePaymentById(id);
     }
 
     @GetMapping("/student/{studentId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeePayment>> getFeePaymentsByStudent(@PathVariable Integer studentId) {
-        // F-3 fix: PARENT callers must verify they are the parent of this student
-        if (TenantContext.roles().contains("PARENT")) {
-            validateParentOwnsStudent(TenantContext.username(), studentId);
-        }
         return feePaymentService.getFeePaymentsByStudent(studentId);
     }
 
-    private void validateParentOwnsStudent(String username, Integer studentId) {
-        User user = userService.findByUsername(username)
-                .orElseThrow(() -> new TenantAccessDeniedException("User not found"));
-        Parent parent = user.getParent();
-        if (parent == null) {
-            throw new TenantAccessDeniedException("Parent profile not found");
-        }
-        boolean isParentOfStudent = parent.getStudents().stream()
-                .anyMatch(student -> student.getId().equals(studentId));
-        if (!isParentOfStudent) {
-            throw new TenantAccessDeniedException("Not authorized to access this student's data");
-        }
-    }
-
     @GetMapping("/date-range")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeePayment>> getFeePaymentsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
@@ -96,7 +71,7 @@ public class FeePaymentController {
     }
 
     @GetMapping("/total-payments")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<BigDecimal> getTotalPaymentsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
@@ -105,7 +80,7 @@ public class FeePaymentController {
     }
 
     @GetMapping("/payment-count")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Long> getCountOfPaymentsByDate(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate paymentDate) {
         Long paymentCount = feePaymentService.getCountOfPaymentsBySchoolIdAndDate(paymentDate);

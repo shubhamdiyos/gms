@@ -20,12 +20,19 @@ public interface FeePaymentRepository extends TenantScopedRepository<FeePayment>
 
     List<FeePayment> findByStudentFee_Student_School_IdAndStudentFee_Id(Integer schoolId, Integer studentFeeId);
 
-    @Query("SELECT SUM(fp.amount) FROM FeePayment fp WHERE fp.studentFee.student.school.id = :schoolId AND fp.paymentDate BETWEEN :startDate AND :endDate AND fp.status = 'SUCCESS'")
-    BigDecimal getTotalPaymentsBySchoolIdAndDateRange(@Param("schoolId") Integer schoolId, 
-                                                     @Param("startDate") LocalDate startDate, 
+    boolean existsBySchool_IdAndPaymentReference(Integer schoolId, String paymentReference);
+
+    @Query("SELECT SUM(fp.amount) FROM FeePayment fp WHERE fp.school.id = :schoolId AND fp.paymentDate BETWEEN :startDate AND :endDate AND fp.status = 'SUCCESS'")
+    BigDecimal getTotalPaymentsBySchoolIdAndDateRange(@Param("schoolId") Integer schoolId,
+                                                     @Param("startDate") LocalDate startDate,
                                                      @Param("endDate") LocalDate endDate);
 
-    @Query("SELECT COUNT(fp) FROM FeePayment fp WHERE fp.studentFee.student.school.id = :schoolId AND fp.paymentDate = :paymentDate AND fp.status = 'SUCCESS'")
-    Long getCountOfPaymentsBySchoolIdAndDate(@Param("schoolId") Integer schoolId, 
+    @Query("SELECT COUNT(fp) FROM FeePayment fp WHERE fp.school.id = :schoolId AND fp.paymentDate = :paymentDate AND fp.status = 'SUCCESS'")
+    Long getCountOfPaymentsBySchoolIdAndDate(@Param("schoolId") Integer schoolId,
                                              @Param("paymentDate") LocalDate paymentDate);
+
+    @Query("SELECT COUNT(fp) FROM FeePayment fp WHERE fp.school.id = :schoolId AND fp.paymentDate BETWEEN :startDate AND :endDate AND fp.status = 'SUCCESS'")
+    Long getCountOfPaymentsBySchoolIdAndDateRange(@Param("schoolId") Integer schoolId,
+                                                  @Param("startDate") LocalDate startDate,
+                                                  @Param("endDate") LocalDate endDate);
 }

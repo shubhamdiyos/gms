@@ -1,5 +1,6 @@
 package com.gms.model.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import com.gms.model.entity.Student;
 import lombok.AllArgsConstructor;
 import lombok.Getter;
@@ -12,6 +13,7 @@ import java.util.List;
 @Setter
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class ParentResponse {
 
     private Integer id;
@@ -20,4 +22,9 @@ public class ParentResponse {
     private String email;
     private String phoneNumber;
     private List<StudentResponse> students;
+
+    /** ACD-13-02: populated only on the creation response so the admin can relay the credential. */
+    private String temporaryPassword;
+
+    private Boolean enabled;
 }

@@ -101,14 +101,20 @@ class DenyByDefaultAuthorizationArchTest {
      * fails the test, so a renamed endpoint cannot leave its exemption behind — this repository treats
      * a stale exemption as a defect, not as harmless dead text.</p>
      */
-    private static final Map<String, String> PUBLIC_BY_DESIGN = Map.of(
-            "AuthController.login",
-            "the credential check itself; a guard here would require the token the call exists to "
-                    + "issue. SecurityConfig.java:111 permits POST /api/v1/auth/login anonymously, "
-                    + "and it is the only anonymous write in the filter chain",
-            "HealthController.ping",
-            "liveness probe, read before anybody signs in. SecurityConfig.java:112 permits "
-                    + "GET /api/v1/ping anonymously");
+    private static final Map<String, String> PUBLIC_BY_DESIGN = Map.ofEntries(
+            Map.entry("AuthController.login",
+                    "the credential check itself; a guard here would require the token the call exists to "
+                            + "issue. SecurityConfig.java permits POST /api/v1/auth/login anonymously, "
+                            + "and it is the only anonymous write in the filter chain"),
+            Map.entry("AuthController.logout",
+                    "clears the authentication cookie; anonymous callers must be able to log out. "
+                            + "SecurityConfig.java permits POST /api/v1/auth/logout anonymously"),
+            Map.entry("AuthController.getCsrfToken",
+                    "returns the CSRF token the frontend needs before any state-changing request. "
+                            + "SecurityConfig.java permits GET /api/v1/auth/csrf-token anonymously"),
+            Map.entry("HealthController.ping",
+                    "liveness probe, read before anybody signs in. SecurityConfig.java permits "
+                            + "GET /api/v1/ping anonymously"));
 
     /**
      * The authorities this application grants.
@@ -486,10 +492,10 @@ class DenyByDefaultAuthorizationArchTest {
      * an exemption added here has to be argued about in {@code SecurityConfig} at the same time.</p>
      */
     @Test
-    void theAnonymousSurfaceIsStillTwoEndpoints() {
+    void theAnonymousSurfaceIsStillFourEndpoints() {
         assertThat(PUBLIC_BY_DESIGN)
-                .as("the anonymous surface is login and the liveness probe; a third exemption needs "
-                        + "the URL rule that justifies it in SecurityConfig first")
-                .hasSize(2);
+                .as("the anonymous surface is login, logout, CSRF token, and the liveness probe; "
+                        + "a new exemption needs the URL rule that justifies it in SecurityConfig first")
+                .hasSize(4);
     }
 }

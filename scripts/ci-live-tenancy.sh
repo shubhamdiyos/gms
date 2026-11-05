@@ -137,6 +137,9 @@ export APP_SUPERADMIN_USERNAME="$SUPERADMIN_USER"
 export APP_SUPERADMIN_PASSWORD="$SUPERADMIN_PASSWORD"
 export APP_SUPERADMIN_EMAIL="${APP_SUPERADMIN_EMAIL:-ci@invalid.example}"
 export APP_SUPERADMIN_FULL_NAME="${APP_SUPERADMIN_FULL_NAME:-Platform Administrator}"
+# Same reason as ci-playwright-e2e.sh: the account's password is the secret this job already
+# holds, not an issued temporary, so the rotation gate would block the fixtures' first write.
+export APP_SUPERADMIN_FORCE_PASSWORD_CHANGE=false
 export GMS_TEST_USERNAME="$SUPERADMIN_USER"
 export GMS_TEST_PASSWORD="$SUPERADMIN_PASSWORD"
 # Not decoration: verify-mvp-e2e.sh skips three least-privilege refusals without a
@@ -157,6 +160,16 @@ export GMS_P1_FIXTURE_ENV="${GMS_P1_FIXTURE_ENV:-$WORK_DIR/p1-fixture.env}"
 # default edited in one suite cannot silently make the other look at a tenant nobody created.
 export GMS_SCHOOL_A_CODE="${GMS_SCHOOL_A_CODE:-MVP801}"
 export GMS_SCHOOL_B_CODE="${GMS_SCHOOL_B_CODE:-MVP802}"
+# verify-mvp-e2e.sh rotates the two provisioned administrators to these values after their first
+# sign-in, and p1_fixtures.sh signs in with the same ones. The issued passwords are random and
+# never leave the creation response, so this pair is the only thing that lets the fixture step
+# reach the tenants the MVP step built. Exported once, so a default edited in one script cannot
+# leave the other authenticating with a password nobody set.
+export GMS_SCHOOL_A_ADMIN_PASSWORD="${GMS_SCHOOL_A_ADMIN_PASSWORD:-Mvp_Admin_A_2026!}"
+export GMS_SCHOOL_B_ADMIN_PASSWORD="${GMS_SCHOOL_B_ADMIN_PASSWORD:-Mvp_Admin_B_2026!}"
+# p1_fixtures.sh rotates the parent account to this and writes it into the env file the negative
+# tests source; exporting it keeps a rerun's "already present" path on the same value.
+export GMS_PARENT_PASSWORD="${GMS_PARENT_PASSWORD:-Parent_Verify_2026!}"
 export DB_URL DB_USERNAME DB_PASSWORD
 # Two more things the validator refuses without, and neither is a decision about
 # production configuration: a signing key that exists only for this process, and an

@@ -36,9 +36,13 @@
 #   GMS_SUPERADMIN_USERNAME / GMS_SUPERADMIN_PASSWORD   required: the bootstrapped
 #       platform account.
 #   GMS_SCHOOL_A_ADMIN_NAME / GMS_SCHOOL_B_ADMIN_NAME   the two administrators'
-#       full names, TWO space-separated words each: the server builds the username
-#       from the first initial plus the surname (SchoolServiceImpl:85), and that is
-#       the rule `admin_username` below re-implements rather than a new one.
+#       full names. They decide the usernames the server mints, which this run reads
+#       from the creation response rather than re-deriving (SchoolServiceImpl:85).
+#   GMS_SCHOOL_A_ADMIN_PASSWORD / GMS_SCHOOL_B_ADMIN_PASSWORD   optional: what each
+#       provisioned administrator rotates to after its first sign-in. The issued
+#       password is random and returned once by POST /schools/create (ACD-13), so a
+#       later step — p1_fixtures.sh in the live-tenancy gate — cannot know it unless
+#       this run replaces it with a value both scripts are told.
 #   GMS_TEACHER_PASSWORD   optional: a policy-valid password for the throwaway
 #       TEACHER account feature 5 needs (min 8, one upper, one lower, one digit, one
 #       of @$!%*?&.#_ — util/PasswordValidator; a hyphen fails it, which is how the
@@ -50,10 +54,10 @@
 #   PostgreSQL, which is what this machine has had since Stage 2 retired Compose.
 #   GMS_SCHOOL_A_CODE GMS_SCHOOL_B_CODE GMS_SEARCH_SURNAME GMS_REQUIRE_DB
 #
-# The administrators' initial password is not a secret this script invented. It is
-# the rule the server itself applies — SchoolServiceImpl:87 writes `<base>@123` —
-# and the base comes from the name the environment supplies. verify-c1 through
-# verify-c7 log in with that same rule; this reuses it and adds nothing.
+# The administrators' issued password is not a secret this script invented: it is random,
+# and the only copy is in the response POST /schools/create answers with. This run reads it
+# there, signs in, and rotates it to a value the p1 fixture can be handed as an environment
+# variable. verify-c1 through verify-c7 read their own creation responses the same way.
 #
 # What the run writes: two schools, two administrators and their employee rows, one
 # teacher account, four classrooms (two in A, two in B), one subject, one section,
@@ -78,10 +82,13 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
 ADMIN_A_NAME=${GMS_SCHOOL_A_ADMIN_NAME:-Aarav Menon}
 ADMIN_B_NAME=${GMS_SCHOOL_B_ADMIN_NAME:-Beatula Fernandes}
+ADMIN_A_PASSWORD=${GMS_SCHOOL_A_ADMIN_PASSWORD:-Mvp_Admin_A_2026!}
+ADMIN_B_PASSWORD=${GMS_SCHOOL_B_ADMIN_PASSWORD:-Mvp_Admin_B_2026!}
 TEACHER_PASSWORD=${GMS_TEACHER_PASSWORD:-}
 SCHOOL_A_CODE=${GMS_SCHOOL_A_CODE:-MVP801}
 SCHOOL_B_CODE=${GMS_SCHOOL_B_CODE:-MVP802}
@@ -179,6 +186,10 @@ fnote() { printf '      %s\n' "$1"; }
 call() { # call <method> <path> [token] [json]
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
@@ -189,7 +200,7 @@ field() { jq -r "$1 // empty" "$body"; }
 # boolean that is really false reads as absent. This distinguishes "the field is false" from "the field
 # is not there", which is the difference between a refusal that worked and a response that never came.
 flag() { jq -r "if has(\"$1\") then .[\"$1\"] else empty end" "$body"; }
-token_of() { field '.accessToken'; }
+token_of() { local t; t=$(field '.accessToken'); printf '%s' "${t:-$(csrf_auth_token)}"; }
 save_ref() { cp "$body" "$ref"; }   # keep a response for a later comparison
 list_len() { jq 'length' "$body"; } # the list the body holds, as a number
 
@@ -203,16 +214,6 @@ require_value() { # require_value <what> <value>
     failures=$((failures + 1))
     F_FAIL[$CUR]=$(( F_FAIL[$CUR] + 1 ))
   fi
-}
-
-# The administrator username the school-creation flow generates: first initial plus
-# surname, lowercased (SchoolServiceImpl:85). The server also strips anything that is
-# not a-z0-9; the names this script is given are letters only, so the two agree.
-admin_username() { # admin_username <full name>
-  local first last
-  first=$(printf '%s' "$1" | awk '{print $1}')
-  last=$(printf '%s' "$1" | awk '{print $2}')
-  printf '%s%s' "${first:0:1}" "$last" | tr 'A-Z' 'a-z'
 }
 
 lc() { printf '%s' "$1" | tr 'A-Z' 'a-z'; }
@@ -349,12 +350,18 @@ if [[ "$code" != "200" ]]; then
 fi
 SCHOOL_A=$(field '.id')
 require_value "F2 school A was created and answers with its tenant id" "$SCHOOL_A"
+csrf_issued_admin "$body" || exit 1
+ADMIN_A_USER=$ISSUED_ADMIN
+ADMIN_A_ISSUED=$ISSUED_ADMIN_PASSWORD
 
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   "{\"schoolName\":\"Brackmoor High\",\"schoolCode\":\"$SCHOOL_B_CODE\",\"email\":\"office@brackmoor.test\",\"adminFullName\":\"$ADMIN_B_NAME\",\"adminEmail\":\"admin.b@brackmoor.test\",\"address\":\"9 Brackmoor Lane\",\"phone\":\"9800000002\",\"principalName\":\"Head of Brackmoor\",\"establishedYear\":2001,\"boardAffiliation\":\"ICSE\"}")
 check "F2 school B was created" "200" "$code"
 SCHOOL_B=$(field '.id')
 require_value "F2 school B was created and answers with its tenant id" "$SCHOOL_B"
+csrf_issued_admin "$body" || exit 1
+ADMIN_B_USER=$ISSUED_ADMIN
+ADMIN_B_ISSUED=$ISSUED_ADMIN_PASSWORD
 [[ "$SCHOOL_A" == "$SCHOOL_B" ]] && { echo "FATAL: the two schools resolved to the same id"; exit 1; }
 
 code=$(call GET "/schools" "$PLATFORM_TOKEN")
@@ -400,25 +407,32 @@ check "F2 and the school the API refused to delete is still there" "$SCHOOL_A" "
 # ─────────────────────────────────────────────────────────────────────────────
 feature 3
 # SchoolServiceImpl:84-118 is the provisioning, reached by POST /schools/create alone:
-# username = first initial + surname lowercased (:85), password = `<base>@123` (:87),
-# role = ADMIN (:98), plus an Employee row saved and linked (:104-117) so
-# TenantContext.employeeId() is non-null in the JWT the admin then authenticates with.
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
-
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"${ADMIN_A_USER}@123\"}")
-check "F3 school A's administrator logged in with the server's own password rule" "200" "$code"
+# username = first initial + surname lowercased (:85) with a uniqueness suffix when that name
+# is taken, password = a random temporary value returned once in the creation response (:87;
+# ACD-13 made it random), role = ADMIN (:98), plus an Employee row saved and linked (:104-117)
+# so TenantContext.employeeId() is non-null in the JWT the admin then authenticates with.
+#
+# Signing in with the issued credential and rotating immediately is what a person does on their
+# first login, and it is not optional here: PasswordChangeEnforcementFilter answers every
+# business route 403 until requirePasswordChange clears. The rotation also leaves the account
+# at a password p1_fixtures.sh is told, which the random one could never be.
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_ISSUED\"}")
+check "F3 school A's administrator signed in with the credential creation issued" "200" "$code"
 TOKEN_A=$(token_of)
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"${ADMIN_B_USER}@123\"}")
-check "F3 school B's administrator logged in the same way" "200" "$code"
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_ISSUED\"}")
+check "F3 school B's administrator signed in the same way" "200" "$code"
 TOKEN_B=$(token_of)
 if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
   echo "FATAL: could not obtain both school administrator tokens."
-  echo "       Derived usernames were '$ADMIN_A_USER' and '$ADMIN_B_USER' from the names in"
-  echo "       GMS_SCHOOL_A_ADMIN_NAME / GMS_SCHOOL_B_ADMIN_NAME; each must be exactly two"
-  echo "       space-separated words for the server's rule to produce them."
+  echo "       The usernames were read from the two creation responses ('$ADMIN_A_USER',"
+  echo "       '$ADMIN_B_USER') and the passwords from the same responses, so a failure here"
+  echo "       means the provisioning response no longer carries its one-time credential."
   exit 1
 fi
+check "F3 school A's administrator rotated off the issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_A" "$ADMIN_A_ISSUED" "$ADMIN_A_PASSWORD")"
+check "F3 school B's administrator rotated off the issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_B" "$ADMIN_B_ISSUED" "$ADMIN_B_PASSWORD")"
 code=$(call GET /schools "$TOKEN_A")
 check "F3 provisioning is part of creation, not a second call: the admin already reaches its school" \
   "200" "$code"
@@ -491,10 +505,14 @@ feature 5
 # GlobalExceptionHandler:106-115 (`.error == "Forbidden"` too).
 #   GET  /dashboard/platform        DashboardController:69  hasAuthority('SUPERADMIN')
 #   POST /schools/create            SchoolController:40     hasAuthority('SUPERADMIN')
-#   POST /student-admissions/apply  StudentAdmissionController:20 hasAuthority('ADMIN')
-#   POST /sections                  SectionController:25    hasAuthority('ADMIN')
+#   POST /student-admissions/apply  StudentAdmissionController:20 hasAnyAuthority('ADMIN','SUPERADMIN')
+#   POST /sections                  SectionController:25    hasAnyAuthority('ADMIN','SUPERADMIN')
 #   GET/POST /students/**, DELETE /subjects/{id} — StudentController:66,44 and
 #   SubjectController:96, reached only with a real least-privilege TEACHER token.
+# The two ADMIN routes admit the platform owner on purpose (F-4, commit 23a0c65): the
+# refusal they are worth testing is a TEACHER's, so the platform-owner calls below assert
+# the write is ADMITTED and lands in the platform's own tenant, and the TEACHER calls
+# further down assert the 403.
 code=$(call POST /subjects/create "$TOKEN_A" '{"name":"Mathematics","code":"MATH-801"}')
 check "F5 setup: school A created a subject to be protected" "200" "$code"
 SUBJECT_A=$(field '.id')
@@ -514,14 +532,15 @@ check "F5 the refused school creation wrote no tenant" "$SCHOOLS_BEFORE" "$(list
 code=$(call GET "/students/admissions" "$TOKEN_A")
 ADMISSIONS_BEFORE=$(list_len)
 code=$(call POST /student-admissions/apply "$PLATFORM_TOKEN" \
-  '{"firstName":"No","lastName":"Admission","email":"no.admission@mvpedge.test"}')
-check "F5 the platform owner may not apply for an admission (ADMIN-only guard): 403" "403" "$code"
-check "F5 and the guard answers the way a method refusal always does" "Forbidden" "$(field '.error')"
+  '{"firstName":"Platform","lastName":"Admission","email":"platform.admission@mvpedge.test"}')
+check "F5 the platform owner may apply for an admission (F-4 grants SUPERADMIN the ADMIN writes)" "200" "$code"
+require_value "F5 and the admission was written" "$(field '.id')"
 code=$(call GET "/students/admissions" "$TOKEN_A")
-check "F5 the refused write left no admission behind" "$ADMISSIONS_BEFORE" "$(list_len)"
+check "F5 and the platform's admission did not land in school A's tenant" "$ADMISSIONS_BEFORE" "$(list_len)"
 
-code=$(call POST /sections "$PLATFORM_TOKEN" '{"name":"Invisible","description":"must not exist","capacity":10}')
-check "F5 the platform owner may not create a section (ADMIN-only guard): 403" "403" "$code"
+code=$(call POST /sections "$PLATFORM_TOKEN" '{"name":"Platform Cohort","description":"owned by the system school","capacity":10}')
+check "F5 the platform owner may create a section (F-4 grants SUPERADMIN the ADMIN writes)" "200" "$code"
+check "F5 and the section carries the platform's own tenant, not school A" "$PLATFORM_SCHOOL" "$(field '.schoolId')"
 
 if [[ -n "$TEACHER_PASSWORD" ]]; then
   TEACHER_UID=""
@@ -532,6 +551,13 @@ if [[ -n "$TEACHER_PASSWORD" ]]; then
   code=$(call POST /auth/login "" "{\"username\":\"e2e.mvp.teacher\",\"password\":\"$TEACHER_PASSWORD\"}")
   check "F5 setup: the TEACHER logged in" "200" "$code"
   TOKEN_T=$(token_of)
+  # `/users/create` flags the account requirePasswordChange, and PasswordChangeEnforcementFilter
+  # answers every business route 403 PASSWORD_CHANGE_REQUIRED until that flag clears — before the
+  # guards this section measures. Rotating to the same value clears it and leaves this token valid.
+  if [[ -n "$TOKEN_T" ]]; then
+    check "F5 setup: the TEACHER cleared the first-login flag" "200" \
+      "$(csrf_rotate_password "$API" "$TOKEN_T" "$TEACHER_PASSWORD" "$TEACHER_PASSWORD")"
+  fi
   if [[ -z "$TOKEN_T" ]]; then
     skip "F5 a TEACHER reading the student list is refused" "the TEACHER token could not be obtained, so there is no bounded caller to refuse"
     skip "F5 and the refusal is the documented 403 body" "no TEACHER token"
@@ -539,6 +565,8 @@ if [[ -n "$TEACHER_PASSWORD" ]]; then
     skip "F5 the refused pupil was never written" "no TEACHER token"
     skip "F5 a TEACHER deleting a subject is refused" "no TEACHER token"
     skip "F5 the refused subject delete destroyed nothing" "no TEACHER token"
+    skip "F5 a TEACHER applying for an admission is refused" "no TEACHER token"
+    skip "F5 a TEACHER creating a section is refused" "no TEACHER token"
   else
     code=$(call GET "/students" "$TOKEN_T")
     check "F5 a TEACHER reading the student list is refused with 403, not 500" "403" "$code"
@@ -557,6 +585,14 @@ if [[ -n "$TEACHER_PASSWORD" ]]; then
     check "F5 the URL layer admits TEACHER to /subjects/** (SecurityConfig:137), so this is the method guard speaking" "Forbidden" "$(field '.error')"
     code=$(call GET "/subjects/$SUBJECT_A" "$TOKEN_A")
     check "F5 and the refused delete destroyed nothing" "$SUBJECT_A" "$(field '.id')"
+    # The two ADMIN writes the platform owner is allowed (above) still refuse a TEACHER.
+    code=$(call POST /student-admissions/apply "$TOKEN_T" \
+      '{"firstName":"No","lastName":"Teacher","email":"no.teacher@mvpedge.test"}')
+    check "F5 a TEACHER applying for an admission is refused (PLATFORM_MANAGEMENT admits ADMIN/SUPERADMIN): 403" "403" "$code"
+    check "F5 and the refusal is the documented body" "Forbidden" "$(field '.error')"
+    code=$(call POST /sections "$TOKEN_T" '{"name":"Invisible","description":"must not exist","capacity":10}')
+    check "F5 a TEACHER creating a section is refused by the method guard, not the URL layer: 403" "403" "$code"
+    check "F5 and that refusal is the same documented body" "Forbidden" "$(field '.error')"
   fi
 else
   skip "F5 a TEACHER reading the student list is refused" "GMS_TEACHER_PASSWORD is not set; there is no least-privilege token to refuse"
@@ -565,6 +601,8 @@ else
   skip "F5 the refused pupil was never written" "no TEACHER token"
   skip "F5 a TEACHER deleting a subject is refused" "no TEACHER token"
   skip "F5 the refused subject delete destroyed nothing" "no TEACHER token"
+  skip "F5 a TEACHER applying for an admission is refused" "no TEACHER token"
+  skip "F5 a TEACHER creating a section is refused" "no TEACHER token"
 fi
 
 # ─────────────────────────────────────────────────────────────────────────────

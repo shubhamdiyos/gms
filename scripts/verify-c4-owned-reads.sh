@@ -46,10 +46,14 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
 ADMIN_A_NAME=${GMS_SCHOOL_A_ADMIN_NAME:-Nadia Okonjo}
 ADMIN_B_NAME=${GMS_SCHOOL_B_ADMIN_NAME:-Tomas Wilder}
+# School creation issues a random temporary password (ACD-13); this is only what each
+# administrator rotates to before the suite's business calls.
+ROTATED_ADMIN_PASSWORD=${GMS_ROTATED_ADMIN_PASSWORD:-Test_Admin_2026!}
 ACADEMIC_YEAR=${GMS_ACADEMIC_YEAR:-2026-2027}
 TODAY=${GMS_VERIFY_DATE:-2026-06-11}
 
@@ -84,20 +88,17 @@ skip() { # skip <name> <reason>
 call() { # call <method> <path> [token] [json]
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
 }
 
 field() { jq -r "$1 // empty" "$body"; }
-token_of() { field '.accessToken'; }
-
-admin_username() { # admin_username <full name>
-  local first last
-  first=$(printf '%s' "$1" | awk '{print $1}')
-  last=$(printf '%s' "$1" | awk '{print $2}')
-  printf '%s%s' "${first:0:1}" "$last" | tr 'A-Z' 'a-z'
-}
+token_of() { local t; t=$(field '.accessToken'); printf '%s' "${t:-$(csrf_auth_token)}"; }
 
 sql() { # sql <statement> — SELECT only
   docker exec -e PGPASSWORD="${!PG_PASSWORD_ENV}" "$PG_CONTAINER" psql -U "$PG_USER" -d "$VERIFY_DB" \
@@ -157,22 +158,30 @@ PLATFORM_TOKEN=$(token_of)
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Ashcombe Grammar","schoolCode":"ASH401","adminFullName":"'"$ADMIN_A_NAME"'","adminEmail":"nadia@ashcombe.test"}')
 check "school A created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_A_USER=$ISSUED_ADMIN
+ADMIN_A_ISSUED=$ISSUED_ADMIN_PASSWORD
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Bracklyn High","schoolCode":"BRK402","adminFullName":"'"$ADMIN_B_NAME"'","adminEmail":"tomas@bracklyn.test"}')
 check "school B created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_B_USER=$ISSUED_ADMIN
+ADMIN_B_ISSUED=$ISSUED_ADMIN_PASSWORD
 
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_USER@123\"}")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_ISSUED\"}")
 check "school A admin login" "200" "$code"
 TOKEN_A=$(token_of)
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_USER@123\"}")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_ISSUED\"}")
 check "school B admin login" "200" "$code"
 TOKEN_B=$(token_of)
 if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
   echo "FATAL: could not obtain both school administrator tokens"
   exit 1
 fi
+check "school A admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_A" "$ADMIN_A_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
+check "school B admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_B" "$ADMIN_B_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
 
 SCHOOL_A=$(sql "SELECT id FROM schools WHERE school_code='ASH401'" 2>/dev/null | tr -d '[:space:]')
 SCHOOL_B=$(sql "SELECT id FROM schools WHERE school_code='BRK402'" 2>/dev/null | tr -d '[:space:]')
@@ -228,7 +237,7 @@ create_row student-fee student_fees /student-fees /student-fees \
 STUDENT_FEE_A=${REPLY_ID:-}
 
 create_row fee-payment fee_payments /fee-payments /fee-payments \
-  "{\"studentFeeId\":$STUDENT_FEE_A,\"amount\":500,\"paymentDate\":\"$TODAY\",\"paymentMethod\":\"CASH\",\"transactionId\":\"TXN-C4-1\",\"status\":\"PAID\"}"
+  "{\"studentFeeId\":$STUDENT_FEE_A,\"amount\":500,\"paymentDate\":\"$TODAY\",\"paymentMethod\":\"CASH\",\"transactionId\":\"TXN-C4-1\",\"paymentReference\":\"PAY-C4-1\",\"status\":\"PAID\"}"
 FEE_PAYMENT_A=${REPLY_ID:-}
 
 create_row invoice invoices /invoices /invoices \
