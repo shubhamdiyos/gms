@@ -671,8 +671,11 @@ removal rather than by gating, and its "CI is not required" half closes through 
 `git show master:gms_backend/pom.xml \| grep -ci flyway` → `0`, `git ls-tree -r master` → zero files under
 `db/migration`, `application-dev.properties:20` → `${JPA_DDL_AUTO:update}`. On the branch the dependency, the
 migrations and the three literal `validate`s exist, the compose and `.env.example` overrides are gone, and
-`scripts/verify-schema.sh` proves the chain rebuilds a schema Hibernate accepts. **Closed on branch; the finding is
-open until the branch merges.**
+`scripts/verify-schema.sh` proves the chain rebuilds a schema Hibernate accepts. *Corrected 2026-11-02:* the last
+sentence has been overtaken twice — PR #25 merged as `ef00eb9` carrying `V1`–`V7`, PR #26 as `8145a31` carrying
+`V8`–`V9` — so `git ls-tree -r master` now lists nine files under `db/migration`, `master` carries the literal
+`validate` in all three profiles, and this finding is **closed on `master`**. The `master`-side greps quoted above are
+the record of what was true on the day they were run, not a current state.
 
 **OPS-08 (P1) — Compose cannot start from a fresh clone.** `docker-compose.yml:8-9,32-33` require `env_file: .env`, which the repo does not ship and `.gitignore:2` forbids, so `make up` fails before the `${VAR:-default}` fallbacks at `:11-13` apply. `version: '3.8'` (`:1`) is obsolete. Both Postgres (`:15`) and app (`:47`) ports are published to the host, and `/actuator` is unauthenticated (SEC-13). No `restart:` policy on any service; `postgres.healthcheck` (`:18-22`) hardcodes `pg_isready -U gms_user -d gms` while user/db are templated, so overriding `DB_NAME` breaks `depends_on: service_healthy` (`:48-50`). `SUPERADMIN_PASSWORD` and the JWT secret are never passed, so a compose deployment inherits both insecure defaults
 (SEC-02, SEC-03) — and the bootstrap name is not even the one that binds (SEC-15).
