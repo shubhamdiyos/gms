@@ -29,4 +29,12 @@ public class StudentResponse {
 
     /** ACD-13-02: populated only on the creation response so the admin can relay the credential. */
     private String temporaryPassword;
+
+    /**
+     * Human-readable placement, populated where the caller cannot look it up itself. The parent
+     * portal is the case: {@code /classrooms} and {@code /sections} are admin/teacher reads, so a
+     * parent holding only {@code classId}/{@code sectionId} has no way to turn 9 into "Grade 9-A".
+     */
+    private String className;
+    private String sectionName;
 }

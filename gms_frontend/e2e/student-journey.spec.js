@@ -108,10 +108,12 @@ test('a provisioned student reaches its dashboard and views profile and attendan
   await expect(page).toHaveURL(/\/student\/attendance$/);
   await expect(page.getByRole('heading', { name: 'My Attendance' })).toBeVisible();
 
-  // The attendance page shows the statistics cards and the month selector.
-  await expect(page.getByText('Total Days')).toBeVisible();
-  await expect(page.getByText('Present Days')).toBeVisible();
-  await expect(page.getByText('Absent Days')).toBeVisible();
+  // The attendance page shows the statistics cards and the month selector. The cards count
+  // marked periods, not days, because one day holds several timetable periods.
+  await expect(page.getByText('Marked Periods', { exact: true })).toBeVisible();
+  await expect(page.getByText('Present', { exact: true })).toBeVisible();
+  await expect(page.getByText('Absent', { exact: true })).toBeVisible();
+  await expect(page.getByText('Late', { exact: true })).toBeVisible();
 
   // A newly created student has no attendance records, so the page shows the empty state.
   // Scoped to the heading: the same words open the sentence "No attendance records found for

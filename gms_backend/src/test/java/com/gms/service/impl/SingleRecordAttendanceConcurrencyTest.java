@@ -66,7 +66,8 @@ class SingleRecordAttendanceConcurrencyTest extends BasePostgresIntegrationTest 
             entityManager.flush();
         });
 
-        testDate = LocalDate.of(2026, 11, 3);
+        // A Monday, matching the MONDAY slot created below.
+        testDate = LocalDate.of(2026, 11, 2);
 
         school = transactionTemplate.execute(status -> {
             School s = new School();

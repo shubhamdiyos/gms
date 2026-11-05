@@ -122,7 +122,7 @@ const TeacherDashboard = () => {
                 value: todayPeriods.length,
                 subtitle: todayPeriods.length === 0
                   ? 'No periods scheduled today'
-                  : `Periods ${todayPeriods
+                  : `${todayPeriods.length === 1 ? 'Period' : 'Periods'} ${todayPeriods
                       .map((slot) => slot.period)
                       .sort((a, b) => a - b)
                       .join(', ')}`,
