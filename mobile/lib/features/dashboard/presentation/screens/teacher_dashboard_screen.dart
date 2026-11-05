@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/models/dashboard_models.dart';
+import '../../../workflows/presentation/widgets/workflow_links.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_widgets.dart';
 
@@ -27,6 +28,18 @@ class TeacherDashboardScreen extends ConsumerWidget {
           subtitle: 'Your classes, students and timetable',
           icon: Icons.school_outlined,
           color: AppColors.roleTeacher,
+        ),
+        const SizedBox(height: 16),
+        const WorkflowLinks(
+          links: [
+            WorkflowLink(
+              title: 'Mark attendance',
+              subtitle: 'Take the register for one of your periods',
+              icon: Icons.fact_check_outlined,
+              route: '/attendance/mark',
+              color: AppColors.roleTeacher,
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         AsyncDashboard<TeacherDashboardData>(

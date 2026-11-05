@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/models/dashboard_models.dart';
+import '../../../workflows/presentation/widgets/workflow_links.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_widgets.dart';
 
@@ -27,6 +28,25 @@ class ParentDashboardScreen extends ConsumerWidget {
           subtitle: "Your children's attendance, results and fees",
           icon: Icons.family_restroom_outlined,
           color: AppColors.roleParent,
+        ),
+        const SizedBox(height: 16),
+        const WorkflowLinks(
+          links: [
+            WorkflowLink(
+              title: 'Child attendance',
+              subtitle: 'Every marked period for one child',
+              icon: Icons.event_available_outlined,
+              route: '/attendance/child',
+              color: AppColors.roleParent,
+            ),
+            WorkflowLink(
+              title: 'Results',
+              subtitle: 'Published exam results per child',
+              icon: Icons.assessment_outlined,
+              route: '/results',
+              color: AppColors.roleStudent,
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         AsyncDashboard<ParentDashboardData>(

@@ -47,6 +47,26 @@ class ApiConstants {
   static const String parentChildResults = '$parentChildren/{studentId}/results';
   static const String parentChildFees = '$parentChildren/{studentId}/fees';
 
+  // Workflow endpoints
+  static const String classrooms = '$apiVersion/classrooms';
+  static const String assignedClassrooms = '$classrooms/teacher/assigned';
+  static const String classroomTimetable =
+      '$apiVersion/timetables/classroom/{classroomId}';
+  static const String studentSearch = '$studentsBase/search';
+  static const String studentById = '$studentsBase/{id}';
+  static const String attendanceBase = '$apiVersion/attendance';
+  static const String attendanceBulk = '$attendanceBase/bulk';
+  static const String attendanceForClassroom =
+      '$attendanceBase/classroom/{classroomId}';
+  static const String attendanceForStudent =
+      '$attendanceBase/student/{studentId}';
+  static const String studentFeesBase = '$apiVersion/student-fees';
+  static const String studentFeesForStudent =
+      '$studentFeesBase/student/{studentId}';
+  static const String feePayments = '$apiVersion/fee-payments';
+  static const String resultsBase = '$apiVersion/results';
+  static const String resultsForStudent = '$resultsBase/student/{studentId}';
+
   // Header names
   static const String headerAuthorization = 'Authorization';
   static const String headerCsrfToken = 'X-XSRF-TOKEN';

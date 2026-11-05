@@ -2,9 +2,16 @@ import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:go_router/go_router.dart';
 import '../features/auth/presentation/providers/auth_provider.dart';
+import '../features/auth/domain/enums/user_role.dart';
 import '../features/auth/presentation/screens/login_screen.dart';
 import '../features/auth/presentation/screens/change_password_screen.dart';
 import '../features/dashboard/presentation/screens/role_dashboard_screen.dart';
+import '../features/workflows/presentation/screens/child_attendance_screen.dart';
+import '../features/workflows/presentation/screens/fee_collection_screen.dart';
+import '../features/workflows/presentation/screens/mark_attendance_screen.dart';
+import '../features/workflows/presentation/screens/student_details_screen.dart';
+import '../features/workflows/presentation/screens/student_list_screen.dart';
+import '../features/workflows/presentation/screens/view_results_screen.dart';
 
 /// Router configuration for the GMS mobile application.
 ///
@@ -61,6 +68,16 @@ final routerProvider = Provider<GoRouter>((ref) {
         return '/home';
       }
 
+      // A workflow route belongs to the roles whose endpoints accept it. A
+      // caller who guesses the URL is sent back to their own dashboard rather
+      // than shown a page that would answer 403 on every request.
+      final allowed = _rolesForPath(currentPath);
+      if (allowed != null &&
+          authState.role != null &&
+          !allowed.contains(authState.role)) {
+        return '/home';
+      }
+
       return null;
     },
     routes: [
@@ -78,10 +95,64 @@ final routerProvider = Provider<GoRouter>((ref) {
         path: '/home',
         builder: (context, state) => const RoleDashboardScreen(),
       ),
+      GoRoute(
+        path: '/students',
+        builder: (context, state) => const StudentListScreen(),
+      ),
+      GoRoute(
+        path: '/students/:id',
+        builder: (context, state) => StudentDetailsScreen(
+          studentId: int.tryParse(state.pathParameters['id'] ?? '') ?? 0,
+        ),
+      ),
+      GoRoute(
+        path: '/fees/collect',
+        builder: (context, state) => const FeeCollectionScreen(),
+      ),
+      GoRoute(
+        path: '/attendance/mark',
+        builder: (context, state) => const MarkAttendanceScreen(),
+      ),
+      GoRoute(
+        path: '/attendance/child',
+        builder: (context, state) => const ChildAttendanceScreen(),
+      ),
+      GoRoute(
+        path: '/results',
+        builder: (context, state) => const ViewResultsScreen(),
+      ),
     ],
     errorBuilder: (context, state) => const NotFoundScreen(),
   );
 });
+
+/// The roles a workflow path serves, or `null` for an unrestricted path.
+Set<UserRole>? _rolesForPath(String path) {
+  if (path == '/students' || path.startsWith('/students/')) {
+    return const {UserRole.admin, UserRole.superadmin};
+  }
+  if (path == '/fees/collect') {
+    return const {
+      UserRole.admin,
+      UserRole.superadmin,
+      UserRole.accountant,
+    };
+  }
+  if (path == '/attendance/mark') {
+    return const {
+      UserRole.admin,
+      UserRole.superadmin,
+      UserRole.teacher,
+    };
+  }
+  if (path == '/attendance/child') {
+    return const {UserRole.parent};
+  }
+  if (path == '/results') {
+    return const {UserRole.student, UserRole.parent};
+  }
+  return null;
+}
 
 /// Shown while the stored session is being validated.
 class SplashScreen extends StatelessWidget {

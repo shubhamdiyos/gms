@@ -168,6 +168,10 @@ class StudentSummary {
 }
 
 class TimetableSlot {
+  /// The server-side slot id. Attendance is recorded against this id, so a
+  /// schedule that does not carry it cannot start a roll call.
+  final int? id;
+  final int? classroomId;
   final String dayOfWeek;
   final int period;
   final String subjectName;
@@ -175,6 +179,8 @@ class TimetableSlot {
   final String? teacherName;
 
   const TimetableSlot({
+    this.id,
+    this.classroomId,
     required this.dayOfWeek,
     required this.period,
     required this.subjectName,
@@ -188,6 +194,9 @@ class TimetableSlot {
     final classroom = asMap(assignment['classroom']);
     final teacher = asMap(assignment['teacher']);
     return TimetableSlot(
+      id: json['id'] == null ? null : asInt(json['id']),
+      classroomId:
+          classroom['id'] == null ? null : asInt(classroom['id']),
       dayOfWeek: json['dayOfWeek']?.toString() ?? '',
       period: asInt(json['period']),
       subjectName: subject['name']?.toString() ?? 'Free period',
@@ -299,6 +308,7 @@ class ExamResult {
 
 class FeeRecord {
   final int id;
+  final int? studentId;
   final String status;
   final double totalAmount;
   final double amountPaid;
@@ -311,6 +321,7 @@ class FeeRecord {
 
   const FeeRecord({
     required this.id,
+    this.studentId,
     required this.status,
     required this.totalAmount,
     required this.amountPaid,
@@ -327,6 +338,7 @@ class FeeRecord {
     final paid = asDouble(json['amountPaid']);
     return FeeRecord(
       id: asInt(json['id']),
+      studentId: json['studentId'] == null ? null : asInt(json['studentId']),
       status: (json['status']?.toString() ?? '').toUpperCase(),
       totalAmount: total,
       amountPaid: paid,

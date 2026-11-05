@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/models/dashboard_models.dart';
+import '../../../workflows/presentation/widgets/workflow_links.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_widgets.dart';
 
@@ -27,6 +28,18 @@ class StudentDashboardScreen extends ConsumerWidget {
           subtitle: 'Attendance, results, fees and your timetable',
           icon: Icons.menu_book_outlined,
           color: AppColors.roleStudent,
+        ),
+        const SizedBox(height: 16),
+        const WorkflowLinks(
+          links: [
+            WorkflowLink(
+              title: 'View results',
+              subtitle: 'Every published exam result in one list',
+              icon: Icons.assessment_outlined,
+              route: '/results',
+              color: AppColors.roleStudent,
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         AsyncDashboard<StudentDashboardData>(
