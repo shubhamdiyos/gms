@@ -62,6 +62,18 @@ ACADEMIC_YEAR=${GMS_ACADEMIC_YEAR:-2026-2027}
 CROSS_YEAR=${GMS_CROSS_TENANT_ACADEMIC_YEAR:-2027-2028}
 TODAY=${GMS_VERIFY_DATE:-2026-06-11}
 
+# A register row may only name a slot scheduled for its own weekday, so the fixture has to
+# ask the date what day it is rather than hardcode MONDAY. BSD date takes -j; GNU date does
+# not, and the fallback is what runs on the Linux CI runner.
+weekday_of() {
+  if date -j -f '%Y-%m-%d' "$1" '+%A' >/dev/null 2>&1; then
+    date -j -f '%Y-%m-%d' "$1" '+%A' | tr '[:lower:]' '[:upper:]'
+  else
+    date -d "$1" '+%A' | tr '[:lower:]' '[:upper:]'
+  fi
+}
+DAY_OF_WEEK=$(weekday_of "$TODAY")
+
 VERIFY_DB=${GMS_VERIFY_DB:-}
 PG_CONTAINER=${GMS_PG_CONTAINER:-gms-postgres}
 PG_USER=${GMS_PG_USER:-gms_user}
@@ -287,7 +299,7 @@ ASSIGNMENT_A=$(field '.id')
 require_id "the teacher assignment" "$ASSIGNMENT_A"
 
 code=$(call POST /timetables "$TOKEN_A" \
-  "{\"classroomId\":$CLASS_A,\"academicYear\":\"$ACADEMIC_YEAR\",\"slots\":[{\"dayOfWeek\":\"MONDAY\",\"period\":1,\"assignmentId\":$ASSIGNMENT_A}]}")
+  "{\"classroomId\":$CLASS_A,\"academicYear\":\"$ACADEMIC_YEAR\",\"slots\":[{\"dayOfWeek\":\"$DAY_OF_WEEK\",\"period\":1,\"assignmentId\":$ASSIGNMENT_A}]}")
 check "timetable with one slot created" "200" "$code"
 TIMETABLE_A=$(field '.id')
 # The response carries the slots' day and period, not their ids, and attendance is

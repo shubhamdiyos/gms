@@ -164,8 +164,8 @@ const ParentChildrenPage = () => {
 
                       <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                         <Box>
-                          <Typography variant="body2" color="text.secondary">Class ID</Typography>
-                          <Typography variant="body1">{child.classId ?? 'N/A'}</Typography>
+                          <Typography variant="body2" color="text.secondary">Class</Typography>
+                          <Typography variant="body1">{child.className ?? 'N/A'}</Typography>
                         </Box>
                         <Chip
                           label={child.status === '1' ? 'Active' : 'Inactive'}
@@ -200,7 +200,7 @@ const ParentChildrenPage = () => {
                       {childFullName(currentChild) || 'Unnamed student'}
                     </Typography>
                     <Typography variant="body2" color="text.secondary">
-                      Roll No: {currentChild.studentId ?? 'N/A'} • Class ID: {currentChild.classId ?? 'N/A'} • Section ID: {currentChild.sectionId ?? 'N/A'}
+                      Roll No: {currentChild.studentId ?? 'N/A'} • Class: {currentChild.className ?? 'N/A'} • Section: {currentChild.sectionName ?? 'N/A'}
                     </Typography>
                   </Box>
                 </Box>

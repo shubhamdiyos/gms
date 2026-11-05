@@ -201,7 +201,9 @@ public class ParentStudentServiceImpl implements ParentStudentService {
                 s.getDateOfBirth(),
                 s.getGender(),
                 s.getStatus(),
-                null
+                null,
+                s.getClassroom() != null ? s.getClassroom().getName() : null,
+                s.getSection() != null ? s.getSection().getName() : null
         );
     }
 }

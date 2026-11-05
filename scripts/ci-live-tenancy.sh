@@ -5,7 +5,7 @@
 #   GMS_JAR=gms_backend/target/gms-0.1.0-SNAPSHOT.jar ./scripts/ci-live-tenancy.sh
 #
 # What it does: boots the built jar against a throwaway PostgreSQL whose schema
-# Flyway brings up from V1 to the last migration, waits for the anonymous liveness
+# Flyway brings up from V1 to the last migration, waits for the anonymous readiness
 # probe, then runs every live verification suite in the tree against that single
 # boot, and refuses the run when any suite fails **or skips**.
 #
@@ -213,8 +213,12 @@ echo "== boot =="
 # ddl-auto=validate must accept the schema it produced.
 JPA_SHOW_SQL=true java -jar "$JAR" --server.port="$PORT" >"$APP_LOG" 2>&1 &
 APP_PID=$!
-echo "pid $APP_PID; waiting for $BASE_URL/actuator/health/liveness (max ${BOOT_TIMEOUT}s)"
+echo "pid $APP_PID; waiting for $BASE_URL/actuator/health/readiness (max ${BOOT_TIMEOUT}s)"
 
+# Readiness, not liveness: the web server answers liveness while the CommandLineRunners are
+# still executing, and SuperAdminBootstrapRunner is one of them. A suite that starts on
+# liveness can log in before the platform account exists and get a 401 that looks like an
+# auth failure. READINESS turns accepting-traffic only after ApplicationReadyEvent.
 ready=""
 for ((waited = 0; waited < BOOT_TIMEOUT; waited += 3)); do
   if ! kill -0 "$APP_PID" 2>/dev/null; then
@@ -222,12 +226,12 @@ for ((waited = 0; waited < BOOT_TIMEOUT; waited += 3)); do
     tail -n 60 "$APP_LOG"
     exit 1
   fi
-  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$BASE_URL/actuator/health/liveness" || echo 000)
+  code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 3 "$BASE_URL/actuator/health/readiness" || echo 000)
   if [[ "$code" == "200" ]]; then ready=yes; break; fi
   sleep 3
 done
 if [[ -z "$ready" ]]; then
-  echo "FATAL: nothing answered GET $BASE_URL/actuator/health/liveness within ${BOOT_TIMEOUT}s."
+  echo "FATAL: nothing answered GET $BASE_URL/actuator/health/readiness within ${BOOT_TIMEOUT}s."
   tail -n 60 "$APP_LOG"
   kill "$APP_PID" 2>/dev/null
   exit 1

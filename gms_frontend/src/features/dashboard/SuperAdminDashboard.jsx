@@ -171,7 +171,7 @@ const SuperAdminDashboard = () => {
         ) : (
           <Box sx={{ mt: 2, p: 2, bgcolor: '#e3f2fd', borderRadius: 1 }}>
             <Typography variant="caption" color="primary.main">
-              Live API data: {schoolList.length} {schoolList.length === 1 ? 'school' : 'schools'}
+              Live API data: {schoolList.length} {schoolList.length === 1 ? 'school' : 'schools'}{' '}
               listed by GET /schools
               {' | '}{pendingNotifications} unread notification{pendingNotifications === 1 ? '' : 's'}
               {' | '}GET /dashboard/platform: {platformValue('totalSchools')} schools,

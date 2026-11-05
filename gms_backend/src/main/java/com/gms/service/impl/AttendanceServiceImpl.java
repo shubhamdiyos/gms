@@ -77,6 +77,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
                         "Timetable slot not found for the current school"));
+        requireSlotScheduledOn(timetableSlot, request.getDate());
 
         // Fetch creator user for audit fields
         User creator = userService.findByEmployee_Id()
@@ -127,6 +128,7 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
                         "Timetable slot not found for the current school"));
+        requireSlotScheduledOn(timetableSlot, request.getDate());
 
         School school = schoolRepository.getReferenceById(TenantContext.schoolId());
 
@@ -223,6 +225,10 @@ public class AttendanceServiceImpl implements AttendanceService {
             attendance.setTimetableSlot(timetableSlot);
         }
 
+        // Checked after the slot has been resolved, so the row that is written is the row that was
+        // checked — whichever of the existing or the requested slot survives the block above.
+        requireSlotScheduledOn(attendance.getTimetableSlot(), request.getDate());
+
         // Update attendance record
         attendance.setStudent(student);
         attendance.setDate(request.getDate());
@@ -279,6 +285,25 @@ public class AttendanceServiceImpl implements AttendanceService {
     public List<AttendanceResponse> getAttendanceByStudentAndDateRange(Integer studentId, LocalDate startDate, LocalDate endDate) {
         List<Attendance> attendances = attendanceRepository.findByStudent_School_IdAndStudent_IdAndDateBetween(TenantContext.schoolId(), studentId, startDate, endDate);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
+    }
+
+    /**
+     * An attendance row names a timetable slot, so it can only describe a lesson that actually runs
+     * that day. The register has no weekday of its own and the unique key is
+     * (student, slot, date), so without this check the database happily accepts Friday's register
+     * against Monday's period — a row that is not wrong on read, just meaningless.
+     */
+    private static void requireSlotScheduledOn(TimetableSlot slot, LocalDate date) {
+        if (date == null) {
+            throw new IllegalArgumentException("Attendance date is required");
+        }
+        String scheduledDay = slot.getDayOfWeek();
+        String actualDay = date.getDayOfWeek().name();
+        if (scheduledDay == null || !scheduledDay.equalsIgnoreCase(actualDay)) {
+            throw new IllegalArgumentException(String.format(
+                    "Timetable slot %d runs on %s, but %s is a %s",
+                    slot.getId(), scheduledDay, date, actualDay));
+        }
     }
 
     private AttendanceResponse mapToResponse(Attendance attendance) {
