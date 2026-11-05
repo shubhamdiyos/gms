@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/models/dashboard_models.dart';
+import '../../../workflows/presentation/widgets/workflow_links.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_widgets.dart';
 
@@ -28,6 +29,8 @@ class AdminDashboardScreen extends ConsumerWidget {
           icon: Icons.admin_panel_settings_outlined,
           color: AppColors.roleAdmin,
         ),
+        const SizedBox(height: 16),
+        const WorkflowLinks(links: adminWorkflowLinks),
         const SizedBox(height: 20),
         AsyncDashboard<SchoolDashboard>(
           value: dashboard,

@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../../core/theme/app_colors.dart';
 import '../../../auth/presentation/providers/auth_provider.dart';
 import '../../data/models/dashboard_models.dart';
+import '../../../workflows/presentation/widgets/workflow_links.dart';
 import '../providers/dashboard_providers.dart';
 import '../widgets/dashboard_widgets.dart';
 
@@ -31,6 +32,18 @@ class AccountantDashboardScreen extends ConsumerWidget {
           subtitle: 'Fee collection and payment activity',
           icon: Icons.account_balance_wallet_outlined,
           color: AppColors.roleAccountant,
+        ),
+        const SizedBox(height: 16),
+        const WorkflowLinks(
+          links: [
+            WorkflowLink(
+              title: 'Fee collection',
+              subtitle: 'Record a payment against an outstanding fee',
+              icon: Icons.receipt_long_outlined,
+              route: '/fees/collect',
+              color: AppColors.roleAccountant,
+            ),
+          ],
         ),
         const SizedBox(height: 20),
         AsyncDashboard<FinancialSummary>(
