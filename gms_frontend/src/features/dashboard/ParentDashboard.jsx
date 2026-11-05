@@ -264,7 +264,7 @@ const ParentDashboard = () => {
                         {[child.firstName, child.lastName].filter(Boolean).join(' ')}
                       </Typography>
                       <Typography variant="body2" color="text.secondary">
-                        Class ID: {child.classId ?? 'N/A'} • Roll No: {child.studentId ?? 'N/A'} • Status: {child.status === '1' ? 'Active' : 'Inactive'}
+                        Class: {child.className ?? 'N/A'} • Roll No: {child.studentId ?? 'N/A'} • Status: {child.status === '1' ? 'Active' : 'Inactive'}
                       </Typography>
                     </Box>
                     <Box sx={{ textAlign: 'right' }}>

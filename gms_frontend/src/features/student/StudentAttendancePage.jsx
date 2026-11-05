@@ -38,20 +38,21 @@ const StudentAttendancePage = () => {
     (record) => typeof record.date === 'string' && record.date.startsWith(selectedMonth)
   );
 
-  // Calculate attendance statistics
+  // A register row is one period, not one day: a single date can carry several of them, so these
+  // counts are periods and the rate is present periods / marked periods.
   const calculateStats = () => {
-    const totalDays = attendance.length;
-    const presentDays = attendance.filter(record => record.status === 'PRESENT').length;
-    const absentDays = attendance.filter(record => record.status === 'ABSENT').length;
-    const lateDays = attendance.filter(record => record.status === 'LATE').length;
-    
-    const attendancePercentage = totalDays > 0 ? Math.round((presentDays / totalDays) * 100) : 0;
-    
+    const markedPeriods = attendance.length;
+    const presentPeriods = attendance.filter(record => record.status === 'PRESENT').length;
+    const absentPeriods = attendance.filter(record => record.status === 'ABSENT').length;
+    const latePeriods = attendance.filter(record => record.status === 'LATE').length;
+
+    const attendancePercentage = markedPeriods > 0 ? Math.round((presentPeriods / markedPeriods) * 100) : 0;
+
     return {
-      totalDays,
-      presentDays,
-      absentDays,
-      lateDays,
+      markedPeriods,
+      presentPeriods,
+      absentPeriods,
+      latePeriods,
       attendancePercentage,
     };
   };
@@ -140,10 +141,10 @@ const StudentAttendancePage = () => {
             <CardContent sx={{ textAlign: 'center' }}>
               <EventNote sx={{ fontSize: 40, color: '#1976d2', mb: 1 }} />
               <Typography variant="h4" color="primary">
-                {stats.totalDays}
+                {stats.markedPeriods}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Total Days
+                Marked Periods
               </Typography>
             </CardContent>
           </Card>
@@ -154,10 +155,10 @@ const StudentAttendancePage = () => {
             <CardContent sx={{ textAlign: 'center' }}>
               <CheckCircle sx={{ fontSize: 40, color: '#4caf50', mb: 1 }} />
               <Typography variant="h4" color="success.main">
-                {stats.presentDays}
+                {stats.presentPeriods}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Present Days
+                Present
               </Typography>
             </CardContent>
           </Card>
@@ -168,10 +169,10 @@ const StudentAttendancePage = () => {
             <CardContent sx={{ textAlign: 'center' }}>
               <Cancel sx={{ fontSize: 40, color: '#f44336', mb: 1 }} />
               <Typography variant="h4" color="error.main">
-                {stats.absentDays}
+                {stats.absentPeriods}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Absent Days
+                Absent
               </Typography>
             </CardContent>
           </Card>
@@ -182,10 +183,10 @@ const StudentAttendancePage = () => {
             <CardContent sx={{ textAlign: 'center' }}>
               <Schedule sx={{ fontSize: 40, color: '#ff9800', mb: 1 }} />
               <Typography variant="h4" color="warning.main">
-                {stats.lateDays}
+                {stats.latePeriods}
               </Typography>
               <Typography variant="body2" color="text.secondary">
-                Late Days
+                Late
               </Typography>
             </CardContent>
           </Card>
