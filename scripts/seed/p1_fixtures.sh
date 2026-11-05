@@ -245,7 +245,7 @@ TA_ID=$(sql "SELECT id FROM teacher_assignments WHERE school_id = $SCHOOL_A ORDE
 # The register may only name a slot scheduled for its own weekday, so the fixture's dates are
 # chosen to fall on the slot's day. Both the slot and the calendar come from the database; the
 # array is ISO Monday-first, matching extract(isodow).
-DAY_OF_WEEK=$(sql "SELECT (ARRAY['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'])[extract(isodow from current_date)::int]")
+DAY_OF_WEEK=$(sql "SELECT (ARRAY['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'])[extract(isodow from current_date)::int]" | tr -d '[:space:]')
 [[ -n "$DAY_OF_WEEK" ]] || { echo "FATAL: could not read the database's weekday"; exit 1; }
 
 SLOT_ID=""
@@ -258,7 +258,7 @@ if [[ "$FRESH_CLASSROOM" == "1" ]]; then
   SLOT_ID=$(sql "SELECT id FROM timetable_slots WHERE assignment_id = $TA_ID ORDER BY id DESC LIMIT 1")
 else
   SLOT_ID=$(sql "SELECT id FROM timetable_slots WHERE school_id = $SCHOOL_A ORDER BY id LIMIT 1")
-  DAY_OF_WEEK=$(sql "SELECT day_of_week FROM timetable_slots WHERE id = $SLOT_ID")
+  DAY_OF_WEEK=$(sql "SELECT day_of_week FROM timetable_slots WHERE id = $SLOT_ID" | tr -d '[:space:]')
   echo "ok: reusing timetable slot $SLOT_ID ($DAY_OF_WEEK)"
 fi
 
