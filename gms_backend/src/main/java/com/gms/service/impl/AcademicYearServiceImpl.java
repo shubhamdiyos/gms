@@ -37,7 +37,7 @@ public class AcademicYearServiceImpl implements AcademicYearService {
         }
 
         if (academicYearRequest.isCurrent()) {
-            clearCurrentYear(TenantContext.schoolId(), null);
+            clearCurrentYear(null);
         }
 
         AcademicYear academicYear = new AcademicYear();
@@ -62,7 +62,7 @@ public class AcademicYearServiceImpl implements AcademicYearService {
 
         AcademicYear academicYear = academicYearOptional.get();
         if (academicYearRequest.isCurrent()) {
-            clearCurrentYear(TenantContext.schoolId(), academicYear.getId());
+            clearCurrentYear(academicYear.getId());
         }
         academicYear.setName(academicYearRequest.getName());
         academicYear.setStartDate(academicYearRequest.getStartDate());
@@ -106,8 +106,8 @@ public class AcademicYearServiceImpl implements AcademicYearService {
      *
      * @param keepId the year that is about to receive the flag, or {@code null} on create
      */
-    private void clearCurrentYear(Integer schoolId, Integer keepId) {
-        List<AcademicYear> currentYears = academicYearRepository.findCurrentYears(schoolId);
+    private void clearCurrentYear(Integer keepId) {
+        List<AcademicYear> currentYears = academicYearRepository.findCurrentYears(TenantContext.schoolId());
         boolean changed = false;
         for (AcademicYear year : currentYears) {
             if (keepId == null || !keepId.equals(year.getId())) {
