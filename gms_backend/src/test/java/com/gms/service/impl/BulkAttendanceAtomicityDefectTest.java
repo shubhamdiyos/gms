@@ -105,7 +105,8 @@ class BulkAttendanceAtomicityDefectTest {
         teacher.setId(1);
         teacher.setUsername("teacher1");
 
-        testDate = LocalDate.of(2026, 11, 3);
+        // A Monday, matching the MONDAY slot created in setUp.
+        testDate = LocalDate.of(2026, 11, 2);
     }
 
     private BulkAttendanceRequest buildRequest(List<Integer> studentIds) {
