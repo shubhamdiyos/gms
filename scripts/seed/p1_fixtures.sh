@@ -242,17 +242,24 @@ code=$(call POST /teacher-assignments "$TOKEN_A" \
 echo "ok: teacher assignment created ($YEAR)"
 TA_ID=$(sql "SELECT id FROM teacher_assignments WHERE school_id = $SCHOOL_A ORDER BY id DESC LIMIT 1")
 
+# The register may only name a slot scheduled for its own weekday, so the fixture's dates are
+# chosen to fall on the slot's day. Both the slot and the calendar come from the database; the
+# array is ISO Monday-first, matching extract(isodow).
+DAY_OF_WEEK=$(sql "SELECT (ARRAY['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'])[extract(isodow from current_date)::int]")
+[[ -n "$DAY_OF_WEEK" ]] || { echo "FATAL: could not read the database's weekday"; exit 1; }
+
 SLOT_ID=""
 if [[ "$FRESH_CLASSROOM" == "1" ]]; then
   code=$(call POST /timetables "$TOKEN_A" \
-    "{\"classroomId\":$CLASSROOM_ID,\"academicYear\":\"$YEAR\",\"slots\":[{\"dayOfWeek\":\"MONDAY\",\"period\":1,\"assignmentId\":$TA_ID}]}")
+    "{\"classroomId\":$CLASSROOM_ID,\"academicYear\":\"$YEAR\",\"slots\":[{\"dayOfWeek\":\"$DAY_OF_WEEK\",\"period\":1,\"assignmentId\":$TA_ID}]}")
   [[ "$code" == "200" || "$code" == "201" ]] \
     || { echo "FATAL: POST /timetables answered $code: $(jq -c . "$body" 2>/dev/null)"; exit 1; }
-  echo "ok: timetable slot created"
+  echo "ok: timetable slot created ($DAY_OF_WEEK)"
   SLOT_ID=$(sql "SELECT id FROM timetable_slots WHERE assignment_id = $TA_ID ORDER BY id DESC LIMIT 1")
 else
   SLOT_ID=$(sql "SELECT id FROM timetable_slots WHERE school_id = $SCHOOL_A ORDER BY id LIMIT 1")
-  echo "ok: reusing timetable slot $SLOT_ID (every classroom already has a timetable)"
+  DAY_OF_WEEK=$(sql "SELECT day_of_week FROM timetable_slots WHERE id = $SLOT_ID")
+  echo "ok: reusing timetable slot $SLOT_ID ($DAY_OF_WEEK)"
 fi
 
 if [[ -z "$(sql "SELECT id FROM attendances WHERE school_id = $SCHOOL_A AND deleted = false LIMIT 1")" ]]; then
@@ -267,7 +274,12 @@ if [[ -z "$(sql "SELECT id FROM attendances WHERE school_id = $SCHOOL_A AND dele
     # `ON_ERROR_STOP` made the query yield no output at all, so `USED` never equalled `0`, the loop
     # spent all 31 offsets, and this fixture died at "no free date" three lines below. Reading the
     # calendar from the same server that stores it also means the two can never disagree.
-    CANDIDATE_DATE=$(sql "SELECT to_char(current_date - $DAY_OFFSET, 'YYYY-MM-DD')")
+    # Only offsets that land on the slot's weekday are candidates; the API refuses the rest.
+    CANDIDATE_DATE=$(sql "SELECT to_char(current_date - $DAY_OFFSET, 'YYYY-MM-DD') WHERE (ARRAY['MONDAY','TUESDAY','WEDNESDAY','THURSDAY','FRIDAY','SATURDAY','SUNDAY'])[extract(isodow from (current_date - $DAY_OFFSET))::int] = '$DAY_OF_WEEK'")
+    if [[ -z "$CANDIDATE_DATE" ]]; then
+      DAY_OFFSET=$((DAY_OFFSET + 1))
+      continue
+    fi
     USED=$(sql "SELECT count(*) FROM attendances WHERE student_id = $PUPIL_A1 AND timetable_slot_id = $SLOT_ID AND date = '$CANDIDATE_DATE'")
     [[ "$USED" == "0" ]] && break
     DAY_OFFSET=$((DAY_OFFSET + 1))
