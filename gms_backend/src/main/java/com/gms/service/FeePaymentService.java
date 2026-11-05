@@ -17,7 +17,7 @@ public interface FeePaymentService {
 
     ResponseEntity<?> deleteFeePayment(Integer id);
 
-    ResponseEntity<List<FeePayment>> getAllFeePayments();
+    ResponseEntity<List<FeePaymentResponse>> getAllFeePayments();
 
     ResponseEntity<FeePayment> getFeePaymentById(Integer id);
 

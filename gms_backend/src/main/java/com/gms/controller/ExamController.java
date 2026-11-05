@@ -24,38 +24,38 @@ public class ExamController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ExamResponse> createExam(@Valid @RequestBody ExamRequest examRequest) {
         return examService.createExam(examRequest);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ExamResponse> updateExam(@PathVariable Integer id,
                                                  @Valid @RequestBody ExamRequest examRequest) {
         return examService.updateExam(id, examRequest);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteExam(@PathVariable Integer id) {
         return examService.deleteExam(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<Exam>> getAllExams() {
         return examService.getAllExams();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<Exam> getExamById(@PathVariable Integer id) {
         return examService.getExamById(id);
     }
 
     @GetMapping("/academic-year")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<Exam>> getExamsByAcademicYear(@RequestParam String academicYear) {
         return examService.getExamsByAcademicYear(academicYear);
     }

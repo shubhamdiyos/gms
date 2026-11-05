@@ -24,38 +24,38 @@ public class FeeStructureController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FeeStructureResponse> createFeeStructure(@Valid @RequestBody FeeStructureRequest request) {
         return feeStructureService.createFeeStructure(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FeeStructureResponse> updateFeeStructure(@PathVariable Integer id,
                                                                  @Valid @RequestBody FeeStructureRequest request) {
         return feeStructureService.updateFeeStructure(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteFeeStructure(@PathVariable Integer id) {
         return feeStructureService.deleteFeeStructure(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeeStructure>> getAllFeeStructures() {
         return feeStructureService.getAllFeeStructures();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FeeStructure> getFeeStructureById(@PathVariable Integer id) {
         return feeStructureService.getFeeStructureById(id);
     }
 
     @GetMapping("/academic-year")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FeeStructure>> getFeeStructuresByAcademicYear(@RequestParam String academicYear) {
         return feeStructureService.getFeeStructuresByAcademicYear(academicYear);
     }

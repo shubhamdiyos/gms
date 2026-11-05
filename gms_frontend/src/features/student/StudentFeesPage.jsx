@@ -1,6 +1,10 @@
 import { Box, Typography, Paper, Table, TableBody, TableCell, TableContainer, TableHead, TableRow, Chip } from '@mui/material';
 import { AttachMoney } from '@mui/icons-material';
+import dayjs from 'dayjs';
 import { useGetMyFeesQuery } from '../../store/api/apiSlice';
+
+const money = (value) =>
+  value == null ? '-' : `₹${new Intl.NumberFormat('en-IN', { maximumFractionDigits: 2 }).format(value)}`;
 
 const StudentFeesPage = () => {
   const { data: fees = [], isLoading } = useGetMyFeesQuery();
@@ -44,15 +48,31 @@ const StudentFeesPage = () => {
             <Table>
               <TableHead>
                 <TableRow>
-                  <TableCell>Fee ID</TableCell>
+                  <TableCell>Fee</TableCell>
+                  <TableCell>Academic Year</TableCell>
+                  <TableCell align="right">Total</TableCell>
+                  <TableCell align="right">Paid</TableCell>
+                  <TableCell align="right">Balance</TableCell>
+                  <TableCell>Due Date</TableCell>
                   <TableCell>Status</TableCell>
-                  <TableCell>Amount Paid</TableCell>
                 </TableRow>
               </TableHead>
               <TableBody>
                 {fees.map((fee) => (
                   <TableRow key={fee.id}>
-                    <TableCell>{fee.feeId ?? '-'}</TableCell>
+                    <TableCell>
+                      <Typography variant="body2">{fee.feeType || `Fee ${fee.feeId ?? fee.id}`}</Typography>
+                      {fee.description && (
+                        <Typography variant="caption" color="text.secondary">
+                          {fee.description}
+                        </Typography>
+                      )}
+                    </TableCell>
+                    <TableCell>{fee.academicYear || '-'}</TableCell>
+                    <TableCell align="right">{money(fee.totalAmount)}</TableCell>
+                    <TableCell align="right">{money(fee.amountPaid)}</TableCell>
+                    <TableCell align="right">{money(fee.balanceAmount)}</TableCell>
+                    <TableCell>{fee.dueDate ? dayjs(fee.dueDate).format('MMM DD, YYYY') : '-'}</TableCell>
                     <TableCell>
                       <Chip
                         label={fee.status}
@@ -60,7 +80,6 @@ const StudentFeesPage = () => {
                         size="small"
                       />
                     </TableCell>
-                    <TableCell>{fee.amountPaid != null ? `₹${fee.amountPaid}` : '-'}</TableCell>
                   </TableRow>
                 ))}
               </TableBody>

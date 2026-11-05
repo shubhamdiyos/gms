@@ -24,32 +24,32 @@ public class GradingSchemeController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<GradingSchemeResponse> createGradingScheme(@Valid @RequestBody GradingSchemeRequest request) {
         return gradingSchemeService.createGradingScheme(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<GradingSchemeResponse> updateGradingScheme(@PathVariable Integer id,
                                                                    @Valid @RequestBody GradingSchemeRequest request) {
         return gradingSchemeService.updateGradingScheme(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteGradingScheme(@PathVariable Integer id) {
         return gradingSchemeService.deleteGradingScheme(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<GradingScheme>> getAllGradingSchemes() {
         return gradingSchemeService.getAllGradingSchemes();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<GradingScheme> getGradingSchemeById(@PathVariable Integer id) {
         return gradingSchemeService.getGradingSchemeById(id);
     }

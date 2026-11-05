@@ -20,6 +20,12 @@ target/
 dist/
 node_modules/
 
+# Playwright run artefacts (gms_frontend/e2e): traces, failure screenshots, the HTML report.
+# A commit containing them is a commit that grows with every red run.
+test-results/
+playwright-report/
+blob-report/
+
 # Logs
 *.log
 logs/

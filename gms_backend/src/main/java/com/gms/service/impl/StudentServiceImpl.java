@@ -5,6 +5,7 @@ import com.gms.model.entity.*;
 import com.gms.enums.RoleEnum;
 import com.gms.exception.NotFoundException;
 import com.gms.model.request.StudentRequest;
+import com.gms.model.request.StudentSelfUpdateRequest;
 import com.gms.model.response.ClassroomResponse;
 import com.gms.model.response.StudentResponse;
 import com.gms.model.response.SubjectResponse;
@@ -18,6 +19,7 @@ import com.gms.model.response.NotificationResponse;
 import com.gms.repository.StudentRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
+import com.gms.util.SecureCredentialGenerator;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.data.domain.Page;
@@ -66,8 +68,9 @@ public class StudentServiceImpl implements StudentService {
     private final SubjectService subjectService;
     private final NotificationService notificationService;
     private final TeacherAssignmentService teacherAssignmentService;
+    private final AttendanceService attendanceService;
 
-    public StudentServiceImpl(StudentRepository studentRepository, SchoolService schoolService, ClassroomService classroomService, SectionService sectionService, UserService userService, PasswordEncoder passwordEncoder, ResultService resultService, StudentFeeService studentFeeService, TimetableService timetableService, AnnouncementService announcementService, SubjectService subjectService, NotificationService notificationService, TeacherAssignmentService teacherAssignmentService) {
+    public StudentServiceImpl(StudentRepository studentRepository, SchoolService schoolService, ClassroomService classroomService, SectionService sectionService, UserService userService, PasswordEncoder passwordEncoder, ResultService resultService, StudentFeeService studentFeeService, TimetableService timetableService, AnnouncementService announcementService, SubjectService subjectService, NotificationService notificationService, TeacherAssignmentService teacherAssignmentService, AttendanceService attendanceService) {
         this.studentRepository = studentRepository;
         this.schoolService = schoolService;
         this.classroomService = classroomService;
@@ -81,6 +84,7 @@ public class StudentServiceImpl implements StudentService {
         this.subjectService = subjectService;
         this.notificationService = notificationService;
         this.teacherAssignmentService = teacherAssignmentService;
+        this.attendanceService = attendanceService;
     }
 
     @Override
@@ -92,18 +96,22 @@ public class StudentServiceImpl implements StudentService {
         Student student = createStudentFromRequest(request, new Student());
         Student savedStudent = studentRepository.save(student);
 
-        // Create a corresponding User for the Student
-        createUserForStudent(savedStudent);
+        // ACD-13-02: generate a unique secure temporary password instead of a shared hardcoded one.
+        // The plaintext is returned once in the creation response so the admin can relay it out-of-band.
+        String temporaryPassword = createUserForStudent(savedStudent);
 
-        return ResponseEntity.ok(toResponse(savedStudent));
+        StudentResponse response = toResponse(savedStudent);
+        response.setTemporaryPassword(temporaryPassword);
+        return ResponseEntity.ok(response);
     }
 
     @Override
-    public void createUserForStudent(Student student) {
+    public String createUserForStudent(Student student) {
         if (userService.existsByEmail(student.getEmail())) {
-            // Or link to existing user if that's a desired feature
             throw new IllegalStateException("A user with this email already exists.");
         }
+
+        String temporaryPassword = SecureCredentialGenerator.generate();
 
         User user = new User();
         user.setSchool(student.getSchool());
@@ -111,12 +119,13 @@ public class StudentServiceImpl implements StudentService {
         user.setFullName(student.getFullName());
         user.setEmail(student.getEmail());
         user.setUsername(UsernameGenerator.generateUsername(student.getFirstName(), student.getLastName(), userService));
-        user.setPassword(passwordEncoder.encode("welcome123")); // Default temporary password
+        user.setPassword(passwordEncoder.encode(temporaryPassword));
         user.setRoles(Collections.singleton(RoleEnum.STUDENT.name()));
         user.setRequirePasswordChange(true);
         user.setEnabled(true);
 
         userService.save(user);
+        return temporaryPassword;
     }
 
     @Override
@@ -265,7 +274,10 @@ public class StudentServiceImpl implements StudentService {
         // comparison is gone; what remains is the archive rule, which is business state rather than
         // tenancy and which the platform owner is not exempt from either.
         if ("0".equals(student.getStatus())) {
-            throw new IllegalArgumentException("Student is archived");
+            // A retired row is outside the caller's visible set, which is what 404 means here: the
+            // school's own list already filters it out, and a foreign row reads the same way. 403
+            // would claim the caller lacks a permission it holds on this route.
+            throw new EntityNotFoundException("Student is archived");
         }
         return student;
     }
@@ -350,6 +362,25 @@ public class StudentServiceImpl implements StudentService {
     }
 
     @Override
+    @Transactional
+    public StudentResponse updateMyProfile(StudentSelfUpdateRequest request) {
+        String username = TenantContext.username();
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
+
+        Student student = user.getStudent();
+        if (student == null) {
+            throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
+        }
+
+        student.setFirstName(request.getFirstName().trim());
+        student.setLastName(request.getLastName().trim());
+        student.setPhoneNumber(request.getPhoneNumber() == null ? null : request.getPhoneNumber().trim());
+
+        return toResponse(studentRepository.save(student));
+    }
+
+    @Override
     public String nextStudentId() {
         int counter = (int) (studentRepository.count() + 1); // coarse; acceptable for now
         String candidate;
@@ -375,7 +406,8 @@ public class StudentServiceImpl implements StudentService {
                 s.getPhoneNumber(),
                 s.getDateOfBirth(),
                 s.getGender(),
-                s.getStatus()
+                s.getStatus(),
+                null
         );
     }
 
@@ -425,11 +457,17 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Get subjects for the student's classroom using service
-        // Temporarily simplified - will be enhanced when proper service methods are available
-        List<Subject> subjects = subjectService.findBySchool();
-        return subjects.stream()
-                .map(this::toSubjectResponse)
+        Classroom classroom = student.getClassroom();
+        if (classroom == null) {
+            return Collections.emptyList();
+        }
+
+        // ACD-02: Return subjects assigned to the student's classroom (not all school subjects)
+        List<com.gms.model.response.TeacherAssignmentResponse> assignments = 
+                teacherAssignmentService.getAssignmentsByClassroom(classroom.getId());
+        return assignments.stream()
+                .map(com.gms.model.response.TeacherAssignmentResponse::getSubject)
+                .distinct()
                 .collect(Collectors.toList());
     }
 
@@ -444,9 +482,10 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // TODO: Implement attendance retrieval when circular dependency is resolved
-        // For now, return empty list to prevent circular dependency
-        return Collections.emptyList();
+        // ACD-02: Return last 30 days of attendance for the authenticated student
+        LocalDate endDate = LocalDate.now();
+        LocalDate startDate = endDate.minusDays(30);
+        return attendanceService.getAttendanceForStudent(student.getId(), startDate, endDate);
     }
 
     @Override
@@ -460,9 +499,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use result service to get student results (placeholder - need proper service method)
-        // Temporarily using a mock implementation since ResultService.findBySchool doesn't exist yet
-        List<Result> results = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return all results for the authenticated student
+        ResponseEntity<List<Result>> response = resultService.getResultsForStudent(student.getId());
+        List<Result> results = response.getBody();
+        if (results == null) {
+            return Collections.emptyList();
+        }
         return results.stream()
                 .map(this::toResultResponse)
                 .collect(Collectors.toList());
@@ -479,9 +521,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use student fee service to get fees (placeholder - need proper service method)
-        // Temporarily using a mock implementation since StudentFeeService.findBySchool doesn't exist yet
-        List<StudentFee> studentFees = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return all fees for the authenticated student
+        ResponseEntity<List<StudentFee>> response = studentFeeService.getStudentFeesByStudent(student.getId());
+        List<StudentFee> studentFees = response.getBody();
+        if (studentFees == null) {
+            return Collections.emptyList();
+        }
         return studentFees.stream()
                 .map(this::toStudentFeeResponse)
                 .collect(Collectors.toList());
@@ -521,11 +566,16 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use teacher assignment service to get classroom teachers
-        // Temporarily using a mock implementation since TeacherAssignmentService.findBySchool doesn't exist yet
-        List<TeacherAssignment> assignments = Collections.emptyList(); // TODO: Implement proper service method
+        Classroom classroom = student.getClassroom();
+        if (classroom == null) {
+            return Collections.emptyList();
+        }
+
+        // ACD-02: Return teachers assigned to the student's classroom
+        List<com.gms.model.response.TeacherAssignmentResponse> assignments = 
+                teacherAssignmentService.getAssignmentsByClassroom(classroom.getId());
         return assignments.stream()
-                .map(assignment -> toEmployeeResponse(assignment.getTeacher()))
+                .map(com.gms.model.response.TeacherAssignmentResponse::getTeacher)
                 .distinct()
                 .collect(Collectors.toList());
     }
@@ -541,9 +591,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use announcement service to get school announcements
-        // Temporarily using a mock implementation since AnnouncementService.findBySchool doesn't exist yet
-        List<Announcement> announcements = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return active (published, non-expired) announcements for the student's school
+        ResponseEntity<List<Announcement>> response = announcementService.getActiveAnnouncements();
+        List<Announcement> announcements = response.getBody();
+        if (announcements == null) {
+            return Collections.emptyList();
+        }
         return announcements.stream()
                 .map(this::toAnnouncementResponse)
                 .collect(Collectors.toList());
@@ -560,9 +613,12 @@ public class StudentServiceImpl implements StudentService {
             throw new NotFoundException("STUDENT_NOT_FOUND", "Student profile not found for this user");
         }
 
-        // Use notification service to get user notifications
-        // Temporarily using a mock implementation since NotificationService.findBySchool doesn't exist yet
-        List<Notification> notifications = Collections.emptyList(); // TODO: Implement proper service method
+        // ACD-02: Return notifications addressed to the authenticated student's user account
+        ResponseEntity<List<Notification>> response = notificationService.getNotificationsByUserId(user.getId());
+        List<Notification> notifications = response.getBody();
+        if (notifications == null) {
+            return Collections.emptyList();
+        }
         return notifications.stream()
                 .map(this::toNotificationResponse)
                 .collect(Collectors.toList());
@@ -602,49 +658,77 @@ public class StudentServiceImpl implements StudentService {
     }
 
     private ResultResponse toResultResponse(Result result) {
-        // Simplified response to avoid field access issues
         ResultResponse response = new ResultResponse();
         response.setId(result.getId());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setStudentExamId(result.getStudentExam().getId());
+        response.setStudentName(result.getStudentExam().getStudent().getFullName());
+        response.setExamName(result.getStudentExam().getExamSubject().getExam().getName());
+        response.setSubjectName(result.getStudentExam().getExamSubject().getSubject().getName());
+        response.setObtainedMarks(result.getObtainedMarks());
+        response.setGrade(result.getGrade());
+        response.setPercentage(result.getPercentage());
+        response.setRemarks(result.getRemarks());
+        response.setStatus(result.getStatus());
         return response;
     }
 
     private StudentFeeResponse toStudentFeeResponse(StudentFee studentFee) {
-        // Simplified response to avoid field access issues
-        StudentFeeResponse response = new StudentFeeResponse();
-        response.setId(studentFee.getId());
-        response.setStudentId(studentFee.getStudent().getId());
-        // TODO: Map other fields when entity structure is confirmed
-        return response;
+        return StudentFeeResponseMapper.toResponse(studentFee);
     }
 
     private EmployeeResponse toEmployeeResponse(Employee employee) {
-        // Simplified response to avoid field access issues
         EmployeeResponse response = new EmployeeResponse();
         response.setId(employee.getId());
         response.setFullName(employee.getFullName());
         response.setEmail(employee.getEmail());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setDesignation(employee.getDesignation());
+        response.setDepartment(employee.getDepartment());
         return response;
     }
 
     private AnnouncementResponse toAnnouncementResponse(Announcement announcement) {
-        // Simplified response to avoid field access issues
         AnnouncementResponse response = new AnnouncementResponse();
         response.setId(announcement.getId());
+        response.setSchoolId(announcement.getSchool() != null ? announcement.getSchool().getId() : null);
         response.setTitle(announcement.getTitle());
         response.setContent(announcement.getContent());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setAnnouncementType(announcement.getAnnouncementType());
+        response.setTargetAudience(announcement.getTargetAudience());
+        response.setTargetIds(announcement.getTargetIds());
+        response.setPublishDate(announcement.getPublishDate());
+        response.setExpiryDate(announcement.getExpiryDate());
+        response.setIsPublished(announcement.getIsPublished());
+        response.setPublishedAt(announcement.getPublishedAt());
+        response.setPublishedBy(announcement.getPublishedBy());
+        response.setPriority(announcement.getPriority());
+        response.setCategory(announcement.getCategory());
+        response.setAttachmentUrls(announcement.getAttachmentUrls());
+        response.setClickActionUrl(announcement.getClickActionUrl());
+        response.setIsPinned(announcement.getIsPinned());
+        response.setViewCount(announcement.getViewCount());
         return response;
     }
 
     private NotificationResponse toNotificationResponse(Notification notification) {
-        // Simplified response to avoid field access issues
         NotificationResponse response = new NotificationResponse();
         response.setId(notification.getId());
+        response.setSchoolId(notification.getSchool() != null ? notification.getSchool().getId() : null);
         response.setTitle(notification.getTitle());
         response.setMessage(notification.getMessage());
-        // TODO: Map other fields when entity structure is confirmed
+        response.setNotificationType(notification.getNotificationType());
+        response.setChannel(notification.getChannel());
+        response.setPriority(notification.getPriority());
+        response.setRecipientType(notification.getRecipientType());
+        response.setRecipientIds(notification.getRecipientIds());
+        response.setScheduledAt(notification.getScheduledAt());
+        response.setSentAt(notification.getSentAt());
+        response.setDeliveryStatus(notification.getDeliveryStatus());
+        response.setReadStatus(notification.getReadStatus());
+        response.setRelatedEntityType(notification.getRelatedEntityType());
+        response.setRelatedEntityId(notification.getRelatedEntityId());
+        response.setIsImportant(notification.getIsImportant());
+        response.setExpiresAt(notification.getExpiresAt());
+        response.setClickActionUrl(notification.getClickActionUrl());
         return response;
     }
 }

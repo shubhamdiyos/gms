@@ -181,7 +181,9 @@ public class ParentStudentServiceImpl implements ParentStudentService {
                 parent.getLastName(),
                 parent.getEmail(),
                 parent.getPhoneNumber(),
-                studentResponses
+                studentResponses,
+                null,
+                parent.getUser() != null ? parent.getUser().isEnabled() : null
         );
     }
 
@@ -198,7 +200,8 @@ public class ParentStudentServiceImpl implements ParentStudentService {
                 s.getPhoneNumber(),
                 s.getDateOfBirth(),
                 s.getGender(),
-                s.getStatus()
+                s.getStatus(),
+                null
         );
     }
 }

@@ -1,6 +1,7 @@
 package com.gms.config;
 
 import com.gms.security.JwtAuthenticationFilter;
+import com.gms.security.PasswordChangeEnforcementFilter;
 import jakarta.servlet.DispatcherType;
 import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
@@ -20,6 +21,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.security.web.csrf.CsrfTokenRequestAttributeHandler;
 import org.springframework.web.cors.CorsConfigurationSource;
 
 /**
@@ -97,10 +99,28 @@ public class SecurityConfig {
 
     @Bean
     public SecurityFilterChain filterChain(HttpSecurity http, JwtAuthenticationFilter jwtFilter,
+                                          PasswordChangeEnforcementFilter passwordChangeFilter,
                                           CorsConfigurationSource corsConfigurationSource) throws Exception {
         http
             .cors(cors -> cors.configurationSource(corsConfigurationSource))
-            .csrf(AbstractHttpConfigurer::disable)
+            // CSRF protection enabled with cookie-based token strategy for SPA architecture.
+            // The CsrfTokenRepository reads the token from a cookie (XSRF-TOKEN) and the frontend
+            // sends it back in the X-XSRF-TOKEN header. This is the Double Submit Cookie pattern.
+            .csrf(csrf -> csrf
+                .csrfTokenRepository(new CookieCsrfTokenRepository())
+                // The default BREACH-masking handler returns an XOR-masked token from the request
+                // attribute, so the token in the response body would not equal the cookie the
+                // SPA reads. Both shipped clients must see one value: the React SPA reads the
+                // cookie, the Flutter app reads the response body.
+                .csrfTokenRequestHandler(new CsrfTokenRequestAttributeHandler())
+                // CSRF token is loaded via a dedicated endpoint, not on every request
+                .requireCsrfProtectionMatcher(request -> {
+                    String method = request.getMethod();
+                    // Only state-changing methods require CSRF protection
+                    return "POST".equals(method) || "PUT".equals(method) || 
+                           "PATCH".equals(method) || "DELETE".equals(method);
+                })
+            )
             .formLogin(AbstractHttpConfigurer::disable)
             .httpBasic(AbstractHttpConfigurer::disable)
             .logout(AbstractHttpConfigurer::disable)
@@ -118,8 +138,10 @@ public class SecurityConfig {
                 // Allow OPTIONS requests for CORS preflight
                 .requestMatchers(HttpMethod.OPTIONS, "/**").permitAll()
 
-                // ── Anonymous surface: login, liveness and the health probes only ──
+                // ── Anonymous surface: login, logout, CSRF token, liveness and the health probes only ──
                 .requestMatchers(HttpMethod.POST, API + "/auth/login").permitAll()
+                .requestMatchers(HttpMethod.POST, API + "/auth/logout").permitAll()
+                .requestMatchers(HttpMethod.GET, API + "/auth/csrf-token").permitAll()
                 .requestMatchers(HttpMethod.GET, API + "/ping").permitAll()
                 .requestMatchers(HttpMethod.GET,
                         "/actuator/health", "/actuator/health/**").permitAll()
@@ -147,7 +169,7 @@ public class SecurityConfig {
                 .requestMatchers(PLATFORM_MANAGEMENT).hasAnyAuthority("ADMIN", "SUPERADMIN")
                 .requestMatchers(SCHOOL_SETUP).hasAnyAuthority("ADMIN", "SUPERADMIN", "TEACHER")
                 .requestMatchers(ACADEMIC_OPERATIONS).hasAnyAuthority("ADMIN", "SUPERADMIN", "TEACHER")
-                .requestMatchers(FINANCIAL).hasAnyAuthority("ADMIN", "SUPERADMIN", "ACCOUNTANT", "PARENT")
+                .requestMatchers(FINANCIAL).hasAnyAuthority("ADMIN", "SUPERADMIN", "ACCOUNTANT")
                 .requestMatchers(SHARED_READS).hasAnyAuthority(
                         "ADMIN", "SUPERADMIN", "TEACHER", "STUDENT", "PARENT")
                 .requestMatchers(DASHBOARD).hasAnyAuthority("ADMIN", "SUPERADMIN")
@@ -157,7 +179,8 @@ public class SecurityConfig {
 
                 .anyRequest().denyAll()
             )
-            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class);
+            .addFilterBefore(jwtFilter, UsernamePasswordAuthenticationFilter.class)
+            .addFilterAfter(passwordChangeFilter, JwtAuthenticationFilter.class);
         return http.build();
     }
 

@@ -1,4 +1,5 @@
 import { useMemo, useState } from 'react';
+import { useLocation } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -35,19 +36,28 @@ import {
   useGetTeacherClassesQuery,
   useGetTeacherStudentsQuery,
   useGetAttendanceQuery,
+  useGetTeacherTimetableQuery,
+  useMarkAttendanceMutation,
+  useUpdateAttendanceMutation,
 } from '../../store/api/apiSlice';
 import dayjs from 'dayjs';
-
-const SAVE_UNAVAILABLE_REASON =
-  'Saving is unavailable: POST /api/v1/attendance rejects a record without a timetableSlotId, and no teacher endpoint returns one.';
+import { toast } from 'react-toastify';
 
 const AttendancePage = () => {
-  const [selectedClass, setSelectedClass] = useState('');
+  const location = useLocation();
+  const [selectedClass, setSelectedClass] = useState(() =>
+    location.state?.classId ? String(location.state.classId) : '',
+  );
+  const [selectedSlot, setSelectedSlot] = useState('');
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const [attendanceData, setAttendanceData] = useState({});
+  const [isSaving, setIsSaving] = useState(false);
 
   const { data: classes = [] } = useGetTeacherClassesQuery();
   const { data: students = [] } = useGetTeacherStudentsQuery();
+  const { data: timetable } = useGetTeacherTimetableQuery();
+  const [markAttendance] = useMarkAttendanceMutation();
+  const [updateAttendance] = useUpdateAttendanceMutation();
 
   const { data: existingAttendance = [] } = useGetAttendanceQuery(
     { classId: selectedClass, date: selectedDate },
@@ -55,25 +65,54 @@ const AttendancePage = () => {
   );
 
   const selectedClassId = selectedClass === '' ? null : Number(selectedClass);
+  const dayKey = dayjs(selectedDate).format('dddd').toUpperCase();
+
+  // Attendance rows carry a timetable slot because the schema requires one, so a register only
+  // exists for a scheduled period.
+  const classSlots = useMemo(() => {
+    const slots = timetable?.slots ?? [];
+    return slots
+      .filter(
+        (slot) =>
+          slot.assignment?.classroom?.id === selectedClassId && slot.dayOfWeek === dayKey,
+      )
+      .sort((a, b) => a.period - b.period);
+  }, [timetable, selectedClassId, dayKey]);
+
+  const activeSlot =
+    classSlots.find((slot) => String(slot.id) === String(selectedSlot)) ?? null;
 
   const classStudents = useMemo(
     () => students.filter((student) => student.classId === selectedClassId),
     [students, selectedClassId],
   );
 
+  // The classroom query returns every period marked that day, so the register must read the
+  // selected slot only — otherwise the Period 1 mark shows up as saved on Period 2.
+  const savedByStudent = useMemo(() => {
+    if (!activeSlot) return {};
+    return existingAttendance.reduce((acc, record) => {
+      if (record?.student?.id && String(record?.timetableSlot?.id) === String(activeSlot.id)) {
+        acc[record.student.id] = { id: record.id, status: record.status };
+      }
+      return acc;
+    }, {});
+  }, [existingAttendance, activeSlot]);
+
   const savedStatusByStudent = useMemo(
-    () =>
-      existingAttendance.reduce((acc, record) => {
-        if (record?.student?.id) {
-          acc[record.student.id] = record.status;
-        }
-        return acc;
-      }, {}),
-    [existingAttendance],
+    () => Object.fromEntries(Object.entries(savedByStudent).map(([studentId, record]) => [studentId, record.status])),
+    [savedByStudent],
   );
 
   const handleClassChange = (classId) => {
     setSelectedClass(classId);
+    setSelectedSlot('');
+    setAttendanceData({});
+  };
+
+  const handleDateChange = (date) => {
+    setSelectedDate(date);
+    setSelectedSlot('');
     setAttendanceData({});
   };
 
@@ -102,6 +141,54 @@ const AttendancePage = () => {
     Boolean(savedStatusByStudent[student.id]),
   ).length;
 
+  const pendingChanges = classStudents.filter(
+    (student) =>
+      attendanceData[student.id] && attendanceData[student.id] !== savedStatusByStudent[student.id],
+  );
+  const canSave = Boolean(activeSlot) && pendingChanges.length > 0 && !isSaving;
+
+  const handleSave = async () => {
+    if (!canSave) return;
+    setIsSaving(true);
+    const results = await Promise.allSettled(
+      pendingChanges.map((student) => {
+        const payload = {
+          studentId: student.id,
+          date: selectedDate,
+          status: attendanceData[student.id],
+          timetableSlotId: activeSlot.id,
+        };
+        // POST refuses a register that already exists, so a correction has to go through PUT by id.
+        const saved = savedByStudent[student.id];
+        return saved
+          ? updateAttendance({ id: saved.id, ...payload }).unwrap()
+          : markAttendance(payload).unwrap();
+      }),
+    );
+    setIsSaving(false);
+
+    const saved = results.filter((result) => result.status === 'fulfilled').length;
+    const duplicates = results.filter((result) => {
+      if (result.status !== 'rejected') return false;
+      const code = result.error?.status ?? result.error?.originalStatus;
+      return code === 400;
+    }).length;
+    const failed = results.length - saved - duplicates;
+
+    if (saved > 0) {
+      toast.success(`${saved} attendance record${saved === 1 ? '' : 's'} saved.`);
+    }
+    if (duplicates > 0) {
+      toast.info(
+        `${duplicates} record${duplicates === 1 ? ' was' : 's were'} already marked for that period.`,
+      );
+    }
+    if (failed > 0) {
+      toast.error(`${failed} record${failed === 1 ? '' : 's'} could not be saved.`);
+    }
+    setAttendanceData({});
+  };
+
   return (
     <Box>
       <Box sx={{ mb: 4 }}>
@@ -115,10 +202,15 @@ const AttendancePage = () => {
 
       <Paper sx={{ p: 3, mb: 3 }}>
         <Grid container spacing={3} alignItems="center">
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={3}>
             <FormControl fullWidth>
-              <InputLabel>Select Class</InputLabel>
+              {/* The label has to be tied to the control: without `labelId`/`id` the InputLabel is
+                  a sibling with no association, so the combobox reaches the accessibility tree with
+                  no name at all and `label="Select Class"` does not supply one either. */}
+              <InputLabel id="teacher-class-label">Select Class</InputLabel>
               <Select
+                labelId="teacher-class-label"
+                id="teacher-class-select"
                 value={selectedClass}
                 onChange={(e) => handleClassChange(e.target.value)}
                 label="Select Class"
@@ -132,12 +224,12 @@ const AttendancePage = () => {
             </FormControl>
           </Grid>
 
-          <Grid item xs={12} md={4}>
+          <Grid item xs={12} md={3}>
             <Box
               component="input"
               type="date"
               value={selectedDate}
-              onChange={(e) => setSelectedDate(e.target.value)}
+              onChange={(e) => handleDateChange(e.target.value)}
               sx={{
                 width: '100%',
                 padding: '16px',
@@ -148,19 +240,46 @@ const AttendancePage = () => {
             />
           </Grid>
 
-          <Grid item xs={12} md={4}>
-            <Tooltip title={SAVE_UNAVAILABLE_REASON}>
+          <Grid item xs={12} md={3}>
+            <FormControl fullWidth disabled={!selectedClass || classSlots.length === 0}>
+              <InputLabel id="teacher-period-label">Period</InputLabel>
+              <Select
+                labelId="teacher-period-label"
+                id="teacher-period-select"
+                value={activeSlot ? String(activeSlot.id) : ''}
+                onChange={(e) => setSelectedSlot(e.target.value)}
+                label="Period"
+              >
+                {classSlots.map((slot) => (
+                  <MenuItem key={slot.id} value={String(slot.id)}>
+                    Period {slot.period}
+                    {slot.assignment?.subject?.name ? ` - ${slot.assignment.subject.name}` : ''}
+                  </MenuItem>
+                ))}
+              </Select>
+            </FormControl>
+          </Grid>
+
+          <Grid item xs={12} md={3}>
+            <Tooltip
+              title={
+                activeSlot
+                  ? 'Save the statuses you changed'
+                  : 'Select a class and period to record attendance'
+              }
+            >
               <Box>
                 <Button
                   variant="contained"
                   startIcon={<Save />}
-                  disabled
+                  disabled={!canSave}
+                  onClick={handleSave}
                   fullWidth
                   sx={{
                     background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)',
                   }}
                 >
-                  Save Attendance
+                  {isSaving ? 'Saving...' : 'Save Attendance'}
                 </Button>
               </Box>
             </Tooltip>
@@ -168,9 +287,11 @@ const AttendancePage = () => {
         </Grid>
       </Paper>
 
-      {selectedClass && (
-        <Alert severity="warning" sx={{ mb: 3 }}>
-          {SAVE_UNAVAILABLE_REASON}
+      {selectedClass && classSlots.length === 0 && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          No periods are scheduled for this class on {dayjs(selectedDate).format('dddd')}. Attendance
+          is recorded against a timetable slot, so pick a day with lessons or ask an administrator to
+          publish the timetable.
         </Alert>
       )}
 
@@ -295,7 +416,13 @@ const AttendancePage = () => {
                         <TableCell align="center">
                           {attendanceStatus ? (
                             <Chip
-                              label={isSaved ? `${attendanceStatus} (saved)` : attendanceStatus}
+                              label={
+                                isSaved && attendanceStatus === savedStatusByStudent[student.id]
+                                  ? `${attendanceStatus} (saved)`
+                                  : isSaved
+                                    ? `${attendanceStatus} (unsaved)`
+                                    : attendanceStatus
+                              }
                               color={attendanceStatus === 'PRESENT' ? 'success' : 'error'}
                               size="small"
                             />

@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Notification;
 import com.gms.model.entity.School;
 import com.gms.model.entity.User;
@@ -123,7 +124,66 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public ResponseEntity<List<Notification>> getAllNotifications() {
         List<Notification> notifications = notificationRepository.findBySchoolIdAndDeliveryStatusOrderByCreatedOnDesc(TenantContext.schoolId(), "PENDING");
-        return ResponseEntity.ok(notifications);
+        return ResponseEntity.ok(filterByAuthorization(notifications));
+    }
+
+    /**
+     * Centralized authorization filter for notification collections.
+     * 
+     * ADMIN/SUPERADMIN/TEACHER: Can see all notifications in their scope.
+     * STUDENT/PARENT: Can see:
+     *   1. School-wide announcements (recipientType="ALL")
+     *   2. Role-targeted announcements matching their role (recipientType="ROLE")
+     *   3. Named-recipient notifications where they are listed (recipientType="INDIVIDUAL")
+     */
+    private List<Notification> filterByAuthorization(List<Notification> notifications) {
+        // Administrative roles see everything in their scope
+        if (TenantContext.roles().stream().anyMatch(r -> 
+                r.equals("ADMIN") || r.equals("SUPERADMIN") || r.equals("TEACHER"))) {
+            return notifications;
+        }
+        
+        // STUDENT/PARENT: filter to authorized notifications only
+        Integer userId = TenantContext.userId();
+        List<String> userRoles = TenantContext.roles().stream().toList();
+        
+        return notifications.stream()
+                .filter(n -> isAuthorizedForNotification(n, userId, userRoles))
+                .toList();
+    }
+    
+    /**
+     * Check if a user is authorized to see a specific notification.
+     */
+    private boolean isAuthorizedForNotification(Notification notification, Integer userId, List<String> userRoles) {
+        String recipientType = notification.getRecipientType();
+        
+        // School-wide announcements visible to everyone in the school
+        if ("ALL".equals(recipientType)) {
+            return true;
+        }
+        
+        // Role-targeted announcements visible to matching roles
+        if ("ROLE".equals(recipientType)) {
+            String recipientIds = notification.getRecipientIds();
+            if (recipientIds != null) {
+                // recipientIds for ROLE type contains role names (e.g., "STUDENT" or "STUDENT,PARENT")
+                for (String role : userRoles) {
+                    if (recipientIds.contains(role)) {
+                        return true;
+                    }
+                }
+            }
+            return false;
+        }
+        
+        // Individual notifications visible only to named recipients
+        if ("INDIVIDUAL".equals(recipientType)) {
+            return addressesUser(notification.getRecipientIds(), userId);
+        }
+        
+        // Unknown recipientType: deny by default
+        return false;
     }
 
     @Override
@@ -131,15 +191,22 @@ public class NotificationServiceImpl implements NotificationService {
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
 
-        // The load that produced this row was scoped by the claim, so a caller from another school
-        // never reaches here; the platform owner does, and it is the caller this row is meant for.
+        // ADMIN/SUPERADMIN can access any notification for administrative oversight; TEACHER can access
+        // notifications they may have created; STUDENT/PARENT must be a named recipient — otherwise a user
+        // could walk ids and read another user's notifications (finding F-2).
+        if (!TenantContext.roles().stream().anyMatch(r -> r.equals("ADMIN") || r.equals("SUPERADMIN") || r.equals("TEACHER"))) {
+            if (!addressesUser(notification.getRecipientIds(), TenantContext.userId())) {
+                throw new TenantAccessDeniedException("Not authorized to access this notification");
+            }
+        }
+
         return ResponseEntity.ok(notification);
     }
 
     @Override
     public ResponseEntity<List<Notification>> getNotificationsByRecipientType(String recipientType) {
         List<Notification> notifications = notificationRepository.findBySchoolIdAndRecipientTypeAndDeliveryStatus(TenantContext.schoolId(), recipientType, "PENDING");
-        return ResponseEntity.ok(notifications);
+        return ResponseEntity.ok(filterByAuthorization(notifications));
     }
 
     @Override
@@ -186,13 +253,13 @@ public class NotificationServiceImpl implements NotificationService {
     @Override
     public ResponseEntity<List<Notification>> getNotificationsByType(String notificationType) {
         List<Notification> notifications = notificationRepository.findBySchoolIdAndNotificationTypeAndDeliveryStatus(TenantContext.schoolId(), notificationType, "PENDING");
-        return ResponseEntity.ok(notifications);
+        return ResponseEntity.ok(filterByAuthorization(notifications));
     }
 
     @Override
     public ResponseEntity<List<Notification>> getNotificationsByPriority(String priority) {
         List<Notification> notifications = notificationRepository.findBySchoolIdAndPriorityAndDeliveryStatus(TenantContext.schoolId(), priority, "PENDING");
-        return ResponseEntity.ok(notifications);
+        return ResponseEntity.ok(filterByAuthorization(notifications));
     }
 
     @Override
@@ -203,8 +270,14 @@ public class NotificationServiceImpl implements NotificationService {
 
     @Override
     public ResponseEntity<Long> countUnreadNotifications() {
-        Long count = notificationRepository.countUnreadNotificationsBySchoolId(TenantContext.schoolId());
-        return ResponseEntity.ok(count);
+        List<Notification> allUnread = notificationRepository.findBySchoolIdAndDeliveryStatus(TenantContext.schoolId(), "PENDING")
+                .stream()
+                .filter(n -> "UNREAD".equals(n.getReadStatus()))
+                .toList();
+        
+        // Apply authorization filter
+        List<Notification> authorized = filterByAuthorization(allUnread);
+        return ResponseEntity.ok((long) authorized.size());
     }
 
     @Override
@@ -213,6 +286,14 @@ public class NotificationServiceImpl implements NotificationService {
         // so the hand-written school comparison is gone — a foreign id throws.
         Notification notification = notificationRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Notification not found"));
+
+        // ADMIN/SUPERADMIN can mark any notification as read; everyone else must be a named
+        // recipient — otherwise a STUDENT could walk ids and clear another user's unread badge (finding F-2).
+        if (!TenantContext.roles().stream().anyMatch(r -> r.equals("ADMIN") || r.equals("SUPERADMIN"))) {
+            if (!addressesUser(notification.getRecipientIds(), TenantContext.userId())) {
+                throw new TenantAccessDeniedException("Not authorized to mark this notification as read");
+            }
+        }
 
         // Mark as read
         notification.setReadStatus("READ");

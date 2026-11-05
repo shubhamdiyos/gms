@@ -3,12 +3,8 @@ package com.gms.security;
 import com.gms.model.entity.User;
 import com.gms.service.UserService;
 import java.util.Optional;
-import java.util.Set;
-import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
 import org.springframework.security.core.userdetails.UsernameNotFoundException;
@@ -30,6 +26,11 @@ public class CustomUserDetailsService implements UserDetailsService {
      * instead of asserting that every account is healthy, so a locked or expired account can no
      * longer authenticate (mandate §7.6, finding SEC-09).</p>
      *
+     * <p>Stage E: Returns {@link GmsUserDetails} instead of Spring Security's built-in User,
+     * so that downstream filters (e.g. {@link PasswordChangeEnforcementFilter}) can read the
+     * {@code requirePasswordChange} flag directly from the principal without a duplicate
+     * database lookup.</p>
+     *
      * @param username The username to look up
      * @return UserDetails object for Spring Security
      * @throws UsernameNotFoundException if user is not found
@@ -40,20 +41,9 @@ public class CustomUserDetailsService implements UserDetailsService {
         User user = userOptional.orElseThrow(
                 () -> new UsernameNotFoundException("User not found with username: " + username));
 
-        Set<GrantedAuthority> authorities = user.getRoles().stream()
-                .map(SimpleGrantedAuthority::new)  // roles are stored without the ROLE_ prefix
-                .collect(Collectors.toSet());
-
         log.debug("Loaded authentication principal {} (enabled={}, locked={}, passwordExpired={})",
                 user.getUsername(), user.isEnabled(), user.isAccountLocked(), user.isPasswordExpired());
 
-        return new org.springframework.security.core.userdetails.User(
-                user.getUsername(),
-                user.getPassword(),
-                user.isEnabled(),
-                true,
-                !user.isPasswordExpired(),
-                !user.isAccountLocked(),
-                authorities);
+        return new GmsUserDetails(user);
     }
 }

@@ -107,7 +107,7 @@ public class TimetableServiceImpl implements TimetableService {
     }
 
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = NotFoundException.class)
     public TimetableResponse getTimetableForStudent(Integer studentId) {
         Student student = studentRepository.findById(studentId)
                 .orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND", "Student not found"));
@@ -115,7 +115,7 @@ public class TimetableServiceImpl implements TimetableService {
     }
     
     @Override
-    @Transactional(readOnly = true)
+    @Transactional(readOnly = true, noRollbackFor = NotFoundException.class)
     public TimetableResponse getTimetableForAuthenticatedStudent(String username) {
         User user = userRepository.findByUsername(username)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
@@ -144,6 +144,7 @@ public class TimetableServiceImpl implements TimetableService {
 
     public TimetableSlotResponse mapToSlotResponse(TimetableSlot slot) {
         return new TimetableSlotResponse(
+                slot.getId(),
                 slot.getDayOfWeek(),
                 slot.getPeriod(),
                 mapToAssignmentResponse(slot.getAssignment())

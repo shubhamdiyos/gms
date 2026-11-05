@@ -14,6 +14,9 @@ import com.gms.service.LoginAttemptService;
 import com.gms.service.UserService;
 import com.gms.util.Constants;
 import com.gms.util.PasswordValidator;
+import jakarta.servlet.http.Cookie;
+import jakarta.servlet.http.HttpServletRequest;
+import jakarta.servlet.http.HttpServletResponse;
 import jakarta.validation.Valid;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
@@ -38,6 +41,10 @@ import java.util.Optional;
 @RestController
 @RequestMapping(Constants.API_BASE_V1 + "/auth")
 public class AuthController {
+
+    private static final String AUTH_COOKIE_NAME = "gms_auth";
+    private static final String COOKIE_PATH = "/";
+    private static final int COOKIE_MAX_AGE_SECONDS = 7 * 24 * 60 * 60; // 7 days
 
     private final AuthenticationManager authenticationManager;
     private final JwtTokenProvider tokenProvider;
@@ -65,11 +72,22 @@ public class AuthController {
      * 401 so the endpoint cannot be used to enumerate accounts, and repeated failures lock the account
      * through {@link LoginAttemptService}.</p>
      *
+     * <p>On success, sets an HttpOnly cookie containing the JWT token. The cookie attributes are:</p>
+     * <ul>
+     *   <li>HttpOnly: prevents JavaScript access (XSS mitigation)</li>
+     *   <li>Secure: only sent over HTTPS (production requirement)</li>
+     *   <li>SameSite=Lax: CSRF mitigation for cross-site requests</li>
+     *   <li>Path=/: available to all endpoints</li>
+     *   <li>Max-Age: matches JWT validity period</li>
+     * </ul>
+     *
      * @param request LoginRequest containing username and password
-     * @return AuthTokenResponse with JWT token and user information
+     * @param response HttpServletResponse for setting the authentication cookie
+     * @return AuthTokenResponse with user information (token omitted, now in cookie)
      */
     @PostMapping("/login")
-    public ResponseEntity<AuthTokenResponse> login(@Valid @RequestBody LoginRequest request) {
+    public ResponseEntity<AuthTokenResponse> login(@Valid @RequestBody LoginRequest request,
+                                                    HttpServletResponse response) {
         Optional<User> userOptional = userService.findByUsername(request.getUsername());
         if (userOptional.isEmpty()) {
             log.debug("Login for unknown username: {}", request.getUsername());
@@ -99,7 +117,12 @@ public class AuthController {
             String token = tokenProvider.createToken(domainUser.getUsername(), roles, schoolId, empId,
                     domainUser.getId());
 
-            AuthTokenResponse payload = new AuthTokenResponse(token,
+            // Set HttpOnly cookie with JWT token
+            setAuthCookie(response, token, (int) tokenProvider.getValiditySeconds());
+
+            // Response body no longer includes the token (it's in the cookie), but we keep the
+            // expiresIn and requirePasswordChange fields for client-side session management
+            AuthTokenResponse payload = new AuthTokenResponse(null,
                     (int) tokenProvider.getValiditySeconds(), domainUser.isRequirePasswordChange());
             return ResponseEntity.ok(payload);
         } catch (AuthenticationException e) {
@@ -107,6 +130,75 @@ public class AuthController {
             log.debug("Login failed for {}: {}", request.getUsername(), e.getClass().getSimpleName());
             return ResponseEntity.status(401).build();
         }
+    }
+
+    /**
+     * Logout endpoint that clears the authentication cookie.
+     *
+     * <p>This endpoint is anonymous (no authentication required) because the client may call it
+     * when the token is expired or invalid. Clearing the cookie is sufficient for logout since
+     * the JWT is stateless and short-lived.</p>
+     *
+     * @param response HttpServletResponse for clearing the authentication cookie
+     * @return 200 OK on successful logout
+     */
+    @PostMapping("/logout")
+    public ResponseEntity<Void> logout(HttpServletResponse response) {
+        clearAuthCookie(response);
+        return ResponseEntity.ok().build();
+    }
+
+    /**
+     * Sets the authentication cookie with security attributes.
+     *
+     * <p>SameSite is set to Lax via the Set-Cookie header attribute because the Jakarta Servlet
+     * Cookie API does not expose SameSite directly. The cookie is sent with Secure flag in
+     * production (HTTPS required) and HttpOnly to prevent JavaScript access.</p>
+     */
+    private void setAuthCookie(HttpServletResponse response, String token, int maxAgeSeconds) {
+        // Use manual Set-Cookie header to include SameSite attribute (not supported by Cookie API)
+        response.addHeader("Set-Cookie",
+                String.format("%s=%s; Path=%s; Max-Age=%d; HttpOnly; Secure; SameSite=Lax",
+                        AUTH_COOKIE_NAME, token, COOKIE_PATH, maxAgeSeconds));
+    }
+
+    /**
+     * Clears the authentication cookie by setting Max-Age to 0.
+     */
+    private void clearAuthCookie(HttpServletResponse response) {
+        // Use manual Set-Cookie header to include SameSite attribute (not supported by Cookie API)
+        response.addHeader("Set-Cookie",
+                String.format("%s=; Path=%s; Max-Age=0; HttpOnly; Secure; SameSite=Lax",
+                        AUTH_COOKIE_NAME, COOKIE_PATH));
+    }
+
+    /**
+     * CSRF token endpoint for SPA clients.
+     *
+     * <p>The frontend calls this endpoint after login to retrieve a CSRF token. The token is
+     * automatically set in the XSRF-TOKEN cookie by Spring Security's CsrfTokenRepository, and
+     * this endpoint returns it in the response body for convenience. The frontend must send this
+     * token in the X-XSRF-TOKEN header on all state-changing requests (POST, PUT, PATCH, DELETE).</p>
+     *
+     * @param request HttpServletRequest to access the CSRF token
+     * @return Map with the CSRF token value
+     */
+    @GetMapping("/csrf-token")
+    public ResponseEntity<java.util.Map<String, String>> getCsrfToken(HttpServletRequest request) {
+        org.springframework.security.web.csrf.CsrfToken csrfToken = 
+            (org.springframework.security.web.csrf.CsrfToken) request.getAttribute(
+                org.springframework.security.web.csrf.CsrfToken.class.getName());
+        
+        if (csrfToken == null) {
+            // CSRF token should always be present due to Spring Security filter
+            return ResponseEntity.status(500).build();
+        }
+        
+        return ResponseEntity.ok(java.util.Map.of(
+            "token", csrfToken.getToken(),
+            "headerName", csrfToken.getHeaderName(),
+            "parameterName", csrfToken.getParameterName()
+        ));
     }
 
     @PostMapping("/change-password")

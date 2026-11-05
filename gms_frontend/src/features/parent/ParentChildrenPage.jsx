@@ -9,7 +9,6 @@ import {
   CardContent,
   Avatar,
   Chip,
-  Button,
   LinearProgress,
   Tabs,
   Tab,
@@ -24,7 +23,6 @@ import {
   School,
   EventNote,
   Assessment,
-  Phone,
   Email,
 } from '@mui/icons-material';
 import {
@@ -36,6 +34,8 @@ import {
 import dayjs from 'dayjs';
 
 const OUTSTANDING_FEE_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE'];
+
+const money = (value) => `₹${Number(value ?? 0).toLocaleString('en-IN')}`;
 
 const ParentChildrenPage = () => {
   const location = useLocation();
@@ -80,9 +80,12 @@ const ParentChildrenPage = () => {
 
   const getFeeStats = () => {
     const paid = childFees.reduce((sum, fee) => sum + Number(fee.amountPaid ?? 0), 0);
-    const outstanding = childFees.filter((fee) => OUTSTANDING_FEE_STATUSES.includes(fee.status)).length;
+    const billed = childFees.reduce((sum, fee) => sum + Number(fee.totalAmount ?? 0), 0);
+    const balance = childFees
+      .filter((fee) => OUTSTANDING_FEE_STATUSES.includes(fee.status))
+      .reduce((sum, fee) => sum + Number(fee.balanceAmount ?? 0), 0);
 
-    return { paid, outstanding, records: childFees.length };
+    return { paid, billed, balance, records: childFees.length };
   };
 
   const scoredResults = childResults.filter(
@@ -200,9 +203,6 @@ const ParentChildrenPage = () => {
                       Roll No: {currentChild.studentId ?? 'N/A'} • Class ID: {currentChild.classId ?? 'N/A'} • Section ID: {currentChild.sectionId ?? 'N/A'}
                     </Typography>
                   </Box>
-                  <Button variant="outlined" startIcon={<Phone />} size="small">
-                    Contact School
-                  </Button>
                 </Box>
 
                 {/* Tabs */}
@@ -305,9 +305,9 @@ const ParentChildrenPage = () => {
                               label={
                                 feesLoading
                                   ? 'Loading...'
-                                  : `${fees.outstanding} of ${fees.records} records outstanding`
+                                  : `${money(fees.balance)} outstanding`
                               }
-                              color={!feesLoading && fees.outstanding > 0 ? 'warning' : 'success'}
+                              color={!feesLoading && fees.balance > 0 ? 'warning' : 'success'}
                               size="small"
                             />
                           </Box>
@@ -463,49 +463,54 @@ const ParentChildrenPage = () => {
                       </Typography>
                     )}
                     <Grid container spacing={3} sx={{ mb: 3 }}>
-                      <Grid item xs={4}>
+                      <Grid item xs={6} md={3}>
                         <Card>
                           <CardContent sx={{ textAlign: 'center' }}>
-                            <Typography variant="h6" color="success.main">
-                              ₹{fees.paid.toLocaleString()}
-                            </Typography>
+                            <Typography variant="h6" color="primary">{money(fees.billed)}</Typography>
+                            <Typography variant="body2" color="text.secondary">Total Billed</Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid item xs={6} md={3}>
+                        <Card>
+                          <CardContent sx={{ textAlign: 'center' }}>
+                            <Typography variant="h6" color="success.main">{money(fees.paid)}</Typography>
                             <Typography variant="body2" color="text.secondary">Paid to Date</Typography>
                           </CardContent>
                         </Card>
                       </Grid>
-                      <Grid item xs={4}>
+                      <Grid item xs={6} md={3}>
                         <Card>
                           <CardContent sx={{ textAlign: 'center' }}>
-                            <Typography variant="h6" color="primary">{fees.records}</Typography>
+                            <Typography variant="h6" color="error.main">{money(fees.balance)}</Typography>
+                            <Typography variant="body2" color="text.secondary">Outstanding Balance</Typography>
+                          </CardContent>
+                        </Card>
+                      </Grid>
+                      <Grid item xs={6} md={3}>
+                        <Card>
+                          <CardContent sx={{ textAlign: 'center' }}>
+                            <Typography variant="h6">{fees.records}</Typography>
                             <Typography variant="body2" color="text.secondary">Fee Records</Typography>
                           </CardContent>
                         </Card>
                       </Grid>
-                      <Grid item xs={4}>
-                        <Card>
-                          <CardContent sx={{ textAlign: 'center' }}>
-                            <Typography variant="h6" color="error.main">{fees.outstanding}</Typography>
-                            <Typography variant="body2" color="text.secondary">Outstanding</Typography>
-                          </CardContent>
-                        </Card>
-                      </Grid>
                     </Grid>
-
-                    {fees.records > 0 && (
-                      <Box sx={{ mb: 2 }}>
-                        <Typography variant="body2" color="text.secondary">
-                          Fee amounts and due dates are not returned by this endpoint, so outstanding balances are shown as record counts.
-                        </Typography>
-                      </Box>
-                    )}
 
                     <List>
                       {childFees.map((fee, index) => (
                         <Box key={fee.id}>
                           <ListItem>
                             <ListItemText
-                              primary={`Fee #${fee.feeId ?? 'N/A'}`}
-                              secondary={`Paid: ₹${Number(fee.amountPaid ?? 0).toLocaleString()}`}
+                              primary={`${fee.feeType ?? 'Fee'} • ${fee.academicYear ?? 'Year N/A'}`}
+                              secondary={[
+                                `Total: ${money(fee.totalAmount)}`,
+                                `Paid: ${money(fee.amountPaid)}`,
+                                `Balance: ${money(fee.balanceAmount)}`,
+                                fee.dueDate ? `Due: ${dayjs(fee.dueDate).format('MMM DD, YYYY')}` : null,
+                              ]
+                                .filter(Boolean)
+                                .join(' • ')}
                             />
                             <Chip
                               label={fee.status ?? 'Unknown'}

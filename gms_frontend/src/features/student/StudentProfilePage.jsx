@@ -34,7 +34,7 @@ import {
   useGetStudentProfileQuery,
   useGetMyClassesQuery,
   useGetMySubjectsQuery,
-  useUpdateStudentMutation,
+  useUpdateMyProfileMutation,
 } from '../../store/api/apiSlice';
 import { toast } from 'react-toastify';
 import dayjs from 'dayjs';
@@ -45,7 +45,7 @@ const StudentProfilePage = () => {
   const { data: profile, isLoading } = useGetStudentProfileQuery();
   const { data: myClass } = useGetMyClassesQuery();
   const { data: subjects = [] } = useGetMySubjectsQuery();
-  const [updateStudent] = useUpdateStudentMutation();
+  const [updateMyProfile, { isLoading: isSaving }] = useUpdateMyProfileMutation();
 
   const { register, handleSubmit, reset, formState: { errors } } = useForm();
 
@@ -54,7 +54,6 @@ const StudentProfilePage = () => {
       reset({
         firstName: profile.firstName,
         lastName: profile.lastName,
-        email: profile.email,
         phoneNumber: profile.phoneNumber,
       });
     }
@@ -66,13 +65,13 @@ const StudentProfilePage = () => {
     reset();
   };
 
-  const onSubmit = async (data) => {
+  const onSubmit = async ({ firstName, lastName, phoneNumber }) => {
     try {
-      await updateStudent({ id: profile.id, ...data }).unwrap();
+      await updateMyProfile({ firstName, lastName, phoneNumber }).unwrap();
       toast.success('Profile updated successfully');
       handleEditClose();
-    } catch {
-      toast.error('Failed to update profile');
+    } catch (error) {
+      toast.error(error?.data?.message || 'Failed to update profile');
     }
   };
 
@@ -308,35 +307,24 @@ const StudentProfilePage = () => {
               </Grid>
               <Grid item xs={12}>
                 <TextField
-                  {...register('email', { 
-                    required: 'Email is required',
-                    pattern: {
-                      value: /^\S+@\S+$/i,
-                      message: 'Invalid email address'
-                    }
-                  })}
-                  fullWidth
-                  label="Email"
-                  type="email"
-                  error={!!errors.email}
-                  helperText={errors.email?.message}
-                />
-              </Grid>
-              <Grid item xs={12}>
-                <TextField
-                  {...register('phoneNumber')}
+                  {...register('phoneNumber', { maxLength: 15 })}
                   fullWidth
                   label="Phone Number"
                   error={!!errors.phoneNumber}
                   helperText={errors.phoneNumber?.message}
                 />
               </Grid>
+              <Grid item xs={12}>
+                <Typography variant="body2" color="text.secondary">
+                  Your e-mail address is your login and is managed by the school office.
+                </Typography>
+              </Grid>
             </Grid>
           </DialogContent>
           <DialogActions>
             <Button onClick={handleEditClose}>Cancel</Button>
-            <Button type="submit" variant="contained" startIcon={<Save />}>
-              Save Changes
+            <Button type="submit" variant="contained" startIcon={<Save />} disabled={isSaving}>
+              {isSaving ? 'Saving…' : 'Save Changes'}
             </Button>
           </DialogActions>
         </form>

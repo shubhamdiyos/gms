@@ -18,6 +18,7 @@ import com.gms.service.StudentFeeService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.util.List;
@@ -43,6 +44,7 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         this.userRepository = userRepository;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<StudentFeeResponse> createStudentFee(StudentFeeRequest request) {
         // Validate school exists
@@ -87,6 +89,7 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         return ResponseEntity.ok(mapToResponse(savedStudentFee));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<StudentFeeResponse> updateStudentFee(Integer id, StudentFeeRequest request) {
         // Validate student fee exists
@@ -130,8 +133,13 @@ public class StudentFeeServiceImpl implements StudentFeeService {
     }
 
     @Override
-    public ResponseEntity<List<StudentFee>> getAllStudentFees() {
-        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStatus(TenantContext.schoolId(), "ACTIVE");
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<StudentFeeResponse>> getAllStudentFees() {
+        List<StudentFeeResponse> studentFees = studentFeeRepository.findByStudent_School_IdAndStatusNot(
+                        TenantContext.schoolId(), "ARCHIVED")
+                .stream()
+                .map(StudentFeeResponseMapper::toResponse)
+                .toList();
         return ResponseEntity.ok(studentFees);
     }
 
@@ -149,13 +157,16 @@ public class StudentFeeServiceImpl implements StudentFeeService {
         Student student = studentRepository.findById(studentId)
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStudent_IdAndStatus(TenantContext.schoolId(), studentId, "ACTIVE");
+        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndStudent_IdAndStatusNot(
+                TenantContext.schoolId(), studentId, "ARCHIVED");
         return ResponseEntity.ok(studentFees);
     }
 
     @Override
     public ResponseEntity<List<StudentFee>> getStudentFeesByAcademicYear(String academicYear) {
-        List<StudentFee> studentFees = studentFeeRepository.findByStudent_School_IdAndFee_AcademicYearAndStatus(TenantContext.schoolId(), academicYear, "ACTIVE");
+        List<StudentFee> studentFees = studentFeeRepository
+                .findByStudent_School_IdAndFee_AcademicYearAndStatusNot(
+                        TenantContext.schoolId(), academicYear, "ARCHIVED");
         return ResponseEntity.ok(studentFees);
     }
 
@@ -189,12 +200,6 @@ public class StudentFeeServiceImpl implements StudentFeeService {
     }
 
     private StudentFeeResponse mapToResponse(StudentFee studentFee) {
-        StudentFeeResponse response = new StudentFeeResponse();
-        response.setId(studentFee.getId());
-        response.setStudentId(studentFee.getStudent().getId());
-        response.setFeeId(studentFee.getFee().getId());
-        response.setStatus(studentFee.getStatus());
-        response.setAmountPaid(studentFee.getAmountPaid());
-        return response;
+        return StudentFeeResponseMapper.toResponse(studentFee);
     }
 }

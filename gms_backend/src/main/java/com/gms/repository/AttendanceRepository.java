@@ -1,11 +1,12 @@
-
 package com.gms.repository;
 
 import com.gms.model.entity.Attendance;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -28,4 +29,44 @@ public interface AttendanceRepository extends TenantScopedRepository<Attendance>
     List<Attendance> findBySchoolIdAndDateBetween(@Param("schoolId") Integer schoolId, 
                                                   @Param("startDate") LocalDate startDate, 
                                                   @Param("endDate") LocalDate endDate);
+
+    /**
+     * Check if attendance exists for a specific student, slot, and date.
+     * Matches the database unique constraint uq_attendance_student_slot_date (student_id, timetable_slot_id, date).
+     * Used by ATT-02 slot-level duplicate detection.
+     */
+    boolean existsByStudent_School_IdAndStudent_IdAndTimetableSlot_IdAndDate(
+            Integer schoolId, Integer studentId, Integer timetableSlotId, LocalDate date);
+
+    /**
+     * Find a single attendance record by student, slot, and date.
+     * Used by Stage H single-record path to retrieve the inserted record after atomic upsert.
+     * Returns Optional.empty() if no record exists or if the record is soft-deleted (@SQLRestriction).
+     */
+    java.util.Optional<Attendance> findByStudent_School_IdAndStudent_IdAndTimetableSlot_IdAndDate(
+            Integer schoolId, Integer studentId, Integer timetableSlotId, LocalDate date);
+
+    /**
+     * Atomic upsert: insert attendance record, or do nothing if it already exists.
+     * Uses PostgreSQL INSERT ... ON CONFLICT DO NOTHING to handle concurrent insertions safely.
+     * Returns the number of rows inserted (0 if already exists, 1 if inserted).
+     * 
+     * This method eliminates the check-then-act race condition by making the duplicate detection
+     * and insertion atomic at the database level.
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+        INSERT INTO attendances (school_id, student_id, timetable_slot_id, date, status, remarks, deleted, created_by, updated_by, created_on, updated_on, version)
+        VALUES (:schoolId, :studentId, :timetableSlotId, :date, :status, :remarks, false, :createdBy, :updatedBy, NOW(), NOW(), 0)
+        ON CONFLICT (student_id, timetable_slot_id, date) DO NOTHING
+        """, nativeQuery = true)
+    int insertIgnoreDuplicate(@Param("schoolId") Integer schoolId,
+                              @Param("studentId") Integer studentId,
+                              @Param("timetableSlotId") Integer timetableSlotId,
+                              @Param("date") LocalDate date,
+                              @Param("status") String status,
+                              @Param("remarks") String remarks,
+                              @Param("createdBy") Integer createdBy,
+                              @Param("updatedBy") Integer updatedBy);
 }

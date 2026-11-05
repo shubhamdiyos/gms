@@ -24,25 +24,25 @@ public class StudentExamController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<StudentExamResponse> registerStudentForExam(@Valid @RequestBody StudentExamRequest request) {
         return studentExamService.registerStudentForExam(request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deregisterStudentFromExam(@PathVariable Integer id) {
         return studentExamService.deregisterStudentFromExam(id);
     }
 
     @GetMapping("/exam-subject/{examSubjectId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<StudentExam>> getStudentsForExamSubject(@PathVariable Integer examSubjectId) {
         return studentExamService.getStudentsForExamSubject(examSubjectId);
     }
 
     @GetMapping("/student/{studentId}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT')")
     public ResponseEntity<List<StudentExam>> getExamsForStudent(@PathVariable Integer studentId) {
         return studentExamService.getExamsForStudent(studentId);
     }

@@ -10,9 +10,11 @@
 #   * a system-school ADMIN minted by the platform owner (p1.sysadmin)
 #   * a teacher assignment, a timetable slot behind it, and one attendance row
 #
-# The login passwords are the server's own documented defaults, not secrets this
-# script invented: parents get "welcome123" (ParentServiceImpl createUserForParent)
-# and school administrators get "<username>@123" (SchoolServiceImpl provisioning).
+# The passwords this script signs in with are values the previous steps and this one agreed
+# on, not defaults the server derives: both school creation and parent creation issue a random
+# temporary password and return it once (ACD-13). verify-mvp-e2e.sh signs in with the issued
+# administrator credential and rotates it to GMS_SCHOOL_A_ADMIN_PASSWORD / …_B_…; this script
+# does the same for the parent and writes both into the env file the negative tests source.
 # The generated parent username is read back from the database by email because
 # UsernameGenerator's collision suffixes are the server's decision.
 #
@@ -24,10 +26,17 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/../lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
 ADMIN_A_NAME=${GMS_SCHOOL_A_ADMIN_NAME:-Aarav Menon}
 ADMIN_B_NAME=${GMS_SCHOOL_B_ADMIN_NAME:-Beatula Fernandes}
+# The same values verify-mvp-e2e.sh rotates the two administrators to. Both scripts read the
+# same environment variable, and the live-tenancy gate exports it explicitly so the pair cannot
+# drift apart between the step that sets the password and the step that uses it.
+ADMIN_A_PASS=${GMS_SCHOOL_A_ADMIN_PASSWORD:-Mvp_Admin_A_2026!}
+ADMIN_B_PASS=${GMS_SCHOOL_B_ADMIN_PASSWORD:-Mvp_Admin_B_2026!}
+PARENT_PASSWORD=${GMS_PARENT_PASSWORD:-Parent_Verify_2026!}
 
 VERIFY_DB=${GMS_VERIFY_DB:-gms_p1_verify}
 PG_CONTAINER=${GMS_PG_CONTAINER:-gms-postgres}
@@ -44,6 +53,10 @@ trap 'rm -f "$body"' EXIT
 call() { # call <method> <path> [token] [json] -> http code
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
@@ -52,7 +65,13 @@ call() { # call <method> <path> [token] [json] -> http code
 login() { # login <username> <password> -> token
   local code
   code=$(call POST /auth/login "" "{\"username\":\"$1\",\"password\":\"$2\"}")
-  [[ "$code" == "200" ]] && jq -r '.accessToken // .token // empty' "$body" || echo ""
+  if [[ "$code" == "200" ]]; then
+    local t
+    t=$(jq -r '.accessToken // .token // empty' "$body")
+    printf '%s' "${t:-$(csrf_auth_token)}"
+  else
+    echo ""
+  fi
 }
 
 sql() {
@@ -60,34 +79,45 @@ sql() {
     -v ON_ERROR_STOP=1 -tAc "$1"
 }
 
-admin_username() { # first initial + surname, the rule SchoolServiceImpl applies
-  local first=${1%% *} last=${1##* }
-  printf '%s%s' "$(echo "${first:0:1}" | tr 'A-Z' 'a-z')" "$(echo "$last" | tr 'A-Z' 'a-z')"
-}
+# Which two tenants, and what logins their administrators actually got — both read from the database
+# before anything logs in, because neither can be derived reliably.
+#   * The tenants are named by the codes `verify-mvp-e2e.sh` creates them with. The first draft picked
+#     "the two lowest school ids that are not the platform owner's", which is the right answer on a
+#     database only the e2e suite has touched and the wrong one on the shared database the live-tenancy
+#     harness runs this on: by then C-1 through C-7 have registered eight schools, so the two lowest
+#     belong to C-1, hold one pupil between them, and the fixture died on its own
+#     `expected pupils in both schools` guard while pointing at the wrong tenants.
+#   * The usernames are what `SchoolServiceImpl` wrote after `generateUniqueUsername` resolved a
+#     collision, which is not always the name the request carried. The password is the value
+#     verify-mvp-e2e.sh rotated the account to; the random issued one no longer exists here.
+SCHOOL_A_CODE=${GMS_SCHOOL_A_CODE:-MVP801}
+SCHOOL_B_CODE=${GMS_SCHOOL_B_CODE:-MVP802}
 
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
+SCHOOL_A=$(sql "SELECT id FROM schools WHERE school_code = '$SCHOOL_A_CODE'" | tr -d '[:space:]')
+SCHOOL_B=$(sql "SELECT id FROM schools WHERE school_code = '$SCHOOL_B_CODE'" | tr -d '[:space:]')
+[[ "$SCHOOL_A" =~ ^[0-9]+$ && "$SCHOOL_B" =~ ^[0-9]+$ ]] \
+  || { echo "FATAL: no schools coded $SCHOOL_A_CODE/$SCHOOL_B_CODE in $VERIFY_DB; run verify-mvp-e2e.sh first"; exit 1; }
+ADMIN_A_USER=$(sql "SELECT username FROM users WHERE school_id = $SCHOOL_A ORDER BY id LIMIT 1" | tr -d '[:space:]')
+ADMIN_B_USER=$(sql "SELECT username FROM users WHERE school_id = $SCHOOL_B ORDER BY id LIMIT 1" | tr -d '[:space:]')
+[[ "$ADMIN_A_USER" =~ ^[A-Za-z0-9_]+$ && "$ADMIN_B_USER" =~ ^[A-Za-z0-9_]+$ ]] \
+  || { echo "FATAL: neither school coded $SCHOOL_A_CODE/$SCHOOL_B_CODE has an administrator account"; exit 1; }
 
 echo "== logins =="
 PLATFORM=$(login "$SUPERUSER" "$SUPERPASSWORD")
-TOKEN_A=$(login "$ADMIN_A_USER" "${ADMIN_A_USER}@123")
-TOKEN_B=$(login "$ADMIN_B_USER" "${ADMIN_B_USER}@123")
+TOKEN_A=$(login "$ADMIN_A_USER" "$ADMIN_A_PASS")
+TOKEN_B=$(login "$ADMIN_B_USER" "$ADMIN_B_PASS")
 [[ -n "$PLATFORM" && -n "$TOKEN_A" && -n "$TOKEN_B" ]] \
   || { echo "FATAL: platform or school-admin login failed; is this the e2e-seeded database?"; exit 1; }
-echo "ok: platform, school A, school B"
-
-# School A is the lowest tenant id that is not the platform owner's system school
-# (the bootstrap reserves one school for the SUPERADMIN account).
-PLATFORM_SCHOOL=$(sql "SELECT school_id FROM users u JOIN user_roles r ON r.user_id = u.id WHERE r.role = 'SUPERADMIN' LIMIT 1")
-SCHOOL_A=$(sql "SELECT id FROM schools WHERE id <> $PLATFORM_SCHOOL ORDER BY id LIMIT 1")
-SCHOOL_B=$(sql "SELECT id FROM schools WHERE id NOT IN ($PLATFORM_SCHOOL, $SCHOOL_A) ORDER BY id LIMIT 1")
-[[ -n "$SCHOOL_A" && -n "$SCHOOL_B" ]] \
-  || { echo "FATAL: two tenant schools expected in $VERIFY_DB"; exit 1; }
+echo "ok: platform, school A ($ADMIN_A_USER in $SCHOOL_A), school B ($ADMIN_B_USER in $SCHOOL_B)"
 
 # ── families ─────────────────────────────────────────────────────────────────
+# The creation response carries the parent's one-time password and nothing else does: the row
+# stores a BCrypt hash. FAMILY_ISSUED holds it for the caller that just created the family.
+FAMILY_ISSUED=""
 ensure_family() { # ensure_family <email> <first> <last> <phone> <studentId> <token>
   local email=$1
   local existing
+  FAMILY_ISSUED=""
   existing=$(sql "SELECT id FROM parents WHERE email = '$email'")
   if [[ -n "$existing" ]]; then
     echo "ok: family $email already present (id $existing)"
@@ -100,6 +130,9 @@ ensure_family() { # ensure_family <email> <first> <last> <phone> <studentId> <to
     echo "FATAL: POST /parents/create for $email answered $code: $(jq -c . "$body" 2>/dev/null)"
     exit 1
   fi
+  FAMILY_ISSUED=$(jq -r '.temporaryPassword // empty' "$body")
+  [[ -n "$FAMILY_ISSUED" ]] \
+    || { echo "FATAL: POST /parents/create for $email returned no one-time password"; exit 1; }
   echo "ok: family $email created"
 }
 
@@ -110,11 +143,31 @@ PUPIL_B=$(sql "SELECT id FROM students WHERE school_id = $SCHOOL_B ORDER BY id L
   || { echo "FATAL: expected pupils in both schools; run verify-mvp-e2e.sh first"; exit 1; }
 
 ensure_family "p1.parent.a1@example.com" "P1" "Guarda"  "5550001111" "$PUPIL_A1" "$TOKEN_A"
+PARENT_ISSUED=$FAMILY_ISSUED
 ensure_family "p1.parent.a2@example.com" "P1" "Guardb"  "5550001112" "$PUPIL_A2" "$TOKEN_A"
 ensure_family "p1.parent.b1@example.com" "P1" "Guardc"  "5550001113" "$PUPIL_B"  "$TOKEN_B"
 
 PARENT_USERNAME=$(sql "SELECT username FROM users WHERE email = 'p1.parent.a1@example.com'")
 [[ -n "$PARENT_USERNAME" ]] || { echo "FATAL: parent a1 has no login account"; exit 1; }
+
+# Sign in with whichever password is current and leave the account on PARENT_PASSWORD. A family
+# created by this run still holds its issued credential, which the enforcement filter would let
+# through to nothing but the change-password route; a family left by an earlier run already holds
+# the rotated value. Both paths end in the same place, so a rerun is not a special case.
+if [[ -n "$PARENT_ISSUED" ]]; then
+  PARENT_TOKEN=$(login "$PARENT_USERNAME" "$PARENT_ISSUED")
+  [[ -n "$PARENT_TOKEN" ]] \
+    || { echo "FATAL: parent a1 cannot sign in with the password its creation issued"; exit 1; }
+  rotated=$(csrf_rotate_password "$API" "$PARENT_TOKEN" "$PARENT_ISSUED" "$PARENT_PASSWORD")
+  [[ "$rotated" == "200" ]] \
+    || { echo "FATAL: parent a1 password rotation answered $rotated"; exit 1; }
+  echo "ok: parent a1 rotated off its issued password"
+else
+  PARENT_TOKEN=$(login "$PARENT_USERNAME" "$PARENT_PASSWORD")
+  [[ -n "$PARENT_TOKEN" ]] \
+    || { echo "FATAL: parent a1 exists but cannot sign in with GMS_PARENT_PASSWORD"; exit 1; }
+  echo "ok: parent a1 signed in with the rotated password this fixture hands over"
+fi
 
 # ── the system-school administrator, minted by the platform owner ────────────
 SYSADMIN_USER="p1.sysadmin"
@@ -207,7 +260,14 @@ if [[ -z "$(sql "SELECT id FROM attendances WHERE school_id = $SCHOOL_A AND dele
   # picks the first date of the last month that this pupil has no record for.
   DAY_OFFSET=0
   while [[ $DAY_OFFSET -le 30 ]]; do
-    CANDIDATE_DATE=$(date -v-${DAY_OFFSET}d +%F)
+    # The date comes from the database, not from the host's `date`. The two operating systems this
+    # script now runs on disagree about the flag: macOS wants `date -v-3d`, and the runner's `date`
+    # answers `error: unexpected argument '-v' found` and writes nothing to stdout. That empty string
+    # is the whole failure — the probe below asked Postgres for `date = ''`, which is not a date,
+    # `ON_ERROR_STOP` made the query yield no output at all, so `USED` never equalled `0`, the loop
+    # spent all 31 offsets, and this fixture died at "no free date" three lines below. Reading the
+    # calendar from the same server that stores it also means the two can never disagree.
+    CANDIDATE_DATE=$(sql "SELECT to_char(current_date - $DAY_OFFSET, 'YYYY-MM-DD')")
     USED=$(sql "SELECT count(*) FROM attendances WHERE student_id = $PUPIL_A1 AND timetable_slot_id = $SLOT_ID AND date = '$CANDIDATE_DATE'")
     [[ "$USED" == "0" ]] && break
     DAY_OFFSET=$((DAY_OFFSET + 1))
@@ -226,14 +286,24 @@ umask 077
   echo "GMS_SUPERADMIN_USERNAME=$SUPERUSER"
   echo "GMS_SUPERADMIN_PASSWORD=$SUPERPASSWORD"
   echo "GMS_ADMIN_USERNAME=$ADMIN_A_USER"
-  echo "GMS_ADMIN_PASSWORD=${ADMIN_A_USER}@123"
+  # The value verify-mvp-e2e.sh rotated the account to. It cannot be re-derived here: the issued
+  # password is random and this script never saw it.
+  echo "GMS_ADMIN_PASSWORD=$ADMIN_A_PASS"
   echo "GMS_ADMIN2_USERNAME=$ADMIN_B_USER"
-  echo "GMS_ADMIN2_PASSWORD=${ADMIN_B_USER}@123"
+  echo "GMS_ADMIN2_PASSWORD=$ADMIN_B_PASS"
   echo "GMS_PARENT_USERNAME=$PARENT_USERNAME"
-  echo "GMS_PARENT_PASSWORD=welcome123"
+  echo "GMS_PARENT_PASSWORD=$PARENT_PASSWORD"
   echo "GMS_SYSTEM_ADMIN_USERNAME=$SYSADMIN_USER"
   echo "GMS_SYSTEM_ADMIN_PASSWORD=Sysadmin@123"
   echo "GMS_VERIFY_DB=$VERIFY_DB"
+  # The two tenants, by id, as this script resolved them from their codes. The negative tests need
+  # exactly these numbers, and reading them from here is the only way the pair cannot drift: the first
+  # draft of `verify-p1-hardening.sh` re-derived them as "the lowest school ids that are not the
+  # platform's", which is this database's C-1 tenants on any shared run — so its school-B family probe
+  # looked in a school that holds no p1 family and four checks failed on a fixture that had been built
+  # correctly two scripts earlier.
+  echo "GMS_P1_SCHOOL_A_ID=$SCHOOL_A"
+  echo "GMS_P1_SCHOOL_B_ID=$SCHOOL_B"
   echo "GMS_PG_CONTAINER=$PG_CONTAINER"
   echo "GMS_PG_USER=$PG_USER"
   echo "GMS_PG_PASSWORD_ENV=$PG_PASSWORD_ENV"

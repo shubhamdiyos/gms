@@ -39,7 +39,7 @@ has been tested."* Decomposed so each clause can be argued with:
 | # | Clause | The test that decides it | Recorded in |
 |---|---|---|---|
 | DoD-1 | The MVP works end-to-end | A scripted journey — superadmin login → create school → provision admin → admin login → create students at 50k scale → paginated search → dashboard counts → teacher attendance → parent reads one child's result — executed against a database built only by migrations, with the HTTP results and row counts captured | `BASELINE_STATUS.md`, new § |
-| DoD-2 | The agreed performance tests pass | The published budget in [PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) met on ≥50,000 records per school, from `EXPLAIN (ANALYZE, BUFFERS)` and measured endpoint latency, on PostgreSQL 17 (local Docker *and* Testcontainers, which must agree). **The clause's environment is not yet met**: every number in Stage 5 came from Homebrew PostgreSQL **15.8** on the laptop's `127.0.0.1:5432`, no Testcontainers dependency exists, and the "16.15 in Colima on 5433" attribution first recorded with them is withdrawn there | evidence section named by DoD-1 |
+| DoD-2 | The agreed performance tests pass | The published budget in [PRODUCT_REQUIREMENTS.md §9](PRODUCT_REQUIREMENTS.md) met on ≥50,000 records per school, from `EXPLAIN (ANALYZE, BUFFERS)` and measured endpoint latency, on PostgreSQL 17 (local Docker *and* Testcontainers, which must agree). **The clause's environment is not yet met**: every *latency* number in Stage 5 came from Homebrew PostgreSQL **15.8** on the laptop's `127.0.0.1:5432`, no Testcontainers dependency exists, and the "16.15 in Colima on 5433" attribution first recorded with them is withdrawn there. What has since run on 17 is the rest of the stack — the chain, the nine live suites and the whole Maven reactor, green on **17.11** in Docker (*PostgreSQL 17, measured*, end of Stage 5) — which makes the missing leg a measurement, not a compatibility question | evidence section named by DoD-1 |
 | DoD-3 | Tenant isolation is verified | Automated negative tests that **attempt** cross-tenant reads/writes on every protected resource and assert 403/404, plus one deliberate-failure control: a test that passes when the guard is removed and fails when it is in place | same |
 | DoD-4 | CI/CD works | Every check required in branch protection with `enforce_admins`; one PR that breaks a test proven unmergeable; the pipeline's own yaml validated by a gate that fires on its own edits | `PRODUCTION_READINESS_MATRIX.md` §2.2/2.3 |
 | DoD-5 | Migrations are reproducible | `flyway migrate` from an **empty** PostgreSQL database to head, twice, producing byte-identical schema (`pg_dump --schema-only` diff empty); `ddl-auto=validate` and never `update` in any profile | same |
@@ -885,14 +885,23 @@ against another over HTTP and one straddled row at a time. They do not exercise 
 (a school-B classroom reached through a school-B student who is attached to a school-A family), concurrent
 writes racing to straddle the same row, or the read path of every archived resource: the suite proves an
 archived row *survives* and keeps its creation stamp, not that every query which reads it *excludes* it.
-The `users` delete path is exercised only as "the row survives". And the live-tenancy CI job remains
-**disabled**, for a reason that changed on this branch: a CI job now *does* start a database — the
-`backend` job's `postgres:15` service, the owner's decision of 2026-11-02 — but these suites need a
-**booted application** pointed at that database plus the twelve secret names `ci.yml` references
-(`DB_PASSWORD`, `SECURITY_JWT_SECRET`, and ten `GMS_*` identity names — three username/password pairs, two
-further passwords, two school codes), and the repository holds none of them: measured again today, `gh api` lists three leftover `EC2_*`
-secrets and zero variables. The gap is the boot step and the credentials, not the engine, and `ci.yml`
-says so in the job's own display name rather than leaving a silent `if: false`.
+The `users` delete path is exercised only as "the row survives".
+
+**And the live-tenancy CI job, which this paragraph recorded as disabled, is no longer a paragraph — it is
+a gate.** *Corrected later on 2026-11-02:* the blocker named above was real and is gone, but not by
+minting credentials. `gh api` still lists three leftover `EC2_*` secrets and zero variables, and the job
+now reads none of that: `ci.yml`'s `live-tenancy` declares a `postgres:15` service on the runner's own
+loopback, downloads the jar the `backend` job built, and hands both to `scripts/ci-live-tenancy.sh`,
+which boots the application with no profile and runs the nine live steps against that one boot. The
+twelve secret names are deleted, because every value behind them — database password, superadmin pair,
+teacher and staff passwords, school codes, a JWT signing key, an allowed origin — is minted for a
+database that exists for the length of one job and is thrown away. The boot step this passage said was
+missing is the harness's first assertion: `StartupSecurityValidator` must pass and the Flyway chain must
+satisfy `ddl-auto=validate` before any suite runs. What remains of the honesty is the *display name*:
+`Live tenancy suites`, with no `if:` in front of it, and its name in `gate-coverage.yml`'s `GATES` map
+and `validate-workflows.yml`'s required-context list, so a red here refuses the merge. See Stage 5 for the
+measurement it produced on both machines, the five controls that prove it can say no, and the run on the real platform
+where it actually did (`41485021174` red, `41488389433` green).
 
 **A defect the P1 fixture surfaced, recorded rather than quietly fixed.**
 `TimetableServiceImpl.createOrUpdateTimetable` calls `timetable.getSlots().clear()` and then re-adds the
@@ -911,7 +920,9 @@ mandate's §4 asked for the journey through the *actual* frontend and backend, n
 SPA proxy, a platform owner created a school from the UI, and that school's administrator walked its own
 tenant: a dashboard of real aggregates, classrooms, subjects, a student registered and searched and archived
 and restored, and `/superadmin/*` refused as `/unauthorized`. The browser console stayed clean on every screen
-of the journey. What the journey produced, with each finding's measured state:
+of the journey. *Dated 2026-11-03:* that sentence was a person watching devtools, and it is the exact kind of
+claim this roadmap cannot audit — it is now an assertion a suite makes about itself, three times, with the
+transcript attached to the report even on a pass (*The browser measures it*, end of Stage 5). What the journey produced, with each finding's measured state:
 
 | finding | severity | state |
 |---|---|---|
@@ -1021,6 +1032,13 @@ loopback, a fresh disposable database migrated V1→V9 in one pass, and `ddl-aut
    11,999 modules, and **9** Vitest tests across 2 files (`npm test`, 1.9 s). What it does not cover: the
    suites guard two components — the route guard and the boundary — not the journey's screens, so a
    regression inside a feature page is still caught only by `verify-mvp-e2e.sh`.
+   *Corrected 2026-11-03:* that last clause is now false for one screen and true for the rest. A Playwright
+   suite drives the administrator's journey — login, forced rotation, the register-a-pupil dialog, the roll, a
+   cross-tenant search — in real Chromium against a real boot, **4 tests, `4 passed (16.0s)`**, and it caught
+   five defects the HTTP layer could not see, one of them in this stage's own product code. It is the reason
+   `Stage 4`'s P2 claim "the browser console stayed clean" changed from an observer's report to an assertion,
+   and it is measured in *The browser measures it* at the end of Stage 5. Teacher, student and parent screens
+   remain where this clause said they were: caught, if at all, by `verify-mvp-e2e.sh`.
 
 ### Stage 5 — Verification at volume, and CI that refuses
 
@@ -1156,7 +1174,9 @@ warm); more than one instance; p99 with statistical strength (20 samples, worst-
 percentiles beyond the six probes. Connection-pool saturation was *not* among the things left
 unmeasured for long: the concurrent leg below runs eight and sixteen clients in flight against the same
 seed, and it is that leg which answers the pool question. `DoD-2` also names **PostgreSQL 17** and asks
-for Testcontainers alongside local Docker; no number in this stage was produced on 17, the sequential
+for Testcontainers alongside local Docker; no **latency** number in this stage was produced on 17 (the
+chain, the nine live suites and the whole Maven reactor have now run there — see *PostgreSQL 17, measured*
+at the end of this stage — but every p50/p95/p99 in the tables above came from 15.8), the sequential
 leg's 16.15 attribution is withdrawn above because the container cannot be reached to re-prove it, and
 the server that can be verified today is **15.8**. Changing the major is an owner decision, not a quiet
 edit, and the gap is recorded as open rather than closed by a nearby version.
@@ -1450,6 +1470,10 @@ pull unmergeable forever, because `ci.yml`'s `paths-ignore` means those jobs nev
 check computes what a given diff owes and refuses what it cannot verify, so the single required name carries the
 whole set transitively — and if the meta check itself is deleted or filtered out, its absence *is* a missing
 required context, which is the failure this criterion exists to catch.
+*Corrected 2026-11-03:* the count in that paragraph was true on the day it was written and is now **eight gates** —
+`ci.yml` contributes six (the four above, `Live tenancy suites`, and `Playwright e2e`) and
+`validate-workflows.yml` its two. The design argument does not move with the count, and neither does the single
+required context: what a docs-only diff owes is computed, not hardcoded, in `gate-coverage.yml`'s `GATES` map.
 
 The demonstration is PR #27, opened and closed as an instrument. Its only content was
 `gms_frontend/src/ci-probe.test.jsx`, asserting `1 + 1 === 3`, and it failed in CI exactly as designed:
@@ -1576,6 +1600,489 @@ because it never rested on this branch. It rests on PR #15's measured **zero run
 gates had been required, that pull would have been unmergeable. What `c5698bf` does prove is the cheaper half — six
 gates owed, all six returned `success`, and the meta check named each one's check-run id instead of assuming them.
 
+### Stage 5, later on 2026-11-02 — the live-tenancy gate is wired, and it is the owner's priority 1
+
+**The decision this section records.** The owner's ruling after PR #26 set the order of work, and the first item
+was *live-tenancy CI integration* — the same item §20 of the mandate had already framed as "decide and implement
+the live-tenancy CI strategy without silently leaving critical tests disabled". The previous decision (a job
+declared `skipping`, switched on by `vars.GMS_CI_LIVE_DB`, blocked on twelve secret names) was not a strategy; it
+was a note that the work was not done. It is deleted, and what replaced it reads **no secret at all**:
+
+| | before (`01b7638` … `8145a31`) | after |
+|---|---|---|
+| trigger | `if: vars.GMS_CI_LIVE_DB == 'enabled'` — a repository variable the owner sets; measured `gh api` lists **zero** variables | no `if:`; runs on every diff `ci.yml` is not path-filtered out of |
+| application | none — the stub had no boot step | the jar the `backend` job built, downloaded as an artifact and booted with **no profile**, so `StartupSecurityValidator` and `ddl-auto=validate` are part of what must pass |
+| database | twelve `secrets.*` names for a server the job could not create | a `postgres:15` **service container** on the runner's own loopback, empty at boot, Flyway brings the chain up, destroyed with the job |
+| verdict | `skipped`, always, and `skipped` is not a check | `scripts/ci-live-tenancy.sh`'s exit code: nine steps must run, every assertion pass, and no suite may exceed its documented skip ceiling |
+
+The credential half of the old blocker was solved by deciding the credential was never needed. A CI job that boots
+a throwaway cluster for the length of one run and seeds it with invented tenants has no secret to hold: an unset
+secret expands to the empty string, PostgreSQL refuses to initialise without a password, and the job would have
+died on a missing prerequisite instead of on a failed assertion. That is the same reasoning that already put a
+literal password on the `backend` job's sidecar. The signing key and the allowed origin are minted per run
+(`openssl rand -base64 48`, an `.invalid` origin no browser in the job will ever send) so nothing carries forward.
+*Read with 2026-11-03:* "no browser in the job" was, and remains, exactly true of `live-tenancy` — but `ci.yml`
+now has a job that does run one, and it mints its own `.invalid` origin for the same reason
+(`scripts/ci-playwright-e2e.sh:214`). The browser's real origin there is the preview server's own
+`http://localhost:<port>`, which the deployment has not allowed either — and that is not an oversight the harness
+works around, it is the fourth test's subject: the refused origin is asserted as a 403 with no
+`access-control-allow-origin` handed back. See *The browser measures it*.
+
+**One script, because CI and a laptop have to be the same instruction.** `.github/workflows/ci.yml`'s job is nine
+lines of `env:` and one `run: bash scripts/ci-live-tenancy.sh`. The same file is what an operator types, on the
+same container name and the same suite list, which is the only reason the local numbers below are evidence about
+CI rather than about a laptop. Sequence on the runner: checkout → `download-artifact` → resolve the jar (refuses
+unless exactly one `.jar` landed) → setup-java → the harness → upload the suite logs `if: always()`.
+
+**The skip policy is the part with a design decision in it.** Every suite skips an assertion when its environment
+cannot ask the question, and in a job whose only verdict is an exit code a skip reads as a pass. The first draft of
+the harness said *zero skips allowed*. That rule dies the first time it is inconvenient — the honest version is a
+number per suite, with a reason attached, refused at boot if the reason is missing:
+
+```
+"verify-c4-owned-reads|scripts/verify-c4-owned-reads.sh|suite|17|fifteen by-id routes grant no SUPERADMIN, two resources declare no DELETE (ARCHITECTURE.md:38)"
+```
+
+Eight suites carry `0|` (no ceiling, no reason, no skip tolerated); c4 carries 17 and the sentence that earns them.
+A non-numeric ceiling, or a nonzero ceiling with an empty reason, is a `FATAL` before the boot. Above the ceiling,
+the verdict is `SKIP` and the gate is red.
+
+**What it measured, on both machines.** The command the harness header documents, run twice: on colima at 2 CPU /
+4 GiB against a database created for the run (`gms_live_220739`, `CREATE DATABASE` on the same container image CI
+gets from its `services:` block), and on `ubuntu-latest` inside the job itself (run `41488389433`). The verdicts are
+identical; only the clock differs, which is the point of writing the harness once.
+
+| | laptop, colima 2 CPU / 4 GiB | runner, `ubuntu-latest` |
+|---|---|---|
+| application up | 9 s | **18 s** |
+| the nine steps | 28 s | **34 s** |
+| assertions | 626 passed, 0 failed | **626 passed, 0 failed** |
+| skipped | 17, all at c4's ceiling of 17 | **17, all at c4's ceiling of 17** |
+| job wall clock | not applicable — no artifact download, no image pull | **82 s**, including checkout, `download-artifact`, `setup-java`, the `postgres:15` pull and the log upload |
+
+Per step the runner printed: c1 33 in 2 s, c2 32 in 2 s, c3 25 in 2 s, c4 118 in 6 s (+17 skipped), c7 68 in 5 s,
+mvp-e2e 298 in 10 s, p1-fixtures 3 s, p1-hardening 34 in 3 s, security 18 in 1 s.
+
+**The first run found two defects, which is the argument for the harness existing.**
+
+1. *A retired row answered 403 where its own school expected 404.* `DELETE /api/v1/subjects/7` returned 204 (it
+   archives; the audit trail needs the authorship) and the read behind it returned `403 Forbidden` to the
+   administrator who owns the row — in three services, while `ClassroomServiceImpl#update` already answered 404 for
+   the same state on the same entity. The write and the read disagreed about what "retired" means, and 403 is a
+   claim about a permission the caller demonstrably holds (`SCHOOL_SETUP` admits `ADMIN` to `/subjects/**`, twice).
+   Fixed at the point of load in `SubjectServiceImpl:88`, `ClassroomServiceImpl:82`, `StudentServiceImpl:267`,
+   `EmployeeServiceImpl:93` (`EntityNotFoundException` → 404), pinned by
+   [RetiredRowReadContractTest.java](../gms_backend/src/test/java/com/gms/service/impl/RetiredRowReadContractTest.java)
+   — five cases, and the pre-fix tree restored to demonstrate them: **`Tests run: 5, Failures: 4`**, with
+   `aSubjectInForceStillReads` still green, which is the half that stops the fix from being "every read is a 404".
+   Two live suites then had to be re-pointed at the contract rather than at the bug: `verify-c1-tenancy.sh`'s
+   classroom section (was expecting the PR-#26 delete to leave a readable row) and `verify-mvp-e2e.sh:748`, which
+   asserted **403** in prose and is now the 404 the rest of the system speaks.
+2. *Two suites located their tenants by "the lowest school ids".* Harmless one suite at a time; wrong the moment
+   nine steps shared one database, because the platform owner's system school and another card's tenants sort
+   ahead of theirs. `p1_fixtures.sh` now resolves its pair by `school_code` and hands the resolved ids to
+   `verify-p1-hardening.sh` through `$GMS_P1_FIXTURE_ENV`, and `verify-c7-tenant-key.sh` reads its administrator's
+   actual login out of `users` instead of re-deriving the guess `SchoolServiceImpl:96` mints — the derivation is
+   `(first initial + surname)`, lowercased and stripped, plus a counter when the base is taken, so school 2's admin
+   is `nokonjo` and school 4's is `nokonjo1`, and the password is `base + "@123"` off the **base**, never off the
+   uniquified name. The first attempt at that lookup silently fell back to the guess, because psql does not
+   substitute `:'code'` inside a `-c` string; the check `school A's token claims the school this card created`
+   caught it as `expected 10, got 8` rather than letting it pass. That check is now in the suite, and so is a
+   shape guard on the username it reads, because these scripts merge psql's stderr into stdout and an error message
+   is not a login.
+
+**Three more findings are recorded rather than fixed, because they are owner decisions, not defects.** Retiring a
+classroom that pupils still name leaves every pupil's `classId` pointing at a row that now reads 404 —
+`deleteWithinSchool` archives and never checks references, and `verify-c1-tenancy.sh` section 8 measures the
+consequence over HTTP instead of silently re-adding a 409. `verify-c7-tenant-key.sh`'s "written by school A, and by
+nobody else" assertions were false alarms caused by counting rows in a database nine steps share; they now count
+tenant-less and orphan rows, and the platform-wide NULL proof stays in its own section. And the write paths still
+answer 403 for a retired row in places the reads now answer 404 — the asymmetry is visible, not smoothed over.
+
+**Controls, because a gate nobody has seen red is decoration.** Five, run against throwaway copies of the tree
+(`/tmp/vw-controls`, since deleted) and against the live harness:
+
+| control | perturbation | what answered |
+|---|---|---|
+| A | `name: Live tenancy suites` → `Live tenancy (experimental)` | `Every required context still exists under the same name` exit 1, naming the file and the dead context |
+| B | step pointed at `scripts/ci-live-tenancy-not-committed.sh` | `No step runs a script that is not in the tree` exit 1 at `ci.yml:786` — and this control is also the proof that the presence-probe exemption deleted from that guard still cannot be walked through |
+| E | display name built from `${{ github.run_id }}` | `Every job declares a stable literal name` exit 1 |
+| C | a suite file removed from the tree | `FATAL: verify-c7-tenant-key is not in the tree at scripts/verify-c7-tenant-key.sh`, **before** the boot — 0 s, no database, no runner minute |
+| D | c4's ceiling 17 → 16, real tree, real boot | `verify-c4-owned-reads SKIP 5s failed=0 skipped=17/16`, the ceiling row printed its own reason, `live-tenancy: REFUSED`, **harness exit 1** |
+
+The green path re-measured after the wiring edits: **626 / 0 failed / 17 skipped at ceiling / exit 0**, and all 15
+structure guards in `validate-workflows.yml` executed locally against this tree, all green.
+
+**Then the runner ran it, and it was the runner that found the bugs.** The first Linux execution — CI run
+`41485021174`, 2026-11-02 — went red in three jobs, and two of the three were defects no laptop, and no local
+control, had been able to produce:
+
+| red on the first runner run | what it actually was | what changed |
+|---|---|---|
+| `Live tenancy suites`, exit 1 at 87 s | `p1_fixtures.sh:224` computed the attendance fixture's candidate date with `date -v-${DAY_OFFSET}d +%F`. That is a BSD flag. The runner's `date` answered `error: unexpected argument '-v' found` and wrote **nothing to stdout**; the empty string went into `… AND date = ''`, Postgres refused it (`ERROR: invalid input syntax for type date: ""`), `ON_ERROR_STOP` left `USED` empty, so the loop never broke, spent all 31 offsets and died at `FATAL: no free date for the attendance fixture` — **before** writing `$GMS_P1_FIXTURE_ENV`, which took `verify-p1-hardening.sh:33` down on `${GMS_ADMIN_USERNAME:?…}` as well. Seven of the nine steps were already green by then, mvp-e2e at 298/0/0. | the date is read from `current_date` on the same server that stores the column: `sql "SELECT to_char(current_date - $DAY_OFFSET, 'YYYY-MM-DD')"` |
+| `Lint every workflow`, exit 1 at 43 s | `actionlint`/shellcheck on `ci.yml`'s `Where the jar landed` step: `SC2006 … Use $(…) notation instead of legacy backticks` and `SC2211 … This is a glob used as a command name`. Not a style complaint — the backticks sat inside a **double-quoted `echo`**, so the shell would have run `gms_backend/target/*.jar` as a command and printed its own FATAL message with the path substituted away. | the backticks are gone from that string |
+| `Gate coverage`, exit 1 at 190 s | **Not a defect.** Two owed gates were red, so it refused — which is the product. The pipeline that `gate-coverage.yml` was written to catch (a green PR whose gate never ran) is indistinguishable from this one from the outside, and this is the second time it has been observed refusing on the real platform. | nothing to fix; see the row above for what made the gates red |
+
+The second run — CI `41488389433`, same branch, head `b48d234` — is **green end to end**: `Live tenancy suites` 82 s,
+`Backend build and tests` 78 s, `Frontend lint and build` 23 s, `Infrastructure definitions` 21 s, `Verify scripts
+syntax and presence` 17 s, `Lint every workflow` 31 s, `Check trigger sets and permissions` 17 s, `Gate coverage`
+175 s. **444 runner-seconds over eight jobs = 7.4 runner-minutes per push, $0** — the repository is public, so
+Linux minutes are not billed, and the estimate this stage carried ("roughly three minutes for the backend job, one
+runner minute for a boot-and-suite job") is replaced by those numbers rather than by a hope. `Gate coverage` spends
+175 s of the 444 *waiting*, not working: that is the price of a watcher that can distinguish "filtered by policy"
+from "gone", and it finished a full 2100 s before the deadline it is armed with and 25 minutes before its own job
+timeout.
+
+**The same arithmetic, re-measured with the browser gate in the pipeline.** Run `41503973978` (PR #32, nine jobs
+across the three workflows): `Backend build and tests` 69 s, `Verify scripts syntax and presence` 6 s,
+`Infrastructure definitions` 24 s, `Frontend lint and build` 24 s, `Playwright e2e` 120 s, `Live tenancy suites`
+80 s, `Lint every workflow` 32 s, `Check trigger sets and permissions` 13 s, `Gate coverage` 198 s — **566
+runner-seconds over nine jobs = 9.4 runner-minutes per push, $0** on a public repository. So the browser gate cost
+**120 s**, of which 49.1 s is the harness doing its work and 63 s is runner setup; it did not lengthen the pipeline,
+because `Gate coverage` finished 17 minutes inside its 2100 s deadline with two booting gates running side by side
+rather than one. The honest comparison with the row above: eight jobs / 444 s → nine jobs / 566 s, and the 122 s
+added is the new job's own 120 s plus `Gate coverage` waiting 23 s longer for it, against 21 s the older jobs got
+faster.
+
+
+A read-only sweep of every script the job executes (all twelve, end to end) looked for the next `date -v` — `sed -i`,
+`grep -oP`, `stat -f`, `base64 -d`, padded `wc`, gawk-only `match()`, `find -printf`, the Homebrew-Postgres
+assumption — and found none: the only remaining host-dependent path is the `psql`-on-the-host branch in
+`verify-mvp-e2e.sh:240` and `verify-perf-50k.sh:180`, which is dead code on CI because nothing sets `GMS_PG_HOST`
+there. That is a *searched-and-clear* claim about a snapshot, not a proof about the future; the runner itself
+remains the test.
+
+**The negative control, this time on the platform.** PR #31 (`ci-probe/live-suite-red`, closed and deleted after the
+answer, never merged) inverted exactly one expectation in `verify-c1-tenancy.sh` — `admin B refused another school's
+subject delete` wanted the leak, `200`, where the server answers `404` — one line of substance on top of this
+branch's head. The laptop harness answered `FAILED: 1` and `live-tenancy: REFUSED`; the runner answered
+`FAIL  admin B refused another school's subject delete (expected 200, got 404)` and the same refusal.
+`Live tenancy suites` failed at 2m51s and `Gate coverage` failed at 4m54s, and an administrator's override could not
+force the merge:
+
+```
+GraphQL: New changes require approval from someone other than the last pusher. Required status check "Gate coverage" is failing. (mergePullRequest)
+```
+
+Both halves of the owner's standing instruction are inside that one refusal: the required check refusing on a red
+gate, and `require_last_push_approval` refusing the single-reviewer-account pattern this repository cannot satisfy on
+its own. PR #27 proved the refusal for `Frontend lint and build` and PR #28 for a deleted workflow file; this is the
+first proof for a **live tenancy suite**, the layer the architecture tests cannot reach. Cost: one pipeline, ~500
+runner-seconds, $0 — the cheapest possible answer to "ensure missing workflows cannot result in a green PR".
+
+**The arithmetic the deadline now carries.** `gate-coverage.yml` waits for the slowest gate rather than doing work,
+so adding a gate that boots the application changes its ceiling. `backend` runs 20 min max, `live-tenancy` 15 — a
+ceiling, now, rather than a guess: it measured **82 s** on the runner, of which 18 s was the boot, so the timeout
+leaves ten minutes of headroom for a cold `postgres:15` pull or a slow artifact download. 20 + 15 = **2100 s** is
+exactly `DEADLINE_SECONDS` — so a gate that finishes inside its own timeout always finishes inside the watch, and a
+"no verdict" refusal can only mean a queue or a hang. The watcher's own `timeout-minutes` went 30 → 40 so it prints
+that refusal instead of being killed mid-poll. Both figures were set before the first runner minute; neither needed
+moving after it.
+*Read with 2026-11-03:* a **third** gate that boots the application has joined this pipeline — `Playwright e2e`,
+15 minutes, `needs: [backend, verification_scripts]` — and the sentence above is the reason it changes nothing:
+it runs **side by side** with `Live tenancy suites` behind the same 20-minute `backend`, so the critical path is
+still 20 + 15 and `DEADLINE_SECONDS` stays **2100**. The difference between the two 15-minute ceilings is what
+they rest on: `live-tenancy`'s is backed by a measured 82 s on a runner, and `Playwright e2e`'s now is too — a
+measured **2m0s** job on run `41503973978`, of which 49.1 s is the harness itself.
+
+**Status, in the mandate's buckets.** *Verified:* the harness, the nine-step list, the ceiling policy, the two
+defect fixes, the five controls, the gate wiring in both enforcement lists — and now **the job on a GitHub runner**,
+green on run `41488389433` at 82 s with 626 assertions, 0 failures and 17 skips at ceiling, after the earlier run
+`41485021174` proved the same gate red on two real defects and refused to let the PR go green. *Deliberately not run
+by CI:* `verify-perf-50k.sh` (needs the 1.84M-row load; it runs where it has always run, and Stage 5 holds its
+numbers) and `verify-schema.sh` (creates and drops probe databases — destructive by design, and the chain it
+validates is validated by the boot above, which dies if Flyway and `ddl-auto=validate` disagree). *Open, and not a
+CI question:* PR #30 still needs the owner's review; nothing here has been merged.
+
+#### PostgreSQL 17, measured
+
+**Goal:** find out whether this project's schema, its data-access behaviour and its statement budgets hold
+on the major `DoD-2` names, without editing anything to make them hold.
+**State:** the chain, the live-tenancy gate and the Maven reactor ran green on **17.11** as it was; the
+latency half of `DoD-2` did not run there, and remains the open part of that clause.
+
+Nothing in the tree needed changing to run this. The verification is a container and eight environment
+variables: `postgres:17` published to the laptop's own `127.0.0.1:5434`, a fresh empty database per run,
+and the two commands the repository already defines pointed at it. What that bought:
+
+| surface | command | server | result |
+| --- | --- | --- | --- |
+| migration chain + `ddl-auto=validate` | boot of the jar | 17.11 | `Database: jdbc:postgresql://127.0.0.1:5434/gms_pg17b (PostgreSQL 17.11)`, `Successfully applied 9 migrations`, `flyway_schema_history` rows 1–9 all `success = t`, up in **9 s** |
+| the live-tenancy gate | `scripts/ci-live-tenancy.sh` | 17.11 | **exit 0 — 626 assertions, 0 failed, 17 skipped at c4's ceiling of 17**, 39 s wall |
+| the whole backend build | `mvn -B clean verify` | 17.11 | **BUILD SUCCESS — Tests run: 126, Failures: 0, Errors: 0, Skipped: 0** in 22.6 s, of which `SqlStatementCountPerRequestTest` is 9 cases that create and own `gms_n_plus_1` on that server |
+
+Those three counts — 626 / 0 / 17 — are the same on 17.11 as on 15.8 on the laptop and on `postgres:15` on
+the GitHub runner. The statement budgets the N+1 work pinned (4/4/3/9/6/3/4/7/3 prepared statements per
+route) are asserted, not eyeballed, so "the planner changed nothing that this project relies on" is a
+measured claim rather than an inference from a passing test.
+
+**The one 17-specific signal is a warning, and it refuses nothing.** Verbatim, at boot:
+
+```
+o.f.c.internal.database.base.Database : Flyway upgrade recommended: PostgreSQL 17.11 is newer than this
+version of Flyway and support has not been tested. The latest supported version of PostgreSQL is 16.
+```
+
+The bundled Flyway's supported matrix ends one major below the server, and it applied all nine migrations
+and let the boot finish anyway. Recorded as a fact about a support statement, not closed: the response is a
+Flyway version bump, which is a dependency decision, and the mandate here says not to move a dependency
+because a warning appeared. It is also the reason `DoD-2`'s Testcontainers leg matters — that leg is where a
+Flyway that has never been tested against 17 either agrees with the Docker numbers or does not.
+
+**What the 17 run found was a defect in the harness, not in 17.** The first run was red:
+
+| run | verdict | the line it turned on |
+| --- | --- | --- |
+| 1, against `gms-pg17`, before the fix | `verify-security` **FAIL**, harness exit 1 | `FAIL ten failures set account_locked — expected true, got ` (empty), preceded by three `psql: error: … FATAL: database "gms_pg17" does not exist` |
+| 2, against `gms-pg17b`, after | `verify-security ok`, harness **exit 0** | `checks=18 failures=0` |
+| 3, against `gms-postgres` (15), regression | harness **exit 0** in 42 s | `626 / 0 failed / 17 at ceiling` — identical to run 2 |
+
+The cause: `verify-security.sh` reaches the database through `GMS_DB_CONTAINER`, while the other nine
+suites reach it through `GMS_PG_CONTAINER` — the flag `scripts/ci-live-tenancy.sh` documents and exports.
+The harness set one and not the other, so the security suite fell back to its own default name and
+`docker exec`'d into whatever container happened to answer that name. On this laptop that was the
+`postgres:15` server, which had no `gms_pg17`; the three probes printed their error to stderr, returned
+empty stdout, and the throttling assertion compared `true` against nothing. CI cannot see this: its job
+names the service container `gms-postgres` *and* sets `GMS_PG_CONTAINER: gms-postgres`, so the flag and the
+fallback default are the same string by coincidence. The fix is one export beside the four the harness
+already makes authoritative — a second server is now a flag, not a rename.
+
+**What did not run on 17, stated as plainly as what did.** The `verify-perf-50k.sh` latency ladder: its
+guard refuses a half-loaded table, and the 1,840,468-row seed lives on the laptop's Homebrew 15.8 instance,
+so measuring on 17 means pouring that volume into a 17 server first — the next perf re-measurement
+(NFR-02's dashboard and `search` breaches) is where that load gets built, and its environment line will
+name the major it ran on. `verify-schema.sh`: creates and drops probe databases, destructive by design, and
+the chain it validates is the one that applied cleanly above. The Testcontainers leg: no such dependency
+exists yet. So `DoD-2`'s environment clause — "on PostgreSQL 17 (local Docker *and* Testcontainers, which
+must agree)" — is **still not met**, and its row at the top of this document says so. What is now true is
+narrower and specific: nothing about PostgreSQL 17 broke this project, and the two things that would let a
+future change break it silently are named above.
+
+#### The browser measures it
+
+**Goal:** make the mandate's clause *"no browser-console errors on the core journey"* and the administrator half
+of PRD `J-01` ([PRODUCT_REQUIREMENTS.md §5](PRODUCT_REQUIREMENTS.md): an account is issued, the person signs in,
+rotates what it was handed, registers a pupil) into measurements taken **from inside a browser**, which is the
+only place a console error exists to be taken.
+**State:** the suite **ran and passed on the platform** — Actions run `41503973978`, job `Playwright e2e`,
+`4 passed (18.3s)`, exit 0, on an `ubuntu-latest` runner, 4 tests, Chromium at 1440x900, one worker, zero retries,
+against a jar booted with no profile and a per-run database the harness created and dropped. Locally it had already
+passed three times: 2026-11-02 against a hand-booted jar (`4 passed (16.0s)`), then twice through
+`scripts/ci-playwright-e2e.sh` — the sequence CI executes — at `4 passed (19.5s)` and `4 passed (16.0s)`. Its CI
+gate is **written and has run**, so `Playwright e2e` now contributes **120 s** of measured runner time to the
+per-push total in the paragraph above, and one product defect the browser surfaced
+(`SchoolServiceImpl`'s username/password mismatch) is recorded **open**, not closed.
+
+The reason this section is a measurement and not a re-telling of Stage 4's P2 walkthrough is that the walkthrough
+was an observer. Everything in this roadmap that claimed to know what the portal does was produced by a script
+speaking HTTP or a test speaking jsdom, and between those two sits exactly what a user does: which screen the
+router chose, what the grid rendered, and what the console printed while it happened. Stage 4's own criterion 5
+conceded that gap — *"a regression inside a feature page is still caught only by `verify-mvp-e2e.sh`"* — and
+`gms_frontend/playwright.config.js:3-9` names the same gap as the reason the config exists. That sentence is
+corrected where it was written, in Stage 4, rather than re-argued here; what replaced it is this run.
+
+**The run, and the environment that produced it** — 2026-11-02, local, in the mandate's own terms: the claim is
+only as good as the boot behind it.
+
+| what | value | why it belongs in the claim |
+| --- | --- | --- |
+| suite | `gms_frontend/e2e/admin-journey.spec.js`, 4 tests | one file, four journeys and refusals; nothing mocked, nothing mounted in memory |
+| engine / run shape | Chromium, viewport 1440x900, `workers: 1`, `retries: 0` | `playwright.config.js:37-46`. One worker is what lets each test provision its own tenant against one shared database without two runs inventing the same school code; zero retries means a red run is a finding rather than a flake that passed on the second attempt |
+| application | `gms-0.1.0-SNAPSHOT.jar`, booted with **no active profile** on `:8080` | the same shape the live-tenancy gate boots: `StartupSecurityValidator` and the 9-migration Flyway chain are part of what had to pass before a browser had anything to talk to |
+| database | `gms_e2e_232619`, created fresh for the run on the `postgres:15` container `gms-postgres`, dropped at teardown | `scripts/ci-playwright-e2e.sh:86` derives the name from the run's own tag and guards every `DROP` with the flag its own `CREATE` set, so the gate cannot write a database it did not make |
+| frontend | bundle from `npm run build`, served by `vite preview` on `:4173`, `/api` proxied to the jar | the **built** bundle is what a deployment serves. `vite dev` would hand the suite an absolute cross-origin API base that this boot's `cors.allowed-origins` refuses, because `StartupSecurityValidator` rejects a `localhost` entry outside the dev profile — so the suite runs against the real boot, not a loosened one (`playwright.config.js:52-67`) |
+
+The four tests, by their titles, and the assumption each one refuses:
+
+| # | title | what it does not take on faith |
+| --- | --- | --- |
+| 1 | `a provisioned administrator reaches its dashboard only after rotating the password it was issued` | the screen is the server's flag's decision, not the URL typed: the test navigates to `/admin/dashboard` by hand and is bounced back (`admin-journey.spec.js:67-68`), then reloads to prove the gate releases rather than traps |
+| 2 | `the administrator registers a pupil through the dialog and the roll shows it` | the row the browser created is reconciled against `GET /students/search` under the same token (`:129-135`) — a pupil that exists only in the grid's local state passes every visible assertion and fails this one |
+| 3 | `a second school's administrator searches for the first school's pupil and finds nothing` | the stranger's empty result is paired with the owner's `totalElements: 1` over the API (`:180-194`), which is what turns a zero into a measurement |
+| 4 | `the API refuses a browser whose origin the deployment has not allowed` | the refusal is asserted from **inside** the page (`TypeError: Failed to fetch`, `:241-244`) and from **outside** it with the page's `Origin` on the request (`:249-260`), so the answer is attributable to the filter and not to the network stack |
+
+**The console half of the mandate, now an assertion.** Tests 1-3 each end with `expectCleanConsole()`, and pass.
+`e2e/console-guard.fixture.js:26-47` watches three channels — `console.error` (which includes every
+`Failed to load resource:` line Chrome writes for a 4xx or 5xx), `pageerror` (an exception that escaped to the
+window, which is what a render crash is before `ErrorBoundary` catches the React half of it), and `requestfailed`
+(a request that never got an answer). Watching one of the three misses two thirds of what can go wrong.
+`requestfailed` excludes `ERR_ABORTED`, and the reason is in the file: a dropped in-flight read is a page changing
+its mind, not a page complaining (`:39-47`). The transcript is attached to the report **even on a pass** (`:49-67`),
+because "the console stayed clean" is only evidence if a reader can see what the console said — measured on the
+harness run rather than assumed: the HTML report's own `report.json` lists
+`{"name":"browser console","contentType":"text/plain"}` for every one of the four tests, `(clean)` included, so the
+report cannot be confused with a guard that never ran. Verbatim, the run's result line:
+
+```
+4 passed (16.0s)
+```
+
+**Five defects the browser caught that no HTTP suite could have.** All five are named with where the evidence
+came from, and the fifth row is the one that matters most for how to read this section: a browser is not a slower
+HTTP client, it is a different instrument.
+
+| # | what the browser saw | where it came from | state on this branch |
+| --- | --- | --- | --- |
+| 1 | the SPA's own login answered **403** | Chrome attaches `Origin` to a same-origin POST, and `CorsConfig.java:35,:42` registers a strict allowlist with no same-origin bypass, so a page calling its own API reads as a stranger. The trace's console line, verbatim: `❌ Login error: Invalid CORS request` | **handled in the harness, covered from the other side by test 4.** `vite.config.js:29-31` drops the header at the proxy, so the request arrives as the same-origin call it is; test 4 then goes around the proxy and asserts the filter's refusal — status 403, **no** `access-control-allow-origin` handed back, and the body's own `Invalid CORS request`. Before this, nothing in the repository asserted the CORS filter's behaviour at all: `@Import`s of `CorsConfig` appear only in `TenantContextTest.java:48`, `EndpointInheritanceTest.java:73` and `EmptyCollectionContractTest.java:62`, while `SqlStatementCountPerRequestTest.java:140` sets an allowed origin purely so a request can traverse the chain, and no script in `scripts/` mentions CORS except `ci-live-tenancy.sh:166` — which sets an origin no browser will ever send |
+| 2 | a **400 on a classroom name in a tenant the fixture had never created** | `psql` on the run's own database, read straight after the failure — the whole story is in the block below this table | **the harness guard is in; the product defect is open** |
+| 3 | `POST /api/v1/students/create` with no `classId` answers **400** with `fields: {"classId": "must not be null"}` | this suite's first run measured it; the constraint is `@NotNull` at `StudentRequest.java:40-41` | **recorded, and now deliberate** — the fixture always sends the classroom it created, and `admin-journey.spec.js:159-161` states in the test that omitting it is the 400 that was measured, so the payload shape is a claim rather than an accident |
+| 4 | three dialog `Select`s in the shipped UI had **no accessible name at all** | proved with a jsdom probe before the fix: `comboId: ""`, `byRoleComboGender: false` — a MUI `Select` given no `labelId`/`id` is invisible to `getByRole('combobox', { name: 'Gender' })` | **fixed in the product, not in the test**: `gms_frontend/src/features/students/StudentsPage.jsx:594,615,638` now carry `id` and `labelId`, and the re-probe showed `aria-labelledby` populated. This is an accessibility finding about what a screen reader sees today, and a `getByRole` locator is simply a screen reader that files a bug report |
+| 5 | `getByRole('gridcell')` matched **nothing** on a page whose accessibility snapshot printed `row "STD002 Ishaan BPupil …"` | the page's own accessibility tree, read while the locator sat empty for ten seconds | **fixed in the suite** — it selects `row` now (`admin-journey.spec.js:117-121`), and test 3's `toHaveCount(0)` is paired with a positive control, because a selector that matches nothing makes "the count is zero" a tautology: it passes when the feature works and when the feature was never looked at |
+
+Defect 2, in full, because it is the one that indicts the product rather than the harness.
+`SchoolServiceImpl.java:96-98` builds `tempPassword` from `base`, while `generateUniqueUsername(base)` at
+`:309-317` returns a **suffixed** username when that base is already taken. Measured in `psql` on the run's
+database:
+
+| `users.username` | `school_id` | `full_name` | the credential that account was handed |
+| --- | --- | --- | --- |
+| `pa1` | 2 | `Playwright A1` | derived from the **base** |
+| `pa11` | 6 | `Playwright A1` | the same base-derived string — the suffix is in the name, never in the password |
+
+So a fixture (or a person) that derives the credential from the administrator's name authenticates into the
+**first** tenant and does not know it: the server answers 200, the token is valid, and every subsequent write
+lands in a school nobody created for this run — which is precisely how a classroom name collided in a tenant the
+fixture had never touched. Two things are now in the suite, and neither is a workaround pretending to be a fix:
+`gms_frontend/e2e/helpers/api.js:174-181` decodes the JWT and refuses the run unless its `schoolId` equals the
+school it just created (the same "a 200 is not yet proof it is *your* 200" move `verify-c7-tenant-key.sh` made
+when it started reading its administrator's actual login out of `users`), and `:106-113` names each run's
+administrators uniquely so the collision cannot recur silently.
+
+**The product defect is not fixed in this branch, and it is recorded as open.** The same mismatch reaches a human
+being: `EmailServiceImpl.java:32-42`, called from `SchoolServiceImpl.java:144`, emails the **suffixed** username
+together with the **unsuffixed** password — so a school administrator whose name collided with someone else's
+receives credentials that cannot open the account it was just given, and the only way to discover that is to try
+them. And the uniqueness that forces the suffix is not a Java convention but DDL: `User.java:74` declares
+`unique = true`, the V1 baseline creates it at `:1441`, and `V3__natural_keys.sql:33-34` renamed it to
+`uq_users_username`. The schema is right and the writer disagrees with it; fixing the writer is Stage 4's work
+(the password must be minted from, or rewritten alongside, the username the transaction actually inserted), and no
+test in this repository currently fails because of it — which is exactly why it is written here instead of left in
+a trace.
+
+**CI wiring: written, and it has run.** `scripts/ci-playwright-e2e.sh` boots the backend and runs the suite the
+way `scripts/ci-live-tenancy.sh` does — a script rather than workflow YAML, for the reason Stage 5 already gives:
+a laptop and the platform must execute the *same instructions*, or CI proves something no local run reproduces. The
+harness owns the boot, the wait on the anonymous liveness probe, the `npm run build`, the run and the teardown; it
+deliberately does not start `vite preview`, because `playwright.config.js`'s `webServer` owns that process and a
+second owner is where a gate and a laptop would disagree. On the platform side: `.github/workflows/ci.yml:853`
+carries the job `playwright_e2e` with display name `Playwright e2e`, `needs: [backend, verification_scripts]`,
+`timeout-minutes: 15`, the same `postgres:15` service container `--name gms-postgres` the live-tenancy job uses and
+the `backend` job's jar artifact; `gate-coverage.yml:126` adds `"Playwright e2e"` to `GATES["ci.yml"]`, so `ci.yml`
+now contributes **6** gates and the pipeline **8** overall (validate-workflows.yml's two); and
+`validate-workflows.yml:231` adds `ci.yml|Playwright e2e` to the required-context pair list, so renaming the job
+dies at the structure guard instead of quietly removing a gate.
+
+**The first platform execution: green, and it is the run this stage was waiting for.** Actions run
+[`41503973978`](https://github.com/shubhamdiyos/gms/actions/runs/41503973978) on PR #32, head `62aef13`, branch
+`test/playwright-e2e`, base `ci/live-tenancy-suites`, 2026-11-02. The job `Playwright e2e` concluded `success` in
+**2m0s** (18:49:20Z → 18:51:20Z) and every step in it passed. An excerpt of its stdout follows, with two things
+dropped and nothing else changed: the runner's `Playwright e2e<TAB>step<TAB>timestamp` column, and the
+`[chromium] › e2e/admin-journey.spec.js:<line>:1 ›` prefix on the four test lines. The preflight's jar/work-dir/log
+lines and the `vite build` chunk table are elided as uninteresting, not edited:
+
+```
+== preflight ==
+database    gms_e2e_r48 (per-run) via jdbc:postgresql://127.0.0.1:5432/gms_e2e_r48 as gms_user; created through docker exec gms-postgres
+== database ==
+created gms_e2e_r48 (owner gms_user); nothing else in this run may touch a database
+== boot ==
+pid 3749; waiting for http://localhost:8080/actuator/health/liveness (max 180s)
+up after 18s
+✓ built in 10.77s
+== suite ==
+Running 4 tests using 1 worker
+  ✓  1 … a provisioned administrator reaches its dashboard only after rotating the password it was issued (2.5s)
+  ✓  2 … the administrator registers a pupil through the dialog and the roll shows it (10.2s)
+  ✓  3 … a second school's administrator searches for the first school's pupil and finds nothing (3.2s)
+  ✓  4 … the API refuses a browser whose origin the deployment has not allowed (635ms)
+  4 passed (18.3s)
+== teardown ==
+application (pid 3749) stopped
+dropped gms_e2e_r48
+```
+
+The `backend.log` the job uploaded says what the boot itself did, which matters more than the suite's count:
+`Database: jdbc:postgresql://127.0.0.1:5432/gms_e2e_r48 (PostgreSQL 15.19)`, then
+`Successfully applied 9 migrations to schema "public", now at version v9 (execution time 00:00.616s)`, then
+`Startup security validation passed (profiles: none).` and `SuperAdmin bootstrap completed successfully!`. So the
+run proves the three things the wiring was designed to prove and could not prove on macOS: the harness executes
+under Linux and a real GitHub runner, the per-run `CREATE`/`DROP` pair works against the service container, and a
+boot that runs Flyway from V1 with `StartupSecurityValidator` enforced is a boot a real Chromium can drive. The
+harness's work — preflight to a dropped database — measured **49.1 s** (18:50:24.247 → 18:51:13.375); the job's 2m0s
+around it is checkout, the jar artifact, `setup-java`, `setup-node`, `npm ci` and the ~130 MB chromium install, all
+of which this laptop had already paid for once. **15 minutes is therefore no longer a guess with a 37-second
+sample behind it — it is 18 times a measured 49 s of harness work plus 63 s of measured runner setup.**
+
+Two defects in the wiring that only a platform run could settle, both found by reading the substitution against the guard rather than by a red job. First, the job
+as first written set `GMS_E2E_TAG: ci${{ github.run_id }}`, and this run's `run_id` is an 11-digit number, so the
+tag would have been 13 characters and the harness's own database-name guard (`^gms_e2e_[a-z0-9]{1,12}$`) would have
+exited `FATAL` on every CI run — a gate that cannot start. It is now `r${{ github.run_number }}`, which for this
+run spells `r48` and the database `gms_e2e_r48`: 12 characters, inside the guard, and *accepted* — the log line
+above is the measurement of that, not a reading of the regex. Second, the artifact step uploaded
+`gms_frontend/test-results`, a directory the suite never writes because `--output` points at the work dir; it would
+have uploaded an empty tree and reported success. The path is now the report directory plus
+`playwright-e2e-work`, which is what the log above came from.
+
+The job ran beside its five siblings on the same commit and all of them passed: `Backend build and tests` 1m9s,
+`Frontend lint and build` 24s, `Infrastructure definitions` 24s, `Verify scripts syntax and presence` 6s,
+`Live tenancy suites` 1m20s, and in the other workflow `Gate coverage` 3m18s, `Lint every workflow` 32s, `Check
+trigger sets and permissions` 13s. `Gate coverage` passing is the part with teeth: it is the guard that refuses a
+required check no workflow produces, and it accepted a pipeline of 8 gates including this one, so `Playwright e2e`
+is blocking rather than decorative.
+
+**The deadline arithmetic does not move, and that is a measured statement about the graph rather than luck.**
+`gate-coverage.yml:99` keeps `DEADLINE_SECONDS: 2100`, because the new gate runs **in parallel** with
+`Live tenancy suites` — both declare `needs: [backend, verification_scripts]` and both carry 15 minutes — behind the
+same 20-minute `backend`. The critical path is therefore still 20 + 15, while the new job's own ceiling is at or
+below the 15 minutes the watcher already budgets for. What the parallel pair does change is the shape of a red
+`backend`: two downstream gates now arrive with the conclusion `skipped`, which the watcher's own comment
+(`gate-coverage.yml:112`) accounts for — a failed upstream names three gates instead of one, and the pull request
+was already refused.
+
+**A third change this run motivated, in the harness rather than the wiring.** Reading the job log to write the
+transcript above produced an unpleasant finding about the harness's own evidence: it *refuses* a boot whose log has
+no `Startup security validation passed` line, and prints nothing when the line is there. So the mandate's
+"no browser-console errors on the core journey" sits next to a claim — *this was the hardened boot* — that a reader
+could only check by downloading an artifact and grepping it. The harness now echoes both lines verbatim into the job
+output and puts them in the step summary, which is the same reasoning `console-guard.fixture.js` already applies to
+the console transcript: a check whose passing result is invisible cannot be told apart from a check that never ran.
+Re-measured locally after the change — `4 passed (16.0s)`, exit 0, 9 s boot, `gms_e2e_1793645819` created and
+dropped — and the summary table now carries `| startup validation | Startup security validation passed (profiles:
+none). |`. The next platform run will show the two rows this commit adds; the run quoted above did not have them,
+which is why the boot log lines in this section are cited from the uploaded artifact rather than presented as job
+output.
+
+**What this browser does not cover, stated as plainly as what it does.** It is **one journey** — the administrator
+— out of the PRD's frozen MVP feature list; teacher, student and parent screens are not driven in a browser at all,
+so `J-02`…`J-05` remain proven at the layers that prove them and not at this one. The eleven live scripts under
+`scripts/` — the nine `ci-live-tenancy.sh` runs, plus `verify-perf-50k.sh` and `verify-schema.sh` which that harness
+names as deliberately not run by CI — are unchanged and still carry the behavioural coverage: not one of the 626
+assertions the tenancy gate
+makes moved into these four tests, and none of them could — a CORS refusal, a routing decision and a console
+transcript are the whole of what is new here. **The Linux half has now run, and it paid for itself exactly the way
+`ci-live-tenancy.sh` taught this repository to expect.** The first platform execution of
+`scripts/ci-playwright-e2e.sh` did not need a portability defect to prove the point — it needed the harness's own
+guard, which a macOS run had already shown it obeying: `GMS_E2E_TAG: ci${{ github.run_id }}` spells a 13-character
+tag on a runner whose run ids are 11 digits, and the database-name guard refuses anything over 12. On a laptop the
+tag comes from `date +%s`, is always 10 characters, and the guard never bites; only a Linux run could produce a tag
+long enough to matter, and the wiring as first written produced one — caught by reading the guard against the
+substitution before the push rather than by a red run, so what the platform measured is the *fixed* spelling. Same
+class, second instance: the artifact step
+named `gms_frontend/test-results`, a directory that exists only when a laptop's hand run leaves traces in it, so CI
+would have uploaded an empty tree and called that evidence. Both were corrected before this run, and the run is the
+measurement that the corrections hold — `gms_e2e_r48` created, driven and dropped, and the report plus `backend.log` and
+the suite transcript uploaded from the work dir. What the harness's *defences* were written for is the remaining
+category: the tag clock is `date +%s` and never `%N` (`:82-85`), the `sed` that rewrites the JDBC URL is built
+without back-references (`:231-235`), and `--with-deps` is passed only under `Linux` (`:416-422`) — all three now
+executed on a Linux runner and none of three found wanting, which is a weaker claim than "portability is proven"
+and is the honest one. The run is **one database on one PostgreSQL major
+(15.19)**, one browser, one viewport, one machine, 18.3 s of suite wall clock with no concurrency in it — so it says nothing
+about `DoD-2`'s budgets and nothing about Firefox or Safari, and it does not touch `DoD-1`'s verdict: the journey is
+now *seen* in a browser for one role, while the criterion is the whole journey from an empty database, twice. The
+console claim is per-journey and opt-in by design (`console-guard.fixture.js:15-19`), which is why test 4 asserts
+nothing about the console — its console line **is** the finding. And the defect that a human would hit first, the
+one in the credentials email, is still in the tree.
+
 ### Stage 6 — Deployment preparation (Oracle enters)
 
 **Goal:** a deploy and a rollback each executed once, on owner-controlled infrastructure.
@@ -1651,8 +2158,19 @@ system, the remaining `DOC-*`).
 | 1 Foundation | PRD + architecture + ADR-019…023 accepted | **Closed** — `a8748f7` | $0 | No |
 | 2 Schema | migrate-empty-twice diff empty; `ddl-auto=validate` everywhere | **Merged** — `ef00eb9` / PR #25. Criteria 2, 3, 6, 7, 8 met; 1 open; 4, 5 moved to Stage 5. `master` now carries V1…V7 and `ddl-auto=validate` | $0 | No |
 | 3 Security & tenancy | cross-tenant suite green + one guard-deletion control red | **Executed and merged** — `C-1`…`C-7` plus `C-8` are implemented and measured, and landed on `master` as `ef00eb9`: both base classes deleted; the tenant resolved once per request into `TenantContext` and taken from there by every service instead of from a parameter; the tenant travels in the query (37 unscoped declared repository reads fixed, 18 left and each allow-listed with the reason the schema supports it) and then in the key (nine entities map `school_id`, 11 create paths fill it from the claim, the ten deferred `SET NOT NULL` flips land as V6, `parent_student` is held by trigger, 7 more same-school FKs make a straddling row impossible); `C-4` puts ownership in the inherited `findById`, `C-5` makes an unguarded handler a refusal (236 handlers, 234 guarded, 2 named public) with the URL ordering fixed, `C-6` makes `ACCOUNTANT` a mintable role on both sides, and `C-8` stamps the author on 33 of the 36 entity classes through `AuthorshipEntity` + V7, taking the tables with an actor column from 31 to 35 of 38. Measured: **106 tests green**, live scripts **mvp-e2e 294/0/0, C-1 29/0, C-2 32/0/0, C-3 24/0/1, C-4 118/0/17, C-7 65/0/1**, a fresh database applies **V1→V7** and boots under `ddl-auto=validate`, and four deliberate-failure controls are red then green (`C-5` names `AnnouncementController.createAnnouncement` at 233 guarded; `C-7` names `Result`, and `Attendance`'s join column aimed at `org_id` refuses the write; `C-4` was proved by a leak the scan named before it was fixed; `C-8` drops both audit annotations and F11 goes red on exactly the three listener-filled tables, the register falling from 11 of 11 to 10 of 11). **Extended past the merge by the P1 batch**: V8 closes the eleven remaining dormant composite foreign keys, V9 gives attendance and teacher assignment a soft-delete column | $0 | No |
-| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence | $0 | No |
-| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated twice** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see); **5 met on minutes, partly on the job split** — **302 runner-seconds** over seven executed jobs, **112 s wall**, **$0**, with `ci.yml`'s own four jobs at 99 s → 154 s. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (nothing here ran on 17; the 16.15 attribution is withdrawn), the live-tenancy CI job (declared `skipping`, gated on a repository variable, blocked on the boot step plus the **12 secret names `ci.yml` references that the repository does not have**), and the integration-job split in criterion 5's wording | $0 (runner minutes only; the DoD-4 probe spent one extra pipeline run, also $0) | No |
+| 4 MVP slice | journey end-to-end for two tenants, bounded lists | **All 11 MVP features proved live, stage still open** — `verify-mvp-e2e.sh` reports **11 of 11 PROVED with 294 assertions, 0 failures and 0 skips** against a fresh V1→V7 database and two tenants, so every frozen-MVP item from superadmin auth through the audit trail is now demonstrated rather than asserted. What keeps the stage open is the gate this row names: *bounded* lists. The search endpoint paginates server-side; the other list resources do not, so the work left in Stage 4 is pagination, sorting and filtering across them, not new features. **The post-#25 P1 batch is closed on evidence** (PR #26, `90f3979`): the parent admin surface, the platform-owner takeover, cross-tenant family re-pointing, five audit-destroying deletes and eleven dormant composite foreign keys are fixed, and `scripts/verify-p1-hardening.sh` reports **34 passed / 0 failed / 0 skipped** of negative checks on a fresh V1→V9 database — each demonstrating a refusal, not a test's existence. **2026-11-03:** the administrator's half of `J-01` is now driven **in a browser** — 4 Playwright tests, `4 passed (16.0s)`, Chromium at 1440x900 against a jar booted with no profile — which converts this stage's "the browser console stayed clean" from an observer's report into an assertion, fixes a real accessibility defect in the shipped dialog, and surfaces a product defect this stage has now inherited as open work: the credentials an administrator is emailed do not match (`SchoolServiceImpl.java:96-98` against `:309-317`). Measured in *The browser measures it*, at the end of Stage 5 | $0 | No |
+| 5 Volume + CI | 50k budgets met, checks required and enforced | Open — **criterion 2 met**; **1 met sequentially and FAILED concurrently**; **3 met in CI** (`postgres:15` pulled and healthy before the first step, then `Tests run: 9` for the statement-count class and `Tests run: 121` for the reactor on run `41454080530`); **4 met, demonstrated three times** (PR #27: a deliberately failing assertion → `Frontend lint and build` red → `Gate coverage` red → `gh pr merge --admin` refused with `Required status check "Gate coverage" is failing` while `enforce_admins=true` and the actor is an admin; PR #28: `.github/workflows/validate-workflows.yml` deleted outright → the same refusal in **6 s**, on *"a deleted workflow is not a passed check"* — the INF-23 absence case, which is the one a green build used to be unable to see; PR #31: one inverted expectation in a **live tenancy suite** → `Live tenancy suites` red at 2m51s → `Gate coverage` red at 4m54s → `gh pr merge --admin` refused on *both* the failing check and `require_last_push_approval` — the first platform proof at the behaviour-over-HTTP layer); **5 met on minutes, partly on the job split** — measured on the first push where the live gate ran: **444 runner-seconds over eight jobs = 7.4 runner-minutes, $0** on a public repository (live-tenancy 82 s, backend 78 s, the watcher 175 s), superseding the 302 s / seven-job figure this row carried. Evidence (`ed869d2`/`0e13290` plus this branch's re-runs): 1,840,468 rows over 27 tables with 50,000 pupils in each of two schools, the seed byte-identical across two loads, twelve sequential probes at twenty samples all inside NFR-02 (`GET /students` went 378.5 ms → 26.6 ms p95 once bounded), **six** EXPLAIN plans through this project's own indexes. At 8 clients in flight on PostgreSQL 15.8:5432, port 8083, **four of the six endpoints section 4b drives** breached NFR-02's p95 — the three `search` lines and `GET /dashboard/school` (p95 1725.2 ms, worst run 1826.8 ms). **Two causes were then fixed in the query and re-measured on the same ladder**: the dashboard fee sums now filter on `sf.school.id` instead of joining 509,000 fee rows to the roll (p95 1502.6 → 705.9 ms at c=8, throughput 10.6 → 21.5 r/s, plateau gone, NFR-02 held to 4-wide and still failed at 8; the script's own 4b run reads 1382.4 ms for the same endpoint, which brackets the size of the win), and five `JOIN FETCH`es closed the results N+1 at **26 → 7 statements** and the route's **HTTP 500 → 200**, both pinned by `SqlStatementCountPerRequestTest` (nine cases, 4/4/3/9/6/3/4/7/3 statements, status assertion inside the guard). Whole reactor: **121 tests, 0 failures, 0 errors, 0 skipped** — 21.9 s locally, the same count in CI; MVP journey: **298 checks, 0 failed, 11 of 11 features PROVED**; frontend: **9 Vitest tests green in CI**, on a step that now refuses if the suite disappears. Still open and recorded as open: the dashboard and two `search` lines at 8-wide (the owner's decision, not a Stage 5 patch), the PostgreSQL **17 + Testcontainers** half of `DoD-2` (the chain, the nine live suites and 126 Maven tests now **have** run green on 17.11 — 626/0/17 and 0 failures, see *PostgreSQL 17, measured* — but no latency number has, and no Testcontainers dependency exists; the 16.15 attribution is withdrawn), the live-tenancy CI job — a stub on the day this row was written and a **gate** the same day, wired through
+`scripts/ci-live-tenancy.sh`, measured at **626 assertions / 17 skips at ceiling / exit 0** on both the laptop and
+the runner (run `41485021174` red on two host-portability defects, run `41488389433` green with the job at 82 s),
+seen red by five local controls and once by the real platform, still awaiting the owner's review, and the
+integration-job split in criterion 5's wording. **A sixth `ci.yml` gate has been wired since, and it has run:**
+`Playwright e2e` boots the same jar against the same `postgres:15` sidecar and drives the admin journey in Chromium —
+**written** in `ci.yml`, `gate-coverage.yml`'s `GATES` and `validate-workflows.yml`'s required-context pair list, and
+**verified on the platform** at `4 passed (18.3s)` in a 120 s job on run `41503973978`; the per-push job count this
+row therefore goes to **nine** and its runner-second total to **566** (see the paragraph above), because a job that
+has executed spends minutes and this one spent them. See *The
+
+browser measures it* at the end of this stage. | $0 — **566 runner-seconds (9.4 runner-minutes)** for the push measured above, nine jobs across the three workflows, and this branch is the first to carry the browser gate in that total; the earlier figure for this line of work was 906 s for two pipelines. Either way **$0 billed**, because the repository is public and Linux minutes are not charged | No |
 | 6 Deployment prep | one deploy + one rollback + one restore observed | Open | ₹0 expected (Always Free) — **owner approval required before any paid resource** | **Yes** |
 | 7 Qualification | matrix fully `VERIFIED`/`BLOCKED`, no promotion by authorship | Open | $0 | Yes |
 

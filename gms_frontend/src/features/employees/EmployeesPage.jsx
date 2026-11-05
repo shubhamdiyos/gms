@@ -154,7 +154,9 @@ const EmployeesPage = () => {
       field: 'salary',
       headerName: 'Salary',
       width: 120,
-      renderCell: (params) => `₹${params.value?.toLocaleString()}`,
+      // Seeded employees carry no salary, and `undefined.toLocaleString()` printed "₹undefined".
+      renderCell: (params) =>
+        params.value == null ? '—' : `₹${Number(params.value).toLocaleString()}`,
     },
     {
       field: 'employeeStatus',

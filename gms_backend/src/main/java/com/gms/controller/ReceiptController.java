@@ -1,10 +1,14 @@
 package com.gms.controller;
 
+import com.gms.exception.TenantAccessDeniedException;
+import com.gms.model.entity.Parent;
 import com.gms.model.entity.Receipt;
+import com.gms.model.entity.User;
 import com.gms.model.request.ReceiptRequest;
 import com.gms.model.response.ReceiptResponse;
 import com.gms.security.TenantContext;
 import com.gms.service.ReceiptService;
+import com.gms.service.UserService;
 import jakarta.validation.Valid;
 import org.springframework.format.annotation.DateTimeFormat;
 import org.springframework.http.ResponseEntity;
@@ -20,26 +24,28 @@ import java.util.List;
 public class ReceiptController {
 
     private final ReceiptService receiptService;
+    private final UserService userService;
 
-    public ReceiptController(ReceiptService receiptService) {
+    public ReceiptController(ReceiptService receiptService, UserService userService) {
         this.receiptService = receiptService;
+        this.userService = userService;
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ReceiptResponse> createReceipt(@Valid @RequestBody ReceiptRequest request) {
         return receiptService.createReceipt(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<ReceiptResponse> updateReceipt(@PathVariable Integer id,
                                                        @Valid @RequestBody ReceiptRequest request) {
         return receiptService.updateReceipt(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteReceipt(@PathVariable Integer id) {
         return receiptService.deleteReceipt(id);
     }
@@ -67,6 +73,24 @@ public class ReceiptController {
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
     public ResponseEntity<List<Receipt>> getReceiptsByStudent(@PathVariable Integer studentId) {
+        // F-3 fix: PARENT callers must verify they are the parent of this student
+        if (TenantContext.roles().contains("PARENT")) {
+            validateParentOwnsStudent(TenantContext.username(), studentId);
+        }
         return receiptService.getReceiptsByStudent(studentId);
+    }
+
+    private void validateParentOwnsStudent(String username, Integer studentId) {
+        User user = userService.findByUsername(username)
+                .orElseThrow(() -> new TenantAccessDeniedException("User not found"));
+        Parent parent = user.getParent();
+        if (parent == null) {
+            throw new TenantAccessDeniedException("Parent profile not found");
+        }
+        boolean isParentOfStudent = parent.getStudents().stream()
+                .anyMatch(student -> student.getId().equals(studentId));
+        if (!isParentOfStudent) {
+            throw new TenantAccessDeniedException("Not authorized to access this student's data");
+        }
     }
 }

@@ -64,6 +64,13 @@ export const ROUTES = {
     EXAMS: '/admin/exams',
     ANNOUNCEMENTS: '/admin/announcements',
   },
+  ACCOUNTANT: {
+    DASHBOARD: '/accountant/dashboard',
+    PAYMENTS: '/accountant/payments',
+    OUTSTANDING: '/accountant/outstanding',
+    REPORTS: '/accountant/reports',
+    FEE_STRUCTURES: '/accountant/fee-structures',
+  },
   TEACHER: {
     DASHBOARD: '/teacher/dashboard',
     CLASSES: '/teacher/classes',
