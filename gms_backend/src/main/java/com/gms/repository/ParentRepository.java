@@ -41,4 +41,8 @@ public interface ParentRepository extends JpaRepository<Parent, Integer> {
      */
     @Query("select distinct p from Parent p join p.students s where s.school.id = :schoolId")
     List<Parent> findBySchoolId(@Param("schoolId") Integer schoolId);
+
+    @Query("select distinct p from Parent p join p.students s " +
+            "where s.school.id = :schoolId and p.id = :id")
+    Optional<Parent> findBySchoolIdAndId(@Param("schoolId") Integer schoolId, @Param("id") Integer id);
 }

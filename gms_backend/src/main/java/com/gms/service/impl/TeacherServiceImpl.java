@@ -119,7 +119,8 @@ public class TeacherServiceImpl implements TeacherService {
                         student.getPhoneNumber(),
                         student.getDateOfBirth(),
                         student.getGender(),
-                        student.getStatus()
+                        student.getStatus(),
+                        null
                 ))
                 .collect(Collectors.toList());
     }

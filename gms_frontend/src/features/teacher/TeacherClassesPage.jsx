@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import {
   Box,
   Typography,
@@ -26,8 +27,10 @@ import {
   useGetTeacherClassesQuery,
   useGetTeacherStudentsQuery,
 } from '../../store/api/apiSlice';
+import { ROUTES } from '../../constants';
 
 const TeacherClassesPage = () => {
+  const navigate = useNavigate();
   const { data: classes = [], isLoading } = useGetTeacherClassesQuery();
   const { data: students = [] } = useGetTeacherStudentsQuery();
   const [selectedClass, setSelectedClass] = useState(null);
@@ -146,24 +149,31 @@ const TeacherClassesPage = () => {
 
                 {/* Quick Actions */}
                 <Box sx={{ mb: 3, display: 'flex', gap: 1, flexWrap: 'wrap' }}>
-                  <Button 
-                    variant="contained" 
+                  <Button
+                    variant="contained"
                     startIcon={<EventNote />}
                     size="small"
+                    onClick={() =>
+                      navigate(ROUTES.TEACHER.ATTENDANCE, { state: { classId: selectedClass.id } })
+                    }
                   >
                     Mark Attendance
                   </Button>
-                  <Button 
-                    variant="outlined" 
+                  <Button
+                    variant="outlined"
                     startIcon={<Assignment />}
                     size="small"
+                    onClick={() =>
+                      navigate(ROUTES.TEACHER.GRADES, { state: { classId: selectedClass.id } })
+                    }
                   >
-                    Enter Grades
+                    Review Grades
                   </Button>
-                  <Button 
-                    variant="outlined" 
+                  <Button
+                    variant="outlined"
                     startIcon={<Schedule />}
                     size="small"
+                    onClick={() => navigate(ROUTES.TEACHER.SCHEDULE)}
                   >
                     View Schedule
                   </Button>

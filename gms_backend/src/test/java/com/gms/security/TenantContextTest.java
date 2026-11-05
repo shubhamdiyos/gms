@@ -11,11 +11,14 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 import com.gms.config.CorsConfig;
 import com.gms.config.SecurityConfig;
+import com.gms.config.SuperAdminBootstrapProperties;
+import com.gms.model.entity.User;
 import com.gms.service.SchoolService;
 import io.jsonwebtoken.Claims;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
 import java.util.concurrent.atomic.AtomicReference;
 import org.junit.jupiter.api.AfterEach;
@@ -29,6 +32,7 @@ import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.security.core.userdetails.UserDetailsService;
+import org.springframework.test.context.ActiveProfiles;
 import org.springframework.test.web.servlet.MockMvc;
 import org.springframework.test.web.servlet.MvcResult;
 
@@ -46,6 +50,7 @@ import org.springframework.test.web.servlet.MvcResult;
  */
 @WebMvcTest(controllers = {com.gms.controller.SchoolController.class})
 @Import({SecurityConfig.class, CorsConfig.class})
+@ActiveProfiles("test")
 class TenantContextTest {
 
     private static final String BEARER = "Bearer test-token";
@@ -61,6 +66,12 @@ class TenantContextTest {
 
     @MockBean
     private SchoolService schoolService;
+
+    @MockBean
+    private SuperAdminBootstrapProperties superAdminBootstrapProperties;
+
+    @MockBean
+    private com.gms.service.UserService userServiceForPasswordFilter;
 
     @AfterEach
     void noContextSurvivesTheTest() {
@@ -181,6 +192,19 @@ class TenantContextTest {
         lenient().when(tokenProvider.parseClaims(anyString())).thenReturn(claims);
         lenient().when(userDetailsService.loadUserByUsername(username))
                 .thenReturn(new Caller(username, roles));
+
+        // Stage F: The Caller principal is not a GmsUserDetails, so PasswordChangeEnforcementFilter
+        // falls back to UserService.findByUsername(). Mock it to return a user that does NOT require
+        // a password change, so the filter allows the request through.
+        User fallbackUser = new User();
+        fallbackUser.setUsername(username);
+        fallbackUser.setRequirePasswordChange(false);
+        fallbackUser.setEnabled(true);
+        fallbackUser.setAccountLocked(false);
+        fallbackUser.setPasswordExpired(false);
+        fallbackUser.setRoles(roles);
+        lenient().when(userServiceForPasswordFilter.findByUsername(username))
+                .thenReturn(Optional.of(fallbackUser));
     }
 
     private static final class Caller implements UserDetails {

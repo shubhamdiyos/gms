@@ -17,7 +17,9 @@ public interface StudentFeeService {
 
     ResponseEntity<?> deleteStudentFee(Integer id);
 
-    ResponseEntity<List<StudentFee>> getAllStudentFees();
+    // The admin/accountant list is what the fees ledger renders, and the entity hides the student
+    // and fee behind @JsonIgnore, so it answers with the joined response instead.
+    ResponseEntity<List<StudentFeeResponse>> getAllStudentFees();
 
     ResponseEntity<StudentFee> getStudentFeeById(Integer id);
 

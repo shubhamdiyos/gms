@@ -586,12 +586,12 @@ const StudentsPage = () => {
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth error={!!errors.gender}>
-                  <InputLabel>Gender</InputLabel>
+                  <InputLabel id="student-gender-label">Gender</InputLabel>
                   <Controller
                     name="gender"
                     control={control}
                     render={({ field }) => (
-                      <Select {...field} label="Gender">
+                      <Select {...field} id="student-gender" labelId="student-gender-label" label="Gender">
                         <MenuItem value="MALE">Male</MenuItem>
                         <MenuItem value="FEMALE">Female</MenuItem>
                         <MenuItem value="OTHER">Other</MenuItem>
@@ -607,12 +607,12 @@ const StudentsPage = () => {
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth error={!!errors.classId}>
-                  <InputLabel>Classroom</InputLabel>
+                  <InputLabel id="student-classroom-label">Classroom</InputLabel>
                   <Controller
                     name="classId"
                     control={control}
                     render={({ field }) => (
-                      <Select {...field} label="Classroom" value={field.value ?? ''}>
+                      <Select {...field} id="student-classroom" labelId="student-classroom-label" label="Classroom" value={field.value ?? ''}>
                         {classrooms.map((classroom) => (
                           <MenuItem key={classroom.id} value={classroom.id}>
                             {classroom.name}
@@ -630,12 +630,12 @@ const StudentsPage = () => {
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth error={!!errors.sectionId}>
-                  <InputLabel>Section</InputLabel>
+                  <InputLabel id="student-section-label">Section</InputLabel>
                   <Controller
                     name="sectionId"
                     control={control}
                     render={({ field }) => (
-                      <Select {...field} label="Section" value={field.value ?? ''}>
+                      <Select {...field} id="student-section" labelId="student-section-label" label="Section" value={field.value ?? ''}>
                         <MenuItem value="">No Section</MenuItem>
                         {sections.map((section) => (
                           <MenuItem key={section.id} value={section.id}>

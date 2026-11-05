@@ -32,12 +32,15 @@ set -uo pipefail
 
 BASE=${GMS_BASE_URL:-http://localhost:8080}
 API="$BASE/api/v1"
+. "$(dirname "${BASH_SOURCE[0]}")/lib/csrf.sh"
 SUPERUSER=${GMS_SUPERADMIN_USERNAME:?set GMS_SUPERADMIN_USERNAME}
 SUPERPASSWORD=${GMS_SUPERADMIN_PASSWORD:?set GMS_SUPERADMIN_PASSWORD}
-# The school administrator's password is derived by SchoolServiceImpl from the
-# administrator's full name: lowercase first-initial + surname + "@123".
+# The administrators' full names decide their usernames. Their passwords do not follow from the
+# names any more: school creation issues a random temporary password and returns it once, so the
+# value below is only what each account rotates to before this suite's business calls.
 ADMIN_A_NAME=${GMS_SCHOOL_A_ADMIN_NAME:-Alice Principal}
 ADMIN_B_NAME=${GMS_SCHOOL_B_ADMIN_NAME:-Bob Principal}
+ROTATED_ADMIN_PASSWORD=${GMS_ROTATED_ADMIN_PASSWORD:-Test_Admin_2026!}
 # The password policy (PasswordValidator) accepts letters, digits and
 # @$!%*?&.#_ only — a hyphen fails it, which is what the first run of this
 # script got wrong.
@@ -75,20 +78,16 @@ refused() { # refused <name> <code>
 call() { # call <method> <path> [token] [json]
   local method=$1 route=$2 token=${3:-} payload=${4:-}
   local args=(-s -o "$body" -w '%{http_code}' -X "$method" "$API$route")
+  if [[ "$method" != "GET" && "$method" != "HEAD" ]]; then
+    csrf_prepare "$API" || return 1
+    args+=("${CSRF_ARGS[@]}")
+  fi
   [[ -n "$token" ]] && args+=(-H "Authorization: Bearer $token")
   [[ -n "$payload" ]] && args+=(-H 'Content-Type: application/json' -d "$payload")
   curl "${args[@]}"
 }
 
-token_of() { jq -r '.accessToken // empty' "$body"; }
-
-# The administrator username the school-creation flow generates.
-admin_username() { # admin_username <full name>
-  local first last
-  first=$(printf '%s' "$1" | awk '{print $1}')
-  last=$(printf '%s' "$1" | awk '{print $2}')
-  printf '%s%s' "${first:0:1}" "$last" | tr 'A-Z' 'a-z'
-}
+token_of() { local t; t=$(jq -r '.accessToken // empty' "$body"); printf '%s' "${t:-$(csrf_auth_token)}"; }
 
 echo "=== 1. Platform login ==="
 code=$(call POST /auth/login "" "{\"username\":\"$SUPERUSER\",\"password\":\"$SUPERPASSWORD\"}")
@@ -101,24 +100,34 @@ echo "=== 2. The platform creates two schools ==="
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Northgate High","schoolCode":"NGH001","adminFullName":"'"$ADMIN_A_NAME"'","adminEmail":"alice@northgate.test"}')
 check "school A created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_A_USER=$ISSUED_ADMIN
+ADMIN_A_ISSUED=$ISSUED_ADMIN_PASSWORD
 code=$(call POST /schools/create "$PLATFORM_TOKEN" \
   '{"schoolName":"Southbank Academy","schoolCode":"SBA002","adminFullName":"'"$ADMIN_B_NAME"'","adminEmail":"bob@southbank.test"}')
 check "school B created" "200" "$code"
+csrf_issued_admin "$body" || exit 1
+ADMIN_B_USER=$ISSUED_ADMIN
+ADMIN_B_ISSUED=$ISSUED_ADMIN_PASSWORD
 
 echo
-echo "=== 3. Both school administrators log in ==="
-ADMIN_A_USER=$(admin_username "$ADMIN_A_NAME")
-ADMIN_B_USER=$(admin_username "$ADMIN_B_NAME")
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_USER@123\"}")
+echo "=== 3. Both school administrators log in and rotate the issued password ==="
+# Rotation is not ceremony: `PasswordChangeEnforcementFilter` refuses every business route with
+# 403 while `requirePasswordChange` is set, and every issued credential carries that flag.
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_A_USER\",\"password\":\"$ADMIN_A_ISSUED\"}")
 check "school A admin login" "200" "$code"
 TOKEN_A=$(token_of)
-code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_USER@123\"}")
+code=$(call POST /auth/login "" "{\"username\":\"$ADMIN_B_USER\",\"password\":\"$ADMIN_B_ISSUED\"}")
 check "school B admin login" "200" "$code"
 TOKEN_B=$(token_of)
 if [[ -z "$TOKEN_A" || -z "$TOKEN_B" ]]; then
   echo "FATAL: could not obtain both school administrator tokens"
   exit 1
 fi
+check "school A admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_A" "$ADMIN_A_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
+check "school B admin rotated its issued password" "200" \
+  "$(csrf_rotate_password "$API" "$TOKEN_B" "$ADMIN_B_ISSUED" "$ROTATED_ADMIN_PASSWORD")"
 
 echo
 echo "=== 4. School A builds its own tenant data ==="
@@ -167,11 +176,33 @@ code=$(call GET "/subjects/$SUBJECT_A" "$TOKEN_A")
 check "deleted subject is gone" "404" "$code"
 
 echo
-echo "=== 8. A referenced row is a conflict, not a server fault ==="
+echo "=== 8. Retiring a classroom the pupils still name ==="
+# This section asserted 409 when a delete refused to orphan rows. The contract that merged in PR #26
+# is different and deliberate: a delete archives, because the row carries the authorship the audit
+# trail reads and students.classroom_id's foreign key would refuse a hard delete anyway. So the
+# question this card actually asks is no longer "is it refused" but "is the retired row invisible and
+# is everything that still names it readable". The 500 this check was written to catch is still the
+# thing being caught — it just arrives one request later now, on the read of a pupil whose classroom
+# is no longer in the visible set.
 code=$(call DELETE "/classrooms/$CLASS_ID" "$TOKEN_B")
 check "admin B refused another school's classroom delete" "404" "$code"
 code=$(call DELETE "/classrooms/$CLASS_ID" "$TOKEN_A")
-check "classroom with students is a conflict, not a 500" "409" "$code"
+check "admin A retired its own classroom, with a body-free 204 and no server fault" "204" "$code"
+code=$(call GET "/classrooms/$CLASS_ID" "$TOKEN_A")
+check "the retired classroom is invisible to its own school" "404" "$code"
+code=$(call GET "/classrooms" "$TOKEN_A")
+check "and it is absent from the school's own list" "0" \
+  "$(jq --argjson id "$CLASS_ID" '[.[] | select(.id == $id)] | length' "$body")"
+code=$(call GET "/students/$STUDENT_A" "$TOKEN_A")
+check "a pupil still pointing at the retired classroom reads without a server fault" "200" "$code"
+code=$(call GET "/students" "$TOKEN_A")
+check "and the pupil list reads too" "200" "$code"
+# Measured, not asserted: the pupil row keeps its classId after the classroom is retired, which the
+# pupil's own response says out loud. Whether a school may retire a classroom that still has pupils in
+# it is the owner's call, not a test's — this line records the consequence of the accepted contract so
+# the decision is made with the observation in front of it.
+printf '      NOTE pupil %s still names classroom %s (classId=%s), which now reads 404\n' \
+  "$STUDENT_A" "$CLASS_ID" "$(jq -r '.classId' "$body")"
 code=$(call POST /classrooms/create "$TOKEN_A" '{"name":"Grade 6-B","grade":"6","section":"B"}')
 check "second classroom created in school A" "200" "$code"
 EMPTY_CLASS=$(jq -r '.id' "$body")

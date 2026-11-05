@@ -86,7 +86,10 @@ public class SubjectServiceImpl implements SubjectService {
         // a second copy of the predicate the scoped findById already applied, and because the
         // bootstrapped platform owner carries its own SYSTEM school id it refused that owner too.
         if ("0".equals(subject.getStatus())) {
-            throw new IllegalArgumentException("Subject is archived");
+            // A retired row is outside the caller's visible set, which is what 404 means here: the
+            // school's own list already filters it out, and a foreign row reads the same way. 403
+            // would claim the caller lacks a permission it holds on this route.
+            throw new EntityNotFoundException("Subject is archived");
         }
         return subject;
     }

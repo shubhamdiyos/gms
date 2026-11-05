@@ -3,6 +3,7 @@ package com.gms.controller;
 import com.gms.model.entity.Student;
 import com.gms.model.entity.StudentAdmission;
 import com.gms.model.request.StudentRequest;
+import com.gms.model.request.StudentSelfUpdateRequest;
 import com.gms.model.response.*;
 import com.gms.repository.StudentAdmissionRepository;
 import com.gms.security.TenantContext;
@@ -171,6 +172,13 @@ public class StudentController {
     public ResponseEntity<StudentResponse> getStudentProfile() {
         StudentResponse response = studentService.getMyProfile();
         return ResponseEntity.ok(response);
+    }
+
+    @PutMapping("/profile")
+    @PreAuthorize("hasAuthority('STUDENT')")
+    public ResponseEntity<StudentResponse> updateStudentProfile(
+            @Valid @RequestBody StudentSelfUpdateRequest request) {
+        return ResponseEntity.ok(studentService.updateMyProfile(request));
     }
 
     @GetMapping("/my-classes")

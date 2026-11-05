@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { Grid, Paper, Typography, Box, Card, CardContent, Avatar, LinearProgress } from '@mui/material';
 import {
   Groups,
@@ -47,6 +48,7 @@ const todayName = () =>
   new Intl.DateTimeFormat('en-US', { weekday: 'long' }).format(new Date()).toUpperCase();
 
 const TeacherDashboard = () => {
+  const navigate = useNavigate();
   const { data: profile } = useGetTeacherProfileQuery();
   const {
     data: classes = [],
@@ -210,7 +212,10 @@ const TeacherDashboard = () => {
               Quick Actions
             </Typography>
             <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
-              <Card sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}>
+              <Card
+                sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
+                onClick={() => navigate('/teacher/attendance')}
+              >
                 <CardContent sx={{ py: 2 }}>
                   <Typography variant="subtitle2">Mark Attendance</Typography>
                   <Typography variant="body2" color="text.secondary">
@@ -218,12 +223,15 @@ const TeacherDashboard = () => {
                   </Typography>
                 </CardContent>
               </Card>
-              
-              <Card sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}>
+
+              <Card
+                sx={{ cursor: 'pointer', '&:hover': { bgcolor: '#f5f5f5' } }}
+                onClick={() => navigate('/teacher/grades')}
+              >
                 <CardContent sx={{ py: 2 }}>
-                  <Typography variant="subtitle2">Enter Grades</Typography>
+                  <Typography variant="subtitle2">Review Grades</Typography>
                   <Typography variant="body2" color="text.secondary">
-                    Update student grades
+                    See results recorded for your classes
                   </Typography>
                 </CardContent>
               </Card>

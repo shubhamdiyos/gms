@@ -22,25 +22,25 @@ public class ParentStudentController {
     private ParentStudentService parentStudentService;
     
     @PostMapping("/assign")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> assignStudentsToParent(@Valid @RequestBody ParentStudentRequest request) {
         return parentStudentService.assignStudentsToParent(request);
     }
 
     @DeleteMapping("/remove")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> removeStudentFromParent(@RequestParam Integer parentId, @RequestParam Integer studentId) {
         return parentStudentService.removeStudentFromParent(parentId, studentId);
     }
 
     @GetMapping("/parent/{parentId}/students")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'PARENT')")
     public ResponseEntity<List<Student>> getStudentsForParent(@PathVariable Integer parentId) {
         return parentStudentService.getStudentsForParent(parentId);
     }
 
     @GetMapping("/student/{studentId}/parents")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<List<ParentResponse>> getParentsForStudent(@PathVariable Integer studentId) {
         return parentStudentService.getParentsForStudent(studentId);
     }

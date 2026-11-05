@@ -19,4 +19,8 @@ public class FeePaymentResponse {
     private LocalDate paymentDate;
     private String paymentMethod;
     private String remarks;
+    private String paymentReference;
+    private String status;
+    private String studentName;
+    private String feeType;
 }

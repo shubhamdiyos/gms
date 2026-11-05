@@ -2,6 +2,8 @@ package com.gms.repository;
 
 import com.gms.model.entity.Invoice;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import org.springframework.stereotype.Repository;
 
 import java.time.LocalDate;
@@ -22,4 +24,7 @@ public interface InvoiceRepository extends TenantScopedRepository<Invoice> {
      * keeps one school's billing out of another's list.
      */
     List<Invoice> findBySchoolIdAndParent_Id(Integer schoolId, Integer parentId);
+
+    @Query("SELECT COUNT(i) FROM Invoice i WHERE i.school.id = :schoolId AND i.status IN ('SENT', 'OVERDUE') AND i.dueDate < :today")
+    Long countOverdueInvoices(@Param("schoolId") Integer schoolId, @Param("today") LocalDate today);
 }

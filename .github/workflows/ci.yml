@@ -17,11 +17,16 @@ name: CI
 # rule class would otherwise leave `mvn verify` green), and `No test class is silently skipped`
 # enumerates the whole test tree against surefire's discovery patterns, including the `*IT` shape that
 # needs a failsafe binding `pom.xml` does not yet have.
-# Behaviour over HTTP (a second tenant reading the first one's rows and getting 403) is NOT proved
-# here: the `postgres` service above exists for one statement-count guard and boots an empty cluster,
-# no job here starts the application, `Verification scripts syntax and presence` checks the live suites
-# statically only, and `live-tenancy` at the bottom is the disabled stub that records what that job
-# needs and the secret names it reads.
+# Behaviour over HTTP (a second tenant reading the first one's rows and getting refused) is proved by
+# `live-tenancy` at the bottom of this file: it boots the jar this job uploads against a PostgreSQL of
+# its own and runs the nine live steps against that one boot. The `postgres` service above exists for
+# the statement-count guard and boots an empty cluster; `Verify scripts syntax and presence` checks the
+# same suites statically on every pull request, so a suite that cannot parse is caught before a live
+# job spends a runner minute on it.
+# What none of the above can see is a browser. `Playwright e2e` is the sixth job and the only one with
+# a real Chromium in it: it drives the built bundle against the same jar, for the mandate's clause
+# "no browser-console errors on the core journey", which is observable only from inside a browser and
+# is not asserted anywhere else in this repository.
 
 on:
   pull_request:
@@ -78,6 +83,7 @@ jobs:
         ports:
           - 127.0.0.1:5432:5432
         options: >-
+          --name gms-ci-db
           --health-cmd "pg_isready -U ci_user -d postgres"
           --health-interval 10s
           --health-timeout 5s
@@ -89,6 +95,15 @@ jobs:
       GMS_N1_DB_URL: jdbc:postgresql://127.0.0.1:5432/gms_n_plus_1
       DB_USERNAME: ci_user
       DB_PASSWORD: ci_password
+      # The PostgreSQL-backed integration tests (BasePostgresIntegrationTest subclasses and
+      # PasswordChangeEnforcementFilterTest) read these through application-test.properties. They exist
+      # because those tests used to point at a developer's `localhost:5433/gms_test`, a port the runner
+      # never has — 36 errors on the first PR that added the classes. The database is created by the
+      # step below in the same throwaway sidecar, so the suite runs against a real PostgreSQL instead of
+      # being skipped.
+      TEST_DB_URL: jdbc:postgresql://127.0.0.1:5432/gms_test
+      TEST_DB_USERNAME: ci_user
+      TEST_DB_PASSWORD: ci_password
     defaults:
       run:
         working-directory: gms_backend
@@ -100,6 +115,15 @@ jobs:
           distribution: temurin
           java-version: '21'                     # the project targets 21; JDK 24 breaks Lombok
           cache: maven
+
+      - name: Create the integration-test database
+        # The sidecar above initialises one database (`postgres`). The profile-driven integration tests
+        # need their own, and `application-test.properties` names it `gms_test` (through TEST_DB_URL).
+        # `docker exec` uses the container's own psql, so this step adds no runner package to depend on
+        # and no network surface: the database lives inside the same throwaway container the health check
+        # already watches. `CREATE DATABASE` fails if it already exists, which would mean the service was
+        # not fresh — the correct outcome for a gate that should only ever measure a clean cluster.
+        run: docker exec gms-ci-db psql -U ci_user -d postgres -c 'CREATE DATABASE gms_test'
 
       - name: Compile, test and package
         # `clean` is not decoration. The roadmap records a schema run that "logged no Flyway line at
@@ -190,7 +214,9 @@ jobs:
         # a source file and duplicates no assertion: when it goes red the fix is build configuration —
         # an `<include>` for the class, or binding failsafe to the `verify` phase — and the message
         # says which. The abstract-base exemption is not a loophole: a base class has no test of its
-        # own, and its concrete subclasses are each enumerated in full.
+        # own, and its concrete subclasses are each enumerated in full. A `@Nested` class is likewise
+        # not a skip: its tests run under `Outer$Inner` reports, so `class_tally` sums the family and a
+        # nested class with no tests of its own still reports zero.
         #
         # Run 2026-11-02 against `mvn -B clean verify` on JDK 21: 16 classes, 104 tests, 0 skipped,
         # step green. Four controls against doctored copies of that same output, each exit 1 naming the
@@ -198,6 +224,13 @@ jobs:
         # its report deleted (the `<excludes>` case), `tests="0"` (the emptied case), and a
         # `StudentTenantIsolationIT` source with no failsafe bound. A fifth control — an
         # `abstract class AbstractLiveProbeTest` — stayed silent, as designed.
+        #
+        # PR #33 found the gap the 2026-11-02 controls could not: `ProductionSecurityIntegrationTest`
+        # holds all of its tests in `@Nested` classes, so surefire writes `Outer` with `tests="0"` and
+        # `Outer$CsrfProtection` and friends with the real counts. The guard read only the outer report
+        # and refused a class that had in fact run — 352 tests executed, one name reported as empty. The
+        # emptied-class control is still honoured, because zero children plus the disabled ones would
+        # only ever add to zero.
         run: |
           set -euo pipefail
           python3 - <<'PY'
@@ -235,6 +268,21 @@ jobs:
           def tally(suite):
               return (int(suite.get("tests") or 0), int(suite.get("skipped") or 0),
                       int(suite.get("failures") or 0), int(suite.get("errors") or 0))
+
+          def class_tally(fqcn):
+              # `@Nested` classes run under their own names (`Outer$Inner`) and write their own reports,
+              # while surefire also writes an `Outer` report whose `tests` attribute is 0 because every
+              # test lives one level down. Counting the outer report alone would refuse a class that did
+              # run — the shape PR #33 first hit, on `ProductionSecurityIntegrationTest`. The children are
+              # folded in here, and never counted twice: the source loop below enumerates one top-level
+              # type per file, so a nested class is not visited on its own.
+              n = sk = fa = er = 0
+              prefix = fqcn + "$"
+              for name, suite in reports.items():
+                  if name == fqcn or name.startswith(prefix):
+                      cn, csk, cfa, cer = tally(suite)
+                      n, sk, fa, er = n + cn, sk + csk, fa + cfa, er + cer
+              return n, sk, fa, er
 
           bad, checked, executed, skipped = [], 0, 0, 0
           for path in sorted(glob.glob("src/test/java/**/*.java", recursive=True)):
@@ -287,7 +335,7 @@ jobs:
                              f"it did not execute (excluded, disabled, emptied, or its package does not "
                              f"match its directory)")
                   continue
-              n, sk, fa, er = tally(suite)
+              n, sk, fa, er = class_tally(fqcn)
               executed += n
               skipped += sk
               if n == 0:
@@ -497,9 +545,13 @@ jobs:
     #
     # GitHub cannot skip a whole job on the contents of the tree — `jobs.<id>.if` is evaluated before
     # `actions/checkout` — which is why the absence handling is a glob plus a report rather than an
-    # `if:`. The job that *would* run these suites is `live-tenancy` at the bottom of this file, and its
-    # per-script steps are individually gated on the same presence probe, so it inherits the property:
-    # enabling it tomorrow cannot reference a file that is not there.
+    # `if:`. The job that runs these suites for real is `live-tenancy` at the bottom of this file; it
+    # calls `scripts/ci-live-tenancy.sh`, which refuses the run when a suite is missing from its own
+    # list rather than stepping over it. So a suite that exists but does not parse dies here, in five
+    # minutes and without a database, instead of costing a live job a boot to say the same thing — and
+    # the glob is over `scripts/**/*.sh`, so it covers `scripts/ci-playwright-e2e.sh`, the harness the
+    # sixth job `Playwright e2e` calls, exactly the same way: a truncated heredoc from a parallel edit
+    # there is caught here too, before that job spends a boot and a chromium download on it.
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
@@ -556,8 +608,8 @@ jobs:
               for path in absent:
                   fh.write(f"- `{path}` ABSENT (being written elsewhere; nothing is claimed for it)\n")
               fh.write("\nCI runs the **syntax and mode** half of these scripts. Their assertions are "
-                       "HTTP calls and SQL against a running backend, which no job here has a database "
-                       "for - see the `live-tenancy` job.\n")
+                       "HTTP calls and SQL against a running backend, which `live-tenancy` boots on "
+                       "every pull request that is not documentation-only.\n")
 
           if bad:
               for message in bad:
@@ -663,223 +715,345 @@ jobs:
           fi
 
   # ─────────────────────────────────────────────────────────────────────────────
-  # DISABLED BY DEFAULT — this job is not a gate and must not be named in branch
-  # protection. Its condition is a repository variable nobody has set, so the job reports
-  # as *skipped* on every run: a skipped job satisfies nothing, and that is the honest
-  # state of live tenancy verification in CI today. It is a variable rather than a literal
-  # `false` for two reasons. actionlint refuses a constant condition
-  # (`constant expression "false" in condition`, [if-cond]) — and that is exactly what this
-  # line said from `01b7638` until 2026-11-02, where the lint gate that would have caught
-  # it was itself unparsable and so emitted no check at all. And a switch the owner can
-  # flip in Settings is the point of writing the wiring down: no workflow diff stands
-  # between the variable and a live suite.
+  # LIVE TENANCY — the behaviour half of Stage 3: eight suites and one fixture step driving
+  # a RUNNING backend over HTTP with real JWTs, plus their SQL halves against the same database.
+  # This job replaced a disabled stub on 2026-11-02 and is a gate: its name is in
+  # `gate-coverage.yml`'s GATES map and in `validate-workflows.yml`'s required-context
+  # list. That is how a job becomes blocking in this repository without a branch-
+  # protection edit — `Gate coverage` is the single context protection requires, and it
+  # refuses any pull request whose owed gate is missing or red.
   #
-  # Why it is off: `verify-c1-tenancy.sh`, `verify-c2-tenant-context.sh`,
-  # `verify-c3-scoped-reads.sh`, `verify-c4-owned-reads.sh`, `verify-c7-tenant-key.sh`,
-  # `verify-mvp-e2e.sh`, `verify-perf-50k.sh` and `verify-security.sh` all drive a RUNNING
-  # backend over HTTP with real JWTs and, for their SQL halves, a PostgreSQL reachable through `psql`.
-  # Since 2026-11-02 the `backend` job above starts a PostgreSQL, so "there is no precedent in this
-  # file" is no longer the reason — the reason is that these eight suites need the *application*
-  # booted against that database and twelve credentials supplied to it, and none of those credentials
-  # exists as a repository secret. Re-checked 2026-11-02 with `gh api
-  # repos/shubhamdiyos/gms/actions/secrets`: the response holds three entries — `EC2_HOST`,
-  # `EC2_SSH_KEY`, `EC2_USER` — all for the instance retired by ADR-015/017, and `actions/variables`
-  # returns `[]`. Not one of the twelve names the map below reads is among them. Every job still runs
-  # on `runs-on: ubuntu-latest` with no job-level `container:` and no cloud call
-  # (`Workflow validation` refuses any other runner label outright and authorises `image:` in a
-  # `services:` block only). Until the secrets land, C-1/C-2/C-3/C-4/C-7 are gated in CI by the arch
-  # tests and by `SqlStatementCountPerRequestTest` — declarations and one statement count, not
-  # behaviour over HTTP. Three of the eight scripts (`verify-c4-owned-reads.sh`,
-  # `verify-mvp-e2e.sh`, `verify-perf-50k.sh`) were still untracked when this stub was written — all
-  # three are tracked now, and the probe below stays because a job that dies on a missing file fails
-  # for the wrong reason, which is the one outcome a gate must never produce.
+  # What it has measured. Same command on both machines, and the verdicts agree while the clocks do not:
+  # on colima at 2 CPU / 4 GiB the application is up in 9 s and the nine steps take 27 s; on this runner
+  # (run `41488389433`, the green one) it is 18 s and 34 s, inside a job that spends 82 s end to end
+  # including checkout, the artifact download, setup-java and the `postgres:15` pull. Both runs: 626
+  # assertions passing, 0 failed, 17 skipped and all seventeen inside `verify-c4-owned-reads.sh`'s
+  # documented ceiling. The run before this one (`41485021174`) was red, and the runner is what made it
+  # red — two defects a macOS laptop cannot see. This job died at 87 s because `p1_fixtures.sh` asked
+  # `date -v-3d` for a date, a BSD flag the runner answers with an empty stdout, which became
+  # `date = ''` in SQL and killed the fixture and the suite that reads its handoff file. `Lint every
+  # workflow` died at 43 s because this job's jar-path message used backticks inside a double-quoted
+  # echo, which shellcheck correctly read as command substitution — and `Gate coverage` died with them,
+  # refusing rather than passing, which is the behaviour it was written for. The first run of the
+  # harness this job wraps, against a jar built from the merged master (`8145a31`), had already found
+  # two more defects on the laptop — a retired row answering 403 where its own school expected 404
+  # (`RetiredRowReadContractTest`), and two suites locating their tenants by "the lowest school ids",
+  # which silently pointed them at another card's tenants once the nine steps shared one database.
   #
-  # What turning this on takes, in order:
-  #   0. `GMS_CI_LIVE_DB` set to `enabled` under Settings → Secrets and variables → Actions
-  #      → Repository variables. That comparison is the job's whole `if:`, so this is the
-  #      only switch, and it is the owner's to throw rather than a line in a diff.
-  #   1. `services:` with a PostgreSQL (loopback on the runner, published to nothing) plus the
-  #      `gms_user` role and `gms_db` from docker-compose.yml, applied by the whole chain in
-  #      `src/main/resources/db/migration/` during the application's own boot — never by ddl-auto.
-  #      `backend` above now declares exactly such a sidecar (`postgres:15`, published to
-  #      `127.0.0.1`), so the shape exists to copy; it carries a
-  #      different role and database because that job only ever hands the suite `gms_n_plus_1`.
-  #   2. `mvn -B clean spring-boot:run -Dspring-boot.run.profiles=dev` in the
-  #      background, waited on through /actuator/health rather than a sleep.
-  #   3. `scripts/seed/` applied so the two tenants, the platform account and the
-  #      role holders the scripts log in as actually exist.
-  #   4. No script invents a pass when a dependency is missing, but only one of them reads
-  #      `GMS_REQUIRE_DB`, so that variable alone is not what makes the job honest — the
-  #      per-script guards are. Checked file by file on 2026-11-02, line numbers re-read the same day
-  #      after both scripts grew a TCP transport and shifted their own offsets:
-  #        - `verify-mvp-e2e.sh` is the only reader (`REQUIRE_DB=${GMS_REQUIRE_DB:-}`, :96)
-  #          and the only one that names a missing backend in its own words
-  #          (`FATAL: no backend on $API`, :281) or honours the switch
-  #          (`FATAL: GMS_REQUIRE_DB is set but the database half is unavailable`, :286);
-  #        - `verify-c1/c2/c3/c4/c7` die on `FATAL: no platform token` when the login call
-  #          does not answer, which is the same outcome reached by a different sentence;
-  #        - `verify-perf-50k.sh` treats the database as mandatory without being asked —
-  #          `FATAL: $PG_PASSWORD_ENV must be set` (:143) — and then refuses to time a
-  #          database whose row counts do not match the seed (:192), so a job pointed at an empty
-  #          schema cannot produce a green line either way;
-  #        - `verify-security.sh` has no guard clause at all: every probe is a `record`
-  #          comparing an expected status to whatever curl got, so with no backend each
-  #          becomes a counted failure and `[[ $failures -eq 0 ]] || exit 1` ends the job.
-  #      `GMS_REQUIRE_DB=1` is set below because that is the documented local invocation for
-  #      the e2e suite; naming it here would be a lie about the other seven if the comment
-  #      claimed it was a convention. What is true — and enough — is that no step in this
-  #      job can pass by doing nothing.
-  #   5. The secrets listed in the map below, created in Settings → Secrets and actions,
-  #      with the script that reads each named next to it. They reach the process through
-  #      `env:` only — never interpolated into a command, never echoed — which is what the
-  #      `A secret value can only reach the environment, never a log` step in
-  #      `validate-workflows.yml` enforces mechanically. `GMS_PG_PASSWORD_ENV` names the
-  #      *variable* the scripts read for the database password (`DB_PASSWORD` by default),
-  #      so `DB_PASSWORD` itself is the secret; `SECURITY_JWT_SECRET` and the
-  #      `APP_SUPERADMIN_*` pair are the application's own boot requirements
-  #      (`application.properties:48,55-59`), not suite inventions.
-  #   6. `ADR-019` budgets Testcontainers as CI's zero-cost route for database-backed tests. The
-  #      `services:` shape it was weighed against is no longer hypothetical: the owner took that
-  #      decision on 2026-11-02 and `backend` above runs one, so what remains here is steps 2, 3 and 5
-  #      — boot the application and supply the credentials — not a precedent to set.
+  # No repository secret is read here, and none is needed: the database is an empty cluster
+  # that exists for the length of the job on the runner's loopback, the tenants are invented
+  # by the suites, and every credential is minted per run. An unset secret expands to the
+  # empty string, PostgreSQL refuses to initialise without a password, and the job would die
+  # on a missing prerequisite instead of on a failed assertion — the reasoning that already
+  # put a literal password on the `backend` job's sidecar.
   live-tenancy:
-    name: 'Live tenancy suites (disabled: CI boots no backend and holds none of the credentials below)'
-    if: ${{ vars.GMS_CI_LIVE_DB == 'enabled' }}
+    name: Live tenancy suites
     needs: [backend, verification_scripts]
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    # Fifteen minutes for a job that measured 18 s of boot plus 34 s of suites on the runner itself
+    # (82 s end to end, run 41488389433) and 9 s plus 27 s on a 2-CPU laptop container. The ceiling is
+    # therefore ten times the measurement: it is room for a cold `postgres:15` pull and a slow artifact
+    # download, not a guess about the suites. The number is also a promise to `gate-coverage.yml`:
+    # `backend`'s 20-minute ceiling plus this one is exactly its 2100-second wait, so a gate that
+    # finishes inside its own timeout always finishes inside the watch, and a "no verdict" refusal can
+    # only mean a queue or a hang.
+    timeout-minutes: 15
+    services:
+      # `postgres:15` is the major the operator's own server runs, and the same one the
+      # `backend` job's sidecar uses. `--name` is not cosmetic: the SQL halves of
+      # verify-c2/c3/c4/c7/p1 and verify-security reach the database with
+      # `docker exec gms-postgres psql`, which is how they check columns no HTTP response
+      # exposes. Published to the runner's own loopback, to nothing outside the job.
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: gms
+          POSTGRES_USER: gms_user
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --name gms-postgres
+          --health-cmd "pg_isready -U gms_user -d gms"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
     env:
+      GMS_CI_WORK_DIR: ${{ github.workspace }}/live-tenancy-work
       GMS_BASE_URL: http://localhost:8080
-      GMS_REQUIRE_DB: '1'
-      GMS_VERIFY_DB: gms_db
+      DB_URL: jdbc:postgresql://127.0.0.1:5432/gms
+      DB_USERNAME: gms_user
+      DB_PASSWORD: ci_password
+      GMS_VERIFY_DB: gms
       GMS_PG_CONTAINER: gms-postgres
       GMS_PG_USER: gms_user
       GMS_PG_PASSWORD_ENV: DB_PASSWORD
-      # Not a free choice: `scripts/seed/perf_seed_50k.sql:92` raises
-      # `IF current_database() <> 'gms_perf_seed' THEN RAISE EXCEPTION`, and the harness's
-      # first section is `check "psql is talking to the perf database" "$PERF_DB"
-      # "$CURRENT_DB"` followed by `FATAL: refusing to measure database` (:143). Any other
-      # value here therefore dies on the load or on the clock — which is the point of the
-      # guard; the earlier `gms_perf` in this line was a name nothing in the repo produces.
-      GMS_PERF_DB: gms_perf_seed
-      GMS_PERF_RUNS: '20'
-      # Non-secret identifiers, defaulted by the scripts themselves; naming them here keeps
-      # a run reproducible rather than dependent on whoever last edited a script.
-      GMS_SCHOOL_A_ADMIN_NAME: Alice Principal
-      GMS_SCHOOL_B_ADMIN_NAME: Bob Principal
-      # ── Secrets: values reach the environment through this map and nowhere else ──
-      # verify-c1 / c2 / c3 / c4 / c7 / mvp-e2e / perf-50k all begin with
-      # `${GMS_SUPERADMIN_USERNAME:?}` and `${GMS_SUPERADMIN_PASSWORD:?}`, so an unset value
-      # stops the suite rather than skipping it.
-      GMS_SUPERADMIN_USERNAME: ${{ secrets.GMS_SUPERADMIN_USERNAME }}
-      GMS_SUPERADMIN_PASSWORD: ${{ secrets.GMS_SUPERADMIN_PASSWORD }}
-      # verify-c1, c2, mvp-e2e (least-privilege refusals); c3 uses the STAFF pair.
-      GMS_TEACHER_PASSWORD: ${{ secrets.GMS_TEACHER_PASSWORD }}
-      GMS_STAFF_PASSWORD: ${{ secrets.GMS_STAFF_PASSWORD }}
-      # verify-security.sh: `${GMS_TEST_USERNAME:?}` / `${GMS_TEST_PASSWORD:?}`.
-      GMS_TEST_USERNAME: ${{ secrets.GMS_TEST_USERNAME }}
-      GMS_TEST_PASSWORD: ${{ secrets.GMS_TEST_PASSWORD }}
-      # verify-perf-50k.sh logs in as a seeded school administrator, not as the platform
-      # account, so it needs its own identity pair; the seeded password hashes in
-      # scripts/seed/ are placeholders until these are supplied.
-      GMS_SCHOOL_ADMIN_USERNAME: ${{ secrets.GMS_SCHOOL_ADMIN_USERNAME }}
-      GMS_SCHOOL_ADMIN_PASSWORD: ${{ secrets.GMS_SCHOOL_ADMIN_PASSWORD }}
-      # The database password, read indirectly through the variable GMS_PG_PASSWORD_ENV names.
-      DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
-      # verify-mvp-e2e.sh creates the two tenants; the codes must be unused on that database.
-      GMS_SCHOOL_A_CODE: ${{ secrets.GMS_SCHOOL_A_CODE }}
-      GMS_SCHOOL_B_CODE: ${{ secrets.GMS_SCHOOL_B_CODE }}
-      # The application's own boot requirements (application.properties:48, 55-59).
-      SECURITY_JWT_SECRET: ${{ secrets.SECURITY_JWT_SECRET }}
-      APP_SUPERADMIN_ENABLED: 'true'
-      APP_SUPERADMIN_USERNAME: ${{ secrets.GMS_SUPERADMIN_USERNAME }}
-      APP_SUPERADMIN_PASSWORD: ${{ secrets.GMS_SUPERADMIN_PASSWORD }}
-      APP_SUPERADMIN_EMAIL: verify@invalid.example
+      # The platform account the harness boots and the suites log in as, and the two role
+      # passwords that retire the skips: without a teacher password `verify-mvp-e2e.sh`
+      # skips three least-privilege refusals, and the harness's ceiling for it is zero.
+      GMS_SUPERADMIN_USERNAME: ciplatformadmin
+      GMS_SUPERADMIN_PASSWORD: Platform_Verify_2026!
+      GMS_TEACHER_PASSWORD: Teacher_Verify_2026!
+      GMS_STAFF_PASSWORD: Staff_Verify_2026!
+      # The school codes `verify-mvp-e2e.sh` creates and `p1_fixtures.sh` then locates by
+      # code. Named here so a run is reproducible rather than dependent on whoever last
+      # edited a default.
+      GMS_SCHOOL_A_CODE: MVP801
+      GMS_SCHOOL_B_CODE: MVP802
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: Which live suites are in this tree
-        id: probe
-        # The presence guard, stated once. A step that ran `scripts/verify-mvp-e2e.sh` unconditionally
-        # would fail this job on a commit that simply has not received the file yet, and a `job.if:`
-        # cannot see the tree because GitHub evaluates it before the checkout. So the probe publishes
-        # one output per suite and every step below is gated on its own.
-        run: |
-          set -euo pipefail
-          for path in scripts/verify-c1-tenancy.sh scripts/verify-c2-tenant-context.sh \
-                      scripts/verify-c3-scoped-reads.sh scripts/verify-c4-owned-reads.sh \
-                      scripts/verify-c7-tenant-key.sh scripts/verify-mvp-e2e.sh \
-                      scripts/verify-perf-50k.sh scripts/verify-security.sh; do
-            name=$(basename "$path" .sh | tr -d '-')
-            if [ -f "$path" ]; then
-              echo "${name}=present" >> "$GITHUB_OUTPUT"
-              echo "present  ${path}"
-            else
-              echo "${name}=absent" >> "$GITHUB_OUTPUT"
-              echo "ABSENT   ${path} - not in this tree; its step is skipped, nothing is claimed"
-            fi
-          done
-          if [ -f scripts/seed/perf_seed_50k.sql ]; then
-            echo "perf_seed=present" >> "$GITHUB_OUTPUT"
-          else
-            echo "perf_seed=absent" >> "$GITHUB_OUTPUT"
-          fi
+      - name: Fetch the jar the backend job built
+        # The same artifact `mvn -B clean verify` produced, so the application this gate
+        # exercises is the one the unit and arch tests passed — not a second build that
+        # could differ from it.
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: gms-backend-jar
+          path: live-tenancy-jar
 
-      - name: What this job still needs
-        # Reachable only by throwing `GMS_CI_LIVE_DB`, so the wording cannot say "not wired" —
-        # by the time this line runs, the owner has said it is. What is still true is the
-        # unmet half: the job declares no `services:` and boots nothing, so a step that gets
-        # here without a backend on GMS_BASE_URL would go on to report eight suite failures
-        # that are all one missing prerequisite. Naming it once, in its own words, and
-        # stopping is more honest than eight downstream FATALs.
+      - name: Where the jar landed
+        # The artifact's internal layout is `upload-artifact`'s decision — it strips the path up to the
+        # common parent of the matched files — so the name is resolved here rather than assumed by a
+        # literal that would fail with "no jar at …" on the day the build changes its name.
         run: |
           set -euo pipefail
-          echo "This job declares no services: PostgreSQL and boots no backend; steps 2, 3 and 5 of"
-          echo "the comment above are owner work that has not landed (step 1 landed on 2026-11-02 in"
-          echo "the backend job, as a sidecar for SqlStatementCountPerRequestTest). Until it does,"
-          echo "C-1/C-2/C-3/C-4/C-7 are gated in CI by the arch tests and one statement count -"
-          echo "declarations and a query shape, not behaviour over HTTP."
-          code=$(curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-                 "$GMS_BASE_URL/actuator/health" || echo 000)
-          if [ "$code" != "200" ]; then
-            echo "FATAL: nothing answers GET $GMS_BASE_URL/actuator/health (got HTTP $code)."
-            echo "       Every suite below would fail for that one reason, not for a real defect."
+          shopt -s nullglob
+          jars=(live-tenancy-jar/*.jar)
+          if [[ ${#jars[@]} -ne 1 ]]; then
+            echo "FATAL: expected exactly one jar in live-tenancy-jar/, found ${#jars[@]}."
+            echo "       The backend job uploads gms_backend/target/*.jar; more than one means the"
+            echo "       build now produces two artifacts and this gate cannot say which it booted."
             exit 1
           fi
-          echo "backend is up on $GMS_BASE_URL - proceeding to the suites"
+          echo "GMS_JAR=${jars[0]}" >> "$GITHUB_ENV"
+          echo "will boot ${jars[0]}"
 
-      # One step per suite, each gated on the probe. `verify-perf-50k.sh` additionally needs the seed:
-      # its own count assertion refuses to measure a half-loaded table, so running it before the seed
-      # exists would report a failure that is really a missing prerequisite.
-      - name: verify-c1-tenancy
-        if: steps.probe.outputs.verifyc1tenancy == 'present'
-        run: bash scripts/verify-c1-tenancy.sh
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '21'
 
-      - name: verify-c2-tenant-context
-        if: steps.probe.outputs.verifyc2tenantcontext == 'present'
-        run: bash scripts/verify-c2-tenant-context.sh
+      - name: Boot the application and run the nine live steps
+        # One command, and the same command an operator types on a laptop:
+        # `scripts/ci-live-tenancy.sh` owns the boot, the wait on /actuator/health/liveness,
+        # the suite list, the per-suite skip ceilings and the teardown. It boots with no
+        # profile, so `StartupSecurityValidator` and the Flyway chain are themselves part of
+        # what has to pass before any suite runs. Its exit code is this step's.
+        run: bash scripts/ci-live-tenancy.sh
 
-      - name: verify-c3-scoped-reads
-        if: steps.probe.outputs.verifyc3scopedreads == 'present'
-        run: bash scripts/verify-c3-scoped-reads.sh
+      - name: Upload the suite logs
+        if: always()
+        # Every `FAIL` line the harness printed is in the step output above; the logs are
+        # the whole transcripts, which is what a reader needs to tell a defect from an
+        # environment that moved.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: live-tenancy-logs
+          path: live-tenancy-work/
+          retention-days: 7
+          if-no-files-found: warn
 
-      - name: verify-c4-owned-reads
-        if: steps.probe.outputs.verifyc4ownedreads == 'present'
-        run: bash scripts/verify-c4-owned-reads.sh
+  # ─────────────────────────────────────────────────────────────────────────────
+  # PLAYWRIGHT E2E — the browser half of the pyramid, and the sixth job. What it proves that
+  # no job above it can: a real Chromium driving the built bundle against a real backend.
+  # `backend` asserts declarations and units, `frontend` proves the bundle builds and its pure
+  # functions agree, and `live-tenancy` proves behaviour over HTTP with curl and psql — but
+  # `verify-mvp-e2e.sh`, the suite that walks the MVP journey, has no browser in it and the Vitest
+  # suite has no server behind it. The mandate's clause this job exists to enforce is "no
+  # browser-console errors on the core journey", and a console error is observable only from inside
+  # a browser: an exception thrown in a React render, a `4xx` the UI swallows silently, a bundle
+  # that builds clean and then dies on first navigation. Every one of those is green everywhere else
+  # in CI and fatal to the administrator who logs in. `gms_frontend/e2e/admin-journey.spec.js` walks
+  # the journey — rotation, registering a pupil, the roll, a cross-tenant search that must come back
+  # empty — and its `console-guard.fixture.js` turns the first console error into a failed test.
+  #
+  # It builds nothing itself and downloads the `backend` job's jar for the same reason
+  # `live-tenancy` does, stated on that job: the application this gate exercises has to be the one
+  # the unit and arch tests passed, not a second build that could differ from it. A second
+  # `mvn -B clean verify` here would also re-prove a compile that is already proved on this exact
+  # commit, for roughly 78 s of runner time the job would rather spend on the browser.
+  #
+  # Fifteen minutes, and the number is a promise to `gate-coverage.yml`: `backend`'s 20-minute
+  # ceiling plus a 15-minute gate is exactly its 2100-second watch, and because this job runs IN
+  # PARALLEL with `Live tenancy suites` — both `needs: [backend, verification_scripts]`, neither
+  # needing the other — that 2100-second ceiling is unchanged provided this job also finishes inside
+  # its own 15 minutes. The measurement behind it is the harness run of 2026-11-03:
+  # `scripts/ci-playwright-e2e.sh` on a macOS laptop over this jar, `4 passed (19.5s)` and exit 0,
+  # 37 s from preflight to a dropped database (9 s to liveness, `vite build` 5.41 s, the suite
+  # 19.5 s). What a runner adds to that is setup this machine had already paid for once — `npm ci`,
+  # a cold `postgres:15` pull, the ~130 MB chromium download — which is why the ceiling is fifteen
+  # times the measured work rather than a rounded guess.
+  #
+  # `retries: 0` and one worker live in `gms_frontend/playwright.config.js` rather than as flags on
+  # this job's command line, and each buys something: a red run is a finding rather than a flake that
+  # passed on the second attempt (this repository already records a gate that hides failures as worse
+  # than one that never ran), and one worker is what lets each test provision its own tenant against
+  # the single shared `gms` database this job's sidecar holds — two workers inventing tenants
+  # concurrently make the verdict depend on who won the race. Keeping both in the config is also what
+  # makes a laptop run and a CI run assert the same thing; the same reasoning that keeps the suite
+  # list in the harness instead of in this file.
+  playwright_e2e:
+    name: Playwright e2e
+    needs: [backend, verification_scripts]
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      # The same sidecar `live-tenancy` runs: `postgres:15`, the major the operator's own server runs,
+      # published to the runner's own loopback and to nothing outside the job. The suite does not talk
+      # to it directly — every journey step goes through the backend over HTTP and through
+      # `/api/v1` on the preview server — but the tenants the journey provisions land here, which is
+      # why the boot and the browser have to be given the same one database.
+      postgres:
+        image: postgres:15
+        env:
+          POSTGRES_DB: gms
+          POSTGRES_USER: gms_user
+          # Not a credential, for all the reasons the `live-tenancy` job gives: an empty cluster that
+          # exists for the length of this job on a loopback interface inside a throwaway VM, with
+          # tenants and passwords invented per run and nothing in the repository able to reach it
+          # afterwards. An unset secret expands to the empty string and PostgreSQL 15 refuses to
+          # initialise without a password, so the literal is what keeps a missing secret from turning
+          # into a red gate that says nothing about the product.
+          POSTGRES_PASSWORD: ci_password
+        ports:
+          - 127.0.0.1:5432:5432
+        options: >-
+          --name gms-postgres
+          --health-cmd "pg_isready -U gms_user -d gms"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 10
+    env:
+      GMS_CI_WORK_DIR: ${{ github.workspace }}/playwright-e2e-work
+      DB_URL: jdbc:postgresql://127.0.0.1:5432/gms
+      DB_USERNAME: gms_user
+      DB_PASSWORD: ci_password
+      GMS_PG_CONTAINER: gms-postgres
+      GMS_PG_USER: gms_user
+      GMS_PG_PASSWORD_ENV: DB_PASSWORD
+      # Two names the `live-tenancy` job carries are deliberately absent here, because this job runs
+      # no `verify-*.sh`: `GMS_BASE_URL`, which those scripts read as their target, and
+      # `GMS_VERIFY_DB`, which names the database they check against. The browser suite has one
+      # origin (`GMS_E2E_API_ORIGIN`, below) and one database — the per-run one the harness mints
+      # from `GMS_E2E_TAG`. `ci-playwright-e2e.sh:224-229` refuses to export the live gate's
+      # database name for the same reason, and setting it at job level would put it back.
+      # The platform account the harness boots the application with and the journey logs in as — the
+      # same two literals `live-tenancy` already carries, for the same reason: no repository secret is
+      # read here, because the account is invented in an empty cluster on the runner's loopback and
+      # exists only for the length of the job.
+      GMS_SUPERADMIN_USERNAME: ciplatformadmin
+      GMS_SUPERADMIN_PASSWORD: Platform_Verify_2026!
+      # The per-run tag: `helpers/api.js` stamps it into every school code it provisions and
+      # `ci-playwright-e2e.sh` builds the run's own database name out of it. Two lengths decide
+      # what can be put here, and the shorter one wins — the harness refuses a database name that
+      # is not `gms_e2e_<1-12 lowercase alphanumerics>` (`ci-playwright-e2e.sh:100`, which is also
+      # what keeps the name spellable inside PostgreSQL's 63-byte identifier limit and provably
+      # this run's when the teardown drops it by name), and `SchoolRequest.schoolCode` is
+      # `@Size(max = 20)` against `E2E<tag><n><label>`. That is why this is `run_number` and not
+      # `run_id`: an 11-digit run id plus the `ci` prefix is 13 characters, and the first push
+      # would have died on the harness's own guard — measured, not guessed: `ci41488389433` is 13
+      # bytes. The repository's own run counter grows by one per push and stays in two or three
+      # digits, so neither cap is in sight; the run id does reach twelve digits someday, and a gate
+      # that dies on the day its host's counter gains a digit is a gate somebody will delete.
+      #
+      # What the tag is NOT for, because the comment this replaced said it: uniqueness between two
+      # runs sharing one database. Each job gets its own throwaway `postgres:15` container, so
+      # there is no second run to collide with on the runner. The place two runs really do share a
+      # cluster is a laptop's `gms-postgres`, and there the tag falls back to `date +%s` — so the
+      # CI value only has to be legal, addressable in the artifact names, and different from the
+      # cluster's own `gms`, which the harness checks separately.
+      GMS_E2E_TAG: r${{ github.run_number }}
+      GMS_E2E_PLATFORM_USERNAME: ciplatformadmin
+      GMS_E2E_PLATFORM_PASSWORD: Platform_Verify_2026!
+      # The origin the browser is served from and the origin the preview server proxies `/api` to:
+      # the same host and port, so the journey is same-origin and no CORS exception has to be
+      # smuggled into a boot that is otherwise the real one — `StartupSecurityValidator` refuses any
+      # `cors.allowed-origins` entry containing `localhost`, and this job never asks it to.
+      GMS_E2E_API_ORIGIN: http://localhost:8080
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
 
-      - name: verify-c7-tenant-key
-        if: steps.probe.outputs.verifyc7tenantkey == 'present'
-        run: bash scripts/verify-c7-tenant-key.sh
+      - name: Fetch the jar the backend job built
+        # The same artifact `mvn -B clean verify` produced, so the application this gate exercises is
+        # the one the unit and arch tests passed — not a second build that could differ from it.
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: gms-backend-jar
+          path: playwright-e2e-jar
 
-      - name: verify-mvp-e2e (eleven MVP features as one journey)
-        if: steps.probe.outputs.verifymvpe2e == 'present'
-        run: bash scripts/verify-mvp-e2e.sh
+      - name: Where the jar landed
+        # The artifact's internal layout is `upload-artifact`'s decision — it strips the path up to the
+        # common parent of the matched files — so the name is resolved here rather than assumed by a
+        # literal that would fail with "no jar at …" on the day the build changes its name.
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          jars=(playwright-e2e-jar/*.jar)
+          if [[ ${#jars[@]} -ne 1 ]]; then
+            echo "FATAL: expected exactly one jar in playwright-e2e-jar/, found ${#jars[@]}."
+            echo "       The backend job uploads gms_backend/target/*.jar; more than one means the"
+            echo "       build now produces two artifacts and this gate cannot say which it booted."
+            exit 1
+          fi
+          echo "GMS_JAR=${jars[0]}" >> "$GITHUB_ENV"
+          echo "will boot ${jars[0]}"
 
-      - name: verify-perf-50k (DoD-2 budgets at volume)
-        if: steps.probe.outputs.verifyperf50k == 'present' && steps.probe.outputs.perf_seed == 'present'
-        run: bash scripts/verify-perf-50k.sh
+      - uses: actions/setup-java@cf277c60eb25467037889841efdb72551f06f6c3 # v4.9.1
+        with:
+          distribution: temurin
+          java-version: '21'
 
-      - name: verify-security
-        if: steps.probe.outputs.verifysecurity == 'present'
-        run: bash scripts/verify-security.sh
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4.4.0
+        with:
+          node-version: '22'                      # the same Node `Frontend lint and build` runs on
+          cache: npm
+          cache-dependency-path: gms_frontend/package-lock.json
+
+      - name: Install the frontend dependencies
+        # `working-directory` on the step, not a job-level `defaults:` block: `frontend` can afford
+        # the default because every one of its commands is a `gms_frontend` command, while this job
+        # spans both trees — the jar resolves at the workspace root and the harness is
+        # `scripts/ci-playwright-e2e.sh` — so each step has to say which directory it means.
+        run: npm ci
+        working-directory: gms_frontend
+
+      - name: Install the browser
+        # Chromium only. `playwright.config.js` declares one project and one engine, and
+        # `--with-deps` is what puts the shared libraries a headless Chromium needs on the runner —
+        # without them the failure is a launch error several seconds into the first test, which reads
+        # like a defect in the journey and is a missing `libnss3`.
+        run: npx playwright install --with-deps chromium
+        working-directory: gms_frontend
+
+      - name: Boot the application and run the browser journey
+        # One command, and the same command an operator types on a laptop:
+        # `scripts/ci-playwright-e2e.sh` owns the boot of the jar, the wait on
+        # `/actuator/health/liveness`, the Playwright invocation and the teardown. It boots with no
+        # profile, so `StartupSecurityValidator` and the Flyway chain are themselves part of what has
+        # to pass before the browser navigates. Its exit code is this step's, and a non-zero one is a
+        # finding rather than something to retry. Note what the job deliberately does NOT do: run
+        # `npm run build`. `vite preview` — the server `playwright.config.js` starts — serves `dist/`,
+        # so the bundle is built inside the harness, next to the boot it is pointed at, rather than
+        # half in YAML and half in a script that can then disagree with it.
+        run: bash scripts/ci-playwright-e2e.sh
+
+      - name: Upload the browser evidence
+        if: always()
+        # The HTML report is the console-error list and the trace viewer; the per-run work dir holds
+        # the traces and failure screenshots, because the harness sends Playwright's `--output` there
+        # rather than leaving it at the config default of `gms_frontend/test-results` — one path that
+        # also holds `backend.log` and the suite transcript is the path a reader should have to find.
+        # Uploaded on a green run too, because the evidence that no console error fired is what makes
+        # the assertion worth having — and `if-no-files-found: ignore`, because a run that dies before
+        # Playwright starts has produced neither, and that absence belongs to the step output rather
+        # than to a warning here.
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: playwright-e2e-report
+          path: |
+            gms_frontend/playwright-report
+            playwright-e2e-work
+          retention-days: 7
+          if-no-files-found: ignore
 

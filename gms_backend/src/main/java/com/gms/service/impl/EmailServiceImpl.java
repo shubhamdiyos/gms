@@ -54,17 +54,16 @@ public class EmailServiceImpl implements EmailService {
             
             mailSender.send(message);
             
-            log.info("[MAIL SUCCESS] Email sent successfully to {}", to);
-            // Also print the full email content to terminal as requested
-            log.info("[MAIL CONTENT] To: {} | From: {} | Subject: {}\n{}", to, fromAddress, subject, text);
+            // SEC-CRED-01: Never log the email body — it may contain plaintext credentials.
+            log.info("[MAIL SUCCESS] Email sent successfully to {} | Subject: {}", to, subject);
         } catch (MailException ex) {
             log.error("[MAIL ERROR] Failed to send email to {} via {}:{} - {}", to, mailHost, mailPort, ex.getMessage(), ex);
-            // Fallback log of the content so operations can verify in logs
-            log.info("[FALLBACK EMAIL LOG] To: {} | From: {} | Subject: {}\n{}", to, fromAddress, subject, text);
+            // SEC-CRED-01: Fallback log omits the body to avoid credential exposure.
+            log.info("[FALLBACK EMAIL LOG] To: {} | From: {} | Subject: {}", to, fromAddress, subject);
         } catch (Exception ex) {
             log.error("[MAIL ERROR] Unexpected error sending email to {} via {}:{} - {}", to, mailHost, mailPort, ex.getMessage(), ex);
-            // Fallback log of the content so operations can verify in logs
-            log.info("[FALLBACK EMAIL LOG] To: {} | From: {} | Subject: {}\n{}", to, fromAddress, subject, text);
+            // SEC-CRED-01: Fallback log omits the body to avoid credential exposure.
+            log.info("[FALLBACK EMAIL LOG] To: {} | From: {} | Subject: {}", to, fromAddress, subject);
         }
     }
 }

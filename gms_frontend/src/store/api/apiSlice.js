@@ -1,6 +1,9 @@
 import { createApi, fetchBaseQuery } from '@reduxjs/toolkit/query/react';
 import { mockBaseQuery } from '../../services/mockBaseQuery';
 
+const CSRF_COOKIE_NAME = 'XSRF-TOKEN';
+const CSRF_HEADER_NAME = 'X-XSRF-TOKEN';
+
 // Get API base URL from environment variable or use default
 const getApiBaseUrl = () => {
   const customUrl = import.meta.env.VITE_API_BASE_URL;
@@ -13,16 +16,41 @@ const getApiBaseUrl = () => {
   return 'http://localhost:8080/api/v1';
 };
 
+// Read CSRF token from cookie
+const getCsrfTokenFromCookie = () => {
+  const cookies = document.cookie.split(';');
+  for (let cookie of cookies) {
+    const [name, value] = cookie.trim().split('=');
+    if (name === CSRF_COOKIE_NAME) {
+      return decodeURIComponent(value);
+    }
+  }
+  return null;
+};
+
 const MOCK_AUTH = import.meta.env.VITE_MOCK_AUTH === 'true';
 
 const realBaseQuery = fetchBaseQuery({
   baseUrl: getApiBaseUrl(),
-  prepareHeaders: (headers, { getState }) => {
-    const token = getState().auth.token || localStorage.getItem('gms_token');
-    if (token) {
-      headers.set('authorization', `Bearer ${token}`);
+  credentials: 'include', // Send cookies with every request
+  prepareHeaders: (headers, { getState, endpoint }) => {
+    // Add CSRF token for all requests (backend validates on state-changing methods only)
+    const csrfToken = getCsrfTokenFromCookie();
+    if (csrfToken) {
+      headers.set(CSRF_HEADER_NAME, csrfToken);
     }
     return headers;
+  },
+  // Delete/publish endpoints answer `ResponseEntity.ok("...")`, which Spring serialises as
+  // text/plain. RTK's default handler JSON-parses every response and turns that success into a
+  // PARSING_ERROR, so the SPA reported failures for writes the server had already committed.
+  responseHandler: async (response) => {
+    const contentType = response.headers.get('content-type') || '';
+    if (contentType.includes('application/json')) {
+      return response.json();
+    }
+    const text = await response.text();
+    return text === '' ? null : text;
   },
 });
 
@@ -46,6 +74,9 @@ export const apiSlice = createApi({
     'Notification',
     'Announcement',
     'Parent',
+    'FeePayment',
+    'StudentFee',
+    'FinancialReport',
     // The dashboard cards aggregate every entity below, so a row that moves a count must refetch them.
     'Dashboard'
   ],
@@ -220,6 +251,15 @@ export const apiSlice = createApi({
     getStudentProfile: builder.query({
       query: () => '/students/profile',
       providesTags: ['Student'],
+    }),
+
+    updateMyProfile: builder.mutation({
+      query: (profile) => ({
+        url: '/students/profile',
+        method: 'PUT',
+        body: profile,
+      }),
+      invalidatesTags: ['Student'],
     }),
     
     getMyClasses: builder.query({
@@ -427,6 +467,16 @@ export const apiSlice = createApi({
       invalidatesTags: ['Attendance'],
     }),
 
+    // POST answers 400 for a register that already exists, so corrections need the PUT by id.
+    updateAttendance: builder.mutation({
+      query: ({ id, ...attendance }) => ({
+        url: `/attendance/${id}`,
+        method: 'PUT',
+        body: attendance,
+      }),
+      invalidatesTags: ['Attendance'],
+    }),
+
     getStudentAttendanceRange: builder.query({
       query: ({ studentId, startDate, endDate }) => ({
         url: `/attendance/student/${studentId}/range`,
@@ -470,6 +520,36 @@ export const apiSlice = createApi({
     getStudentFeesByStudent: builder.query({
       query: (studentId) => `/student-fees/student/${studentId}`,
       providesTags: ['Fee'],
+    }),
+
+    // Fee ledger and collections (ACCOUNTANT portal)
+    getStudentFees: builder.query({
+      query: () => '/student-fees',
+      providesTags: ['StudentFee'],
+    }),
+
+    getFeePayments: builder.query({
+      query: () => '/fee-payments',
+      providesTags: ['FeePayment'],
+    }),
+
+    recordFeePayment: builder.mutation({
+      query: (payment) => ({
+        url: '/fee-payments',
+        method: 'POST',
+        body: payment,
+      }),
+      invalidatesTags: ['FeePayment', 'StudentFee', 'Fee', 'Dashboard'],
+    }),
+
+    getFinancialDashboard: builder.query({
+      query: () => '/financial-dashboard',
+      providesTags: ['Dashboard'],
+    }),
+
+    getFinancialReports: builder.query({
+      query: () => '/financial-reports',
+      providesTags: ['FinancialReport'],
     }),
 
     // Notification endpoints
@@ -662,6 +742,7 @@ export const {
   useUpdateStudentMutation,
   useToggleStudentMutation,
   useGetStudentProfileQuery,
+  useUpdateMyProfileMutation,
   useGetMyClassesQuery,
   useGetMySubjectsQuery,
   useGetMyAttendanceQuery,
@@ -706,6 +787,7 @@ export const {
   // Attendance
   useGetAttendanceQuery,
   useMarkAttendanceMutation,
+  useUpdateAttendanceMutation,
   useGetStudentAttendanceRangeQuery,
   
   // Fees
@@ -714,6 +796,11 @@ export const {
   useUpdateFeeMutation,
   useDeleteFeeMutation,
   useGetStudentFeesByStudentQuery,
+  useGetStudentFeesQuery,
+  useGetFeePaymentsQuery,
+  useRecordFeePaymentMutation,
+  useGetFinancialDashboardQuery,
+  useGetFinancialReportsQuery,
   
   // Notifications
   useGetNotificationsQuery,

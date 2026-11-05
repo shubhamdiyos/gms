@@ -43,55 +43,55 @@ public class AnnouncementController {
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getAllAnnouncements() {
         return announcementService.getAllAnnouncements();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<Announcement> getAnnouncementById(@PathVariable Integer id) {
         return announcementService.getAnnouncementById(id);
     }
 
     @GetMapping("/published")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getPublishedAnnouncements() {
         return announcementService.getPublishedAnnouncements();
     }
 
     @GetMapping("/target-audience/{targetAudience}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getAnnouncementsByTargetAudience(@PathVariable String targetAudience) {
         return announcementService.getAnnouncementsByTargetAudience(targetAudience);
     }
 
     @GetMapping("/type/{announcementType}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getAnnouncementsByType(@PathVariable String announcementType) {
         return announcementService.getAnnouncementsByType(announcementType);
     }
 
     @GetMapping("/category/{category}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getAnnouncementsByCategory(@PathVariable String category) {
         return announcementService.getAnnouncementsByCategory(category);
     }
 
     @GetMapping("/priority/{priority}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getAnnouncementsByPriority(@PathVariable String priority) {
         return announcementService.getAnnouncementsByPriority(priority);
     }
 
     @GetMapping("/active")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getActiveAnnouncements() {
         return announcementService.getActiveAnnouncements();
     }
 
     @GetMapping("/pinned")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER', 'STUDENT', 'PARENT')")
     public ResponseEntity<List<Announcement>> getPinnedAnnouncements() {
         return announcementService.getPinnedAnnouncements();
     }

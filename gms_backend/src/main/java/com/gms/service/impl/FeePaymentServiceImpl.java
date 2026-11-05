@@ -1,5 +1,6 @@
 package com.gms.service.impl;
 
+import com.gms.config.TenantContextAuditorAware;
 import com.gms.model.entity.FeePayment;
 import com.gms.model.entity.StudentFee;
 import com.gms.model.entity.School;
@@ -7,6 +8,8 @@ import com.gms.model.entity.User;
 import com.gms.model.request.FeePaymentRequest;
 import com.gms.model.response.FeePaymentResponse;
 import com.gms.repository.FeePaymentRepository;
+import com.gms.repository.StudentFeeRepository;
+import com.gms.repository.UserRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
@@ -17,112 +20,110 @@ import org.springframework.transaction.annotation.Transactional;
 import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.util.List;
+import java.util.Locale;
 
 @Service
 public class FeePaymentServiceImpl implements FeePaymentService {
 
     private final FeePaymentRepository feePaymentRepository;
-    private final StudentFeeService studentFeeService;
+    private final StudentFeeRepository studentFeeRepository;
     private final SchoolService schoolService;
     private final UserService userService;
+    private final UserRepository userRepository;
 
     public FeePaymentServiceImpl(FeePaymentRepository feePaymentRepository,
-                                StudentFeeService studentFeeService,
+                                StudentFeeRepository studentFeeRepository,
                                 SchoolService schoolService,
-                                UserService userService) {
+                                UserService userService,
+                                UserRepository userRepository) {
         this.feePaymentRepository = feePaymentRepository;
-        this.studentFeeService = studentFeeService;
+        this.studentFeeRepository = studentFeeRepository;
         this.schoolService = schoolService;
         this.userService = userService;
+        this.userRepository = userRepository;
     }
 
     @Transactional
     @Override
     public ResponseEntity<FeePaymentResponse> createFeePayment(FeePaymentRequest request) {
-        // Validate school exists
+        if (request.getAmount() == null || request.getAmount().signum() <= 0) {
+            throw new IllegalArgumentException("Payment amount must be greater than zero.");
+        }
+        if (request.getPaymentReference() == null || request.getPaymentReference().isBlank()) {
+            throw new IllegalArgumentException("Payment reference is required.");
+        }
+
         School school = schoolService.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
+        // BKL-08: attribute the payment to the account the verified token names, not to the employee
+        // pointer. An accountant may have a users row and no employees row at all, which made every
+        // payment they recorded answer 404 "Creator user not found".
+        User employeeCreator = userService.findByEmployee_Id().orElse(null);
+        User creator = TenantContextAuditorAware.currentAuditor(userRepository).orElse(employeeCreator);
+        if (creator == null) {
+            throw new EntityNotFoundException("Creator user not found");
+        }
 
-        // Validate creator exists
-        User creator = userService.findByEmployee_Id()
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
+        StudentFee studentFee = studentFeeRepository.findByIdForUpdate(
+                        request.getStudentFeeId(), TenantContext.schoolId())
+                .orElseThrow(() -> new EntityNotFoundException("Student fee not found"));
 
-        // Validate student fee exists and belongs to school
-        StudentFee studentFee = studentFeeService.findById(request.getStudentFeeId());
+        String paymentReference = request.getPaymentReference().trim();
+        if (feePaymentRepository.existsBySchool_IdAndPaymentReference(school.getId(), paymentReference)) {
+            throw new IllegalArgumentException("Payment reference already exists for this school.");
+        }
 
-        // Create fee payment
+        BigDecimal outstanding = studentFee.getTotalAmount().subtract(studentFee.getAmountPaid());
+        if (request.getAmount().compareTo(outstanding) > 0) {
+            throw new IllegalArgumentException("Payment amount exceeds the outstanding balance.");
+        }
+
         FeePayment feePayment = new FeePayment();
         feePayment.setSchool(school);
         feePayment.setStudentFee(studentFee);
         feePayment.setAmount(request.getAmount());
         feePayment.setPaymentDate(request.getPaymentDate());
-        feePayment.setPaymentMethod(request.getPaymentMethod());
+        feePayment.setPaymentMethod(request.getPaymentMethod().trim().toUpperCase(Locale.ROOT));
         feePayment.setTransactionId(request.getTransactionId());
         feePayment.setRemarks(request.getRemarks());
-        feePayment.setPaymentReference(request.getPaymentReference());
+        feePayment.setPaymentReference(paymentReference);
         feePayment.setBankName(request.getBankName());
         feePayment.setChequeNumber(request.getChequeNumber());
         feePayment.setStatus("SUCCESS");
         feePayment.setCreatedBy(creator);
         feePayment.setUpdatedBy(creator);
 
-        FeePayment savedFeePayment = feePaymentRepository.save(feePayment);
-
-        // Update student fee with payment information
-        updateStudentFeeWithPayment(studentFee, request.getAmount());
+        FeePayment savedFeePayment = feePaymentRepository.saveAndFlush(feePayment);
+        updateStudentFeeWithPayment(studentFee, request.getAmount(), request.getPaymentDate());
 
         return ResponseEntity.ok(mapToResponse(savedFeePayment));
     }
 
     @Override
     public ResponseEntity<FeePaymentResponse> updateFeePayment(Integer id, FeePaymentRequest request) {
-        // Validate fee payment exists
-        FeePayment feePayment = feePaymentRepository.findById(id)
+        feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
-
-        // Validate updater exists
-        User updater = userService.findByEmployee_Id()
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
-
-        // Update fee payment
-        feePayment.setAmount(request.getAmount());
-        feePayment.setPaymentDate(request.getPaymentDate());
-        feePayment.setPaymentMethod(request.getPaymentMethod());
-        feePayment.setTransactionId(request.getTransactionId());
-        feePayment.setRemarks(request.getRemarks());
-        feePayment.setPaymentReference(request.getPaymentReference());
-        feePayment.setBankName(request.getBankName());
-        feePayment.setChequeNumber(request.getChequeNumber());
-        feePayment.setStatus(request.getStatus());
-        feePayment.setUpdatedBy(updater);
-
-        FeePayment savedFeePayment = feePaymentRepository.save(feePayment);
-
-        return ResponseEntity.ok(mapToResponse(savedFeePayment));
+        throw new IllegalArgumentException(
+                "Recorded fee payments are immutable; a reversal workflow is required.");
     }
 
     @Override
     public ResponseEntity<?> deleteFeePayment(Integer id) {
-        // Validate fee payment exists
-        FeePayment feePayment = feePaymentRepository.findById(id)
+        feePaymentRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
-
-        // Validate updater exists
-        User updater = userService.findByEmployee_Id()
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
-
-        // Soft delete by setting status to CANCELLED
-        feePayment.setStatus("CANCELLED");
-        feePayment.setUpdatedBy(updater);
-
-        feePaymentRepository.save(feePayment);
-        return ResponseEntity.ok("Fee payment deleted successfully");
+        throw new IllegalArgumentException(
+                "Recorded fee payments are immutable; a reversal workflow is required.");
     }
 
     @Override
-    public ResponseEntity<List<FeePayment>> getAllFeePayments() {
-        List<FeePayment> feePayments = feePaymentRepository.findByStudentFee_Student_School_IdAndPaymentDateBetween(
-                TenantContext.schoolId(), LocalDate.now().minusYears(1), LocalDate.now());
+    @Transactional(readOnly = true)
+    public ResponseEntity<List<FeePaymentResponse>> getAllFeePayments() {
+        List<FeePaymentResponse> feePayments = feePaymentRepository
+                .findByStudentFee_Student_School_IdAndPaymentDateBetween(
+                        TenantContext.schoolId(), LocalDate.now().minusYears(1), LocalDate.now())
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(feePayments);
     }
 
@@ -157,20 +158,20 @@ public class FeePaymentServiceImpl implements FeePaymentService {
         return feePaymentRepository.getCountOfPaymentsBySchoolIdAndDate(TenantContext.schoolId(), paymentDate);
     }
 
-    private void updateStudentFeeWithPayment(StudentFee studentFee, BigDecimal paymentAmount) {
+    private void updateStudentFeeWithPayment(StudentFee studentFee, BigDecimal paymentAmount,
+                                             LocalDate paymentDate) {
         BigDecimal newAmountPaid = studentFee.getAmountPaid().add(paymentAmount);
         studentFee.setAmountPaid(newAmountPaid);
         studentFee.setBalanceAmount(studentFee.getTotalAmount().subtract(newAmountPaid));
-        studentFee.setLastPaymentDate(LocalDate.now());
-        
-        // Update status based on payment amount
-        if (newAmountPaid.compareTo(studentFee.getTotalAmount()) >= 0) {
+        studentFee.setLastPaymentDate(paymentDate);
+
+        if (newAmountPaid.compareTo(studentFee.getTotalAmount()) == 0) {
             studentFee.setStatus("PAID");
-        } else if (newAmountPaid.compareTo(BigDecimal.ZERO) > 0) {
+        } else {
             studentFee.setStatus("PARTIAL");
         }
-        
-        studentFeeService.save(studentFee);
+
+        studentFeeRepository.save(studentFee);
     }
 
     private FeePaymentResponse mapToResponse(FeePayment feePayment) {
@@ -181,6 +182,10 @@ public class FeePaymentServiceImpl implements FeePaymentService {
         response.setPaymentDate(feePayment.getPaymentDate());
         response.setPaymentMethod(feePayment.getPaymentMethod());
         response.setRemarks(feePayment.getRemarks());
+        response.setPaymentReference(feePayment.getPaymentReference());
+        response.setStatus(feePayment.getStatus());
+        response.setStudentName(feePayment.getStudentFee().getStudent().getFullName());
+        response.setFeeType(feePayment.getStudentFee().getFee().getFeeType());
         return response;
     }
 }

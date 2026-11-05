@@ -26,38 +26,38 @@ public class FinancialReportController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FinancialReportResponse> createFinancialReport(@Valid @RequestBody FinancialReportRequest request) {
         return financialReportService.createFinancialReport(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FinancialReportResponse> updateFinancialReport(@PathVariable Integer id,
                                                                      @Valid @RequestBody FinancialReportRequest request) {
         return financialReportService.updateFinancialReport(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteFinancialReport(@PathVariable Integer id) {
         return financialReportService.deleteFinancialReport(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FinancialReport>> getAllFinancialReports() {
         return financialReportService.getAllFinancialReports();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<FinancialReport> getFinancialReportById(@PathVariable Integer id) {
         return financialReportService.getFinancialReportById(id);
     }
 
     @GetMapping("/date-range")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FinancialReport>> getFinancialReportsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
@@ -65,7 +65,7 @@ public class FinancialReportController {
     }
 
     @GetMapping("/academic-year")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<FinancialReport>> getFinancialReportsByAcademicYear(@RequestParam String academicYear) {
         return financialReportService.getFinancialReportsByAcademicYear(academicYear);
     }

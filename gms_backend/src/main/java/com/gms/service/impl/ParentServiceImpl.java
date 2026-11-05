@@ -9,10 +9,10 @@ import com.gms.model.response.*;
 import com.gms.repository.ParentRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
+import com.gms.util.SecureCredentialGenerator;
 import com.gms.util.UsernameGenerator;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.beans.BeanUtils;
-import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
@@ -20,13 +20,19 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.Collections;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 @Service
 @Transactional
 public class ParentServiceImpl implements ParentService {
+
+    private static final Set<String> PARENT_VISIBLE_AUDIENCES = Set.of("ALL", "STUDENTS", "PARENTS");
 
     private final ParentRepository parentRepository;
     private final StudentService studentService;
@@ -85,14 +91,67 @@ public class ParentServiceImpl implements ParentService {
         return toResponse(parent);
     }
 
+    @Override
     public ResponseEntity<ParentResponse> update(ParentRequest request) {
-        // Parent update is handled differently, returning not implemented
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        if (request.getId() == null) {
+            return ResponseEntity.badRequest().build();
+        }
+
+        Parent parent = findParentForCurrentSchool(request.getId());
+        parentRepository.findByEmail(request.getEmail())
+                .filter(existing -> !existing.getId().equals(parent.getId()))
+                .ifPresent(existing -> {
+                    throw new IllegalArgumentException("A parent with this email already exists.");
+                });
+        if (!parent.getEmail().equals(request.getEmail()) && userService.existsByEmail(request.getEmail())) {
+            throw new IllegalArgumentException("A user with this email already exists.");
+        }
+
+        List<Student> students = request.getStudentIds().stream()
+                .distinct()
+                .map(id -> studentService.findById(id)
+                        .orElseThrow(() -> new EntityNotFoundException("Student not found with id: " + id)))
+                .collect(Collectors.toList());
+
+        parent.setFirstName(request.getFirstName());
+        parent.setLastName(request.getLastName());
+        parent.setEmail(request.getEmail());
+        parent.setPhoneNumber(request.getPhoneNumber());
+        parent.setStudents(students);
+
+        User user = parent.getUser();
+        if (user != null) {
+            user.setFullName(parent.getFullName());
+            user.setEmail(parent.getEmail());
+            user.setPhoneNumber(parent.getPhoneNumber());
+            userService.save(user);
+        }
+
+        return ResponseEntity.ok(toResponse(parentRepository.save(parent)));
     }
 
+    @Override
     public ResponseEntity<?> toggleParent(Integer id, Boolean isActive) {
-        // Parent doesn't have a status field, returning not implemented
-        return ResponseEntity.status(HttpStatus.NOT_IMPLEMENTED).build();
+        Parent parent = findParentForCurrentSchool(id);
+        User user = parent.getUser();
+        if (user == null) {
+            throw new NotFoundException("USER_NOT_FOUND", "Parent login account not found");
+        }
+
+        user.setEnabled(isActive);
+        user.setUserStatus(isActive ? "1" : "0");
+        userService.save(user);
+        return ResponseEntity.ok(toResponse(parent));
+    }
+
+    private Parent findParentForCurrentSchool(Integer id) {
+        Parent parent = parentRepository.findBySchoolIdAndId(TenantContext.schoolId(), id)
+                .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
+        if (parent.getStudents().stream()
+                .anyMatch(student -> !student.getSchoolId().equals(TenantContext.schoolId()))) {
+            throw new TenantAccessDeniedException("Parent does not belong to this school");
+        }
+        return parent;
     }
 
     @Override
@@ -125,9 +184,12 @@ public class ParentServiceImpl implements ParentService {
 
         Parent savedParent = parentRepository.save(parent);
 
-        createUserForParent(savedParent);
+        // ACD-13-02: generate a unique secure temporary password instead of a shared hardcoded one.
+        String temporaryPassword = createUserForParent(savedParent);
 
-        return ResponseEntity.ok(toResponse(savedParent));
+        ParentResponse response = toResponse(savedParent);
+        response.setTemporaryPassword(temporaryPassword);
+        return ResponseEntity.ok(response);
     }
 
     @Override
@@ -179,19 +241,16 @@ public class ParentServiceImpl implements ParentService {
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getChildAttendance(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-
-        // Use AttendanceService to get attendance for the student
-        return attendanceService.getAttendanceByStudentAndDateRange(studentId, LocalDate.now().minusMonths(1), LocalDate.now());
+        Student student = validateParentAndChild(username, studentId);
+        return attendanceService.getAttendanceByStudentAndDateRange(
+                student.getId(), LocalDate.now().minusMonths(1), LocalDate.now());
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<ResultResponse> getChildResults(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-        
-        // Get all results for this student across all exams
-        ResponseEntity<List<Result>> resultResponse = resultService.getResultsForStudent(studentId);
+        Student student = validateParentAndChild(username, studentId);
+        ResponseEntity<List<Result>> resultResponse = resultService.getResultsForStudent(student.getId());
         if (resultResponse.getBody() != null) {
             return resultResponse.getBody().stream()
                     .map(this::mapResultToResponse)
@@ -203,10 +262,8 @@ public class ParentServiceImpl implements ParentService {
     @Override
     @Transactional(readOnly = true)
     public List<StudentFeeResponse> getChildFees(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-        
-        // Get fees for the student
-        ResponseEntity<List<StudentFee>> feeResponse = studentFeeService.getStudentFeesByStudent(studentId);
+        Student student = validateParentAndChild(username, studentId);
+        ResponseEntity<List<StudentFee>> feeResponse = studentFeeService.getStudentFeesByStudent(student.getId());
         if (feeResponse.getBody() != null) {
             return feeResponse.getBody().stream()
                     .map(this::mapStudentFeeToResponse)
@@ -218,28 +275,45 @@ public class ParentServiceImpl implements ParentService {
     @Override
     @Transactional(readOnly = true)
     public List<TimetableResponse> getChildTimetable(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-        
-        // TODO: Implement proper timetable retrieval when timetable service methods are available
-        return Collections.emptyList();
+        validateParentAndChild(username, studentId);
+        try {
+            return List.of(timetableService.getTimetableForStudent(studentId));
+        } catch (NotFoundException ex) {
+            if ("TIMETABLE_NOT_FOUND".equals(ex.getCode())) {
+                return List.of();
+            }
+            throw ex;
+        }
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<AnnouncementResponse> getChildAnnouncements(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-        
-        // TODO: Implement proper announcement retrieval when announcement service methods are available
-        return Collections.emptyList();
+        validateParentAndChild(username, studentId);
+        List<Announcement> announcements = announcementService.getActiveAnnouncements().getBody();
+        if (announcements == null) {
+            return List.of();
+        }
+        return announcements.stream()
+                .filter(announcement -> PARENT_VISIBLE_AUDIENCES.contains(announcement.getTargetAudience()))
+                .map(this::mapAnnouncementToResponse)
+                .toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<SubjectResponse> getChildSubjects(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-        
-        // TODO: Implement proper subject retrieval when subject service methods are available
-        return Collections.emptyList();
+        Student student = validateParentAndChild(username, studentId);
+        if (student.getClassroom() == null) {
+            return List.of();
+        }
+        return teacherAssignmentService.getAssignmentsByClassroom(student.getClassroom().getId()).stream()
+                .map(TeacherAssignmentResponse::getSubject)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(SubjectResponse::getId, Function.identity(),
+                        (first, duplicate) -> first, LinkedHashMap::new))
+                .values().stream()
+                .toList();
     }
 
     @Override
@@ -248,25 +322,36 @@ public class ParentServiceImpl implements ParentService {
         User user = userService.findByUsername(username)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 
-        Parent parent = user.getParent();
-        if (parent == null) {
+        if (user.getParent() == null) {
             throw new NotFoundException("PARENT_NOT_FOUND", "Parent profile not found for this user");
         }
 
-        // TODO: Implement proper notification retrieval when notification service methods are available
-        return Collections.emptyList();
+        List<Notification> notifications = notificationService.getAllNotifications().getBody();
+        if (notifications == null) {
+            return List.of();
+        }
+        return notifications.stream()
+                .map(this::mapNotificationToResponse)
+                .toList();
     }
 
     @Override
     @Transactional(readOnly = true)
     public List<EmployeeResponse> getChildTeachers(String username, Integer studentId) {
-        Parent parent = validateParentAndChild(username, studentId);
-        
-        // TODO: Implement proper teacher assignment retrieval when teacher assignment service methods are available
-        return Collections.emptyList();
+        Student student = validateParentAndChild(username, studentId);
+        if (student.getClassroom() == null) {
+            return List.of();
+        }
+        return teacherAssignmentService.getAssignmentsByClassroom(student.getClassroom().getId()).stream()
+                .map(TeacherAssignmentResponse::getTeacher)
+                .filter(Objects::nonNull)
+                .collect(Collectors.toMap(EmployeeResponse::getId, Function.identity(),
+                        (first, duplicate) -> first, LinkedHashMap::new))
+                .values().stream()
+                .toList();
     }
 
-    private Parent validateParentAndChild(String username, Integer studentId) {
+    private Student validateParentAndChild(String username, Integer studentId) {
         User user = userService.findByUsername(username)
                 .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
 
@@ -275,28 +360,32 @@ public class ParentServiceImpl implements ParentService {
             throw new NotFoundException("PARENT_NOT_FOUND", "Parent profile not found for this user");
         }
 
-        boolean isParentOfStudent = parent.getStudents().stream()
-                .anyMatch(student -> student.getId().equals(studentId));
-        
-        if (!isParentOfStudent) {
-            throw new TenantAccessDeniedException("You are not authorized to access this student's information");
-        }
-
-        return parent;
+        return parent.getStudents().stream()
+                .filter(student -> student.getId().equals(studentId))
+                .findFirst()
+                .orElseThrow(() -> new TenantAccessDeniedException(
+                        "You are not authorized to access this student's information"));
     }
 
-    private void createUserForParent(Parent parent) {
+    /**
+     * ACD-13-02: generates a unique secure temporary password for the parent account.
+     *
+     * @return the generated plaintext temporary password (returned once to the admin for relay)
+     */
+    private String createUserForParent(Parent parent) {
         if (userService.existsByEmail(parent.getEmail())) {
             throw new IllegalStateException("A user with this email already exists.");
         }
 
+        String temporaryPassword = SecureCredentialGenerator.generate();
+
         User user = new User();
-        user.setSchool(parent.getStudents().get(0).getSchool()); // Assuming all students are in the same school
+        user.setSchool(parent.getStudents().get(0).getSchool());
         user.setParent(parent);
         user.setFullName(parent.getFirstName() + " " + parent.getLastName());
         user.setEmail(parent.getEmail());
         user.setUsername(UsernameGenerator.generateUsername(parent.getFirstName(), parent.getLastName(), userService));
-        user.setPassword(passwordEncoder.encode("welcome123")); // Default temporary password
+        user.setPassword(passwordEncoder.encode(temporaryPassword));
         user.setRoles(Collections.singleton(RoleEnum.PARENT.name()));
         user.setRequirePasswordChange(true);
         user.setEnabled(true);
@@ -305,6 +394,7 @@ public class ParentServiceImpl implements ParentService {
         
         parent.setUser(savedUser);
         parentRepository.save(parent);
+        return temporaryPassword;
     }
 
     // Service-to-service communication methods
@@ -335,7 +425,9 @@ public class ParentServiceImpl implements ParentService {
                 parent.getLastName(),
                 parent.getEmail(),
                 parent.getPhoneNumber(),
-                studentResponses
+                studentResponses,
+                null,
+                parent.getUser() != null ? parent.getUser().isEnabled() : null
         );
     }
 
@@ -352,7 +444,8 @@ public class ParentServiceImpl implements ParentService {
                 s.getPhoneNumber(),
                 s.getDateOfBirth(),
                 s.getGender(),
-                s.getStatus()
+                s.getStatus(),
+                null
         );
     }
 
@@ -372,12 +465,44 @@ public class ParentServiceImpl implements ParentService {
     }
 
     private StudentFeeResponse mapStudentFeeToResponse(StudentFee studentFee) {
-        StudentFeeResponse response = new StudentFeeResponse();
-        response.setId(studentFee.getId());
-        response.setStudentId(studentFee.getStudent().getId());
-        response.setFeeId(studentFee.getFee().getId());
-        response.setStatus(studentFee.getStatus());
-        response.setAmountPaid(studentFee.getAmountPaid());
+        return StudentFeeResponseMapper.toResponse(studentFee);
+    }
+
+    private AnnouncementResponse mapAnnouncementToResponse(Announcement announcement) {
+        AnnouncementResponse response = new AnnouncementResponse();
+        response.setId(announcement.getId());
+        response.setSchoolId(announcement.getSchool().getId());
+        response.setTitle(announcement.getTitle());
+        response.setContent(announcement.getContent());
+        response.setAnnouncementType(announcement.getAnnouncementType());
+        response.setTargetAudience(announcement.getTargetAudience());
+        response.setPublishDate(announcement.getPublishDate());
+        response.setExpiryDate(announcement.getExpiryDate());
+        response.setPriority(announcement.getPriority());
+        response.setCategory(announcement.getCategory());
+        response.setIsPinned(announcement.getIsPinned());
+        return response;
+    }
+
+    private NotificationResponse mapNotificationToResponse(Notification notification) {
+        NotificationResponse response = new NotificationResponse();
+        response.setId(notification.getId());
+        response.setSchoolId(notification.getSchool().getId());
+        response.setTitle(notification.getTitle());
+        response.setMessage(notification.getMessage());
+        response.setNotificationType(notification.getNotificationType());
+        response.setChannel(notification.getChannel());
+        response.setPriority(notification.getPriority());
+        response.setRecipientType(notification.getRecipientType());
+        response.setScheduledAt(notification.getScheduledAt());
+        response.setSentAt(notification.getSentAt());
+        response.setDeliveryStatus(notification.getDeliveryStatus());
+        response.setReadStatus(notification.getReadStatus());
+        response.setRelatedEntityType(notification.getRelatedEntityType());
+        response.setRelatedEntityId(notification.getRelatedEntityId());
+        response.setIsImportant(notification.getIsImportant());
+        response.setExpiresAt(notification.getExpiresAt());
+        response.setClickActionUrl(notification.getClickActionUrl());
         return response;
     }
 }

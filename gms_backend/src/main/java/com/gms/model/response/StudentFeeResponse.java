@@ -6,6 +6,7 @@ import lombok.NoArgsConstructor;
 import lombok.Setter;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
 
 @Getter
 @Setter
@@ -17,4 +18,12 @@ public class StudentFeeResponse {
     private Integer feeId;
     private String status;
     private BigDecimal amountPaid;
+    private BigDecimal totalAmount;
+    private BigDecimal balanceAmount;
+    private LocalDate dueDate;
+    private LocalDate lastPaymentDate;
+    private String studentName;
+    private String feeType;
+    private String description;
+    private String academicYear;
 }

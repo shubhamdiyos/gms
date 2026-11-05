@@ -12,6 +12,8 @@ import lombok.Setter;
 @AllArgsConstructor
 public class TimetableSlotResponse {
 
+    /** Attendance rows reference the slot, so a client that shows a schedule has to be able to name one. */
+    private Integer id;
     private String dayOfWeek;
     private Integer period;
     private TeacherAssignmentResponse assignment;

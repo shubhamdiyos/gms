@@ -27,44 +27,44 @@ public class FeeController {
     }
 
     @PostMapping
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FeeResponse> createFee(@Valid @RequestBody FeeRequest request) {
         return feeService.createFee(request);
     }
 
     @PutMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<FeeResponse> updateFee(@PathVariable Integer id,
                                                 @Valid @RequestBody FeeRequest request) {
         return feeService.updateFee(id, request);
     }
 
     @DeleteMapping("/{id}")
-    @PreAuthorize("hasAuthority('ADMIN')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN')")
     public ResponseEntity<?> deleteFee(@PathVariable Integer id) {
         return feeService.deleteFee(id);
     }
 
     @GetMapping
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Fee>> getAllFees() {
         return feeService.getAllFees();
     }
 
     @GetMapping("/{id}")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<Fee> getFeeById(@PathVariable Integer id) {
         return feeService.getFeeById(id);
     }
 
     @GetMapping("/academic-year")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<List<Fee>> getFeesByAcademicYear(@RequestParam String academicYear) {
         return feeService.getFeesByAcademicYear(academicYear);
     }
 
     @GetMapping("/total-amount")
-    @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'ACCOUNTANT')")
     public ResponseEntity<BigDecimal> getTotalFeeAmountBySchoolIdAndAcademicYear(@RequestParam String academicYear) {
         BigDecimal totalAmount = feeService.getTotalFeeAmountBySchoolIdAndAcademicYear(academicYear);
         return ResponseEntity.ok(totalAmount);
