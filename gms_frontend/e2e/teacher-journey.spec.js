@@ -18,11 +18,12 @@ import {
  * `requirePasswordChange`, so the browser journey skips the rotation screen and goes straight
  * to the dashboard.
  *
- * The attendance page is the one feature the teacher owns. The Save button is disabled in the
- * shipped build — `POST /attendance/bulk` requires a `timetableSlotId` the UI cannot supply —
- * so the journey proves what the page *does* reach: the class dropdown populates from the
- * teacher's assignments, and selecting a class lists its students. The console guard at the
- * end is the mandate's "no browser-console errors on the core journey" written as an assertion.
+ * The attendance page is the one feature the teacher owns. It opens on the Daily Register:
+ * one mark per student for the whole day, no timetable slot required, everyone defaulted to
+ * PRESENT. The journey proves the full loop: the class dropdown populates from the teacher's
+ * assignments, selecting a class lists its students, the register saves, and the saved state
+ * comes back. The console guard at the end is the mandate's "no browser-console errors on
+ * the core journey" written as an assertion.
  *
  * One tenant per test, each labelled E/F/G/H to keep school codes and surnames distinct. The
  * teacher is assigned to the tenant's own classroom; the pupil registered for the assignment
@@ -135,10 +136,16 @@ test('a provisioned teacher reaches its dashboard and loads the attendance page'
   // The student row is on screen. The roster renders each student's name in a table cell.
   await expect(page.getByText(tenant.pupilSurname)).toBeVisible();
 
-  // The Save button is disabled — the page documents why in a tooltip and an alert. The
-  // journey proves the page loads and renders, not that it can submit (it cannot, by design).
+  // The Daily Register defaults every student to PRESENT, so with a pupil on the roster the
+  // register has something to save the moment the class is chosen — no timetable period is
+  // involved. Saving writes the daily record; the roster then shows it as saved and the Save
+  // button settles back to disabled because nothing is left pending.
   const saveButton = page.getByRole('button', { name: 'Save Attendance' });
   await expect(saveButton).toBeVisible();
+  await expect(saveButton).toBeEnabled();
+  await saveButton.click();
+  await expect(page.getByText(/attendance records? saved\./)).toBeVisible();
+  await expect(page.getByText('PRESENT (saved)')).toBeVisible();
   await expect(saveButton).toBeDisabled();
 
   expectCleanConsole(consoleErrors);

@@ -13,8 +13,12 @@ import java.util.List;
 @Setter
 public class BulkAttendanceRequest {
 
-    @NotNull
+    // Exactly one register scope per request, enforced in the service: a timetableSlotId
+    // records a per-period register; a classroomId with no slot records the daily register
+    // (V13). Both null — or both set — is a bad request.
     private Integer timetableSlotId;
+
+    private Integer classroomId;
 
     @NotNull
     private LocalDate date;
