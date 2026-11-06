@@ -357,7 +357,8 @@ echo
 echo "=== 4. No tenant table holds a row without a tenant ==="
 if have_db; then
   TABLES=$(sql "SELECT count(*) FROM information_schema.columns WHERE table_schema='public' AND column_name='school_id' AND data_type='integer'")
-  check "the database carries the tenant on 35 tables" "35" "$(printf '%s' "$TABLES" | tr -d '[:space:]')"
+  # 34, not 35: V12 dropped payment_gateways with the removed gateway feature (SEC-12).
+  check "the database carries the tenant on 34 tables" "34" "$(printf '%s' "$TABLES" | tr -d '[:space:]')"
   UNION=$(sql "SELECT string_agg(format('SELECT count(*) FROM %I WHERE school_id IS NULL', table_name), ' UNION ALL ') FROM information_schema.columns WHERE table_schema='public' AND column_name='school_id' AND data_type='integer'")
   NULLS=$(sql "$UNION" | awk '{s+=$1} END {print s+0}')
   check "rows with a NULL tenant, in any tenant table, platform-wide" "0" "$(printf '%s' "$NULLS" | tr -d '[:space:]')"
