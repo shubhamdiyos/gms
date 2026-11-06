@@ -30,10 +30,12 @@ public interface AttendanceRepository extends TenantScopedRepository<Attendance>
      */
     @Query("""
             SELECT a FROM Attendance a
+            LEFT JOIN a.timetableSlot ts
+            LEFT JOIN ts.timetable tt
             WHERE a.student.school.id = :schoolId AND a.date = :date
               AND (
-                (a.timetableSlot IS NOT NULL AND a.timetableSlot.timetable.classroom.id = :classroomId)
-                OR (a.timetableSlot IS NULL AND a.student.classroom.id = :classroomId)
+                (ts IS NOT NULL AND tt.classroom.id = :classroomId)
+                OR (ts IS NULL AND a.student.classroom.id = :classroomId)
               )
             """)
     List<Attendance> findByClassroomAndDate(@Param("schoolId") Integer schoolId,
