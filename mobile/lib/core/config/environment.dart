@@ -66,13 +66,13 @@ class EnvironmentConfig {
       case Environment.production:
         return EnvironmentConfig(
           environment: env,
-          apiBaseUrl: _overrideOr('https://api.gms.com'),
+          apiBaseUrl: _requireOverride(env),
           enableLogging: false,
         );
       case Environment.staging:
         return EnvironmentConfig(
           environment: env,
-          apiBaseUrl: _overrideOr('https://staging-api.gms.com'),
+          apiBaseUrl: _requireOverride(env),
           enableLogging: true,
         );
       case Environment.development:
@@ -87,6 +87,17 @@ class EnvironmentConfig {
   static String _overrideOr(String fallback) {
     final override = _baseUrlOverride.trim();
     return override.isEmpty ? fallback : override;
+  }
+
+  static String _requireOverride(Environment env) {
+    final override = _baseUrlOverride.trim();
+    if (override.isEmpty) {
+      throw StateError(
+        'API_BASE_URL must be provided with --dart-define for '
+        '${env.name} builds; refusing to fall back to a placeholder host.',
+      );
+    }
+    return override;
   }
 
   /// The host machine as seen from the platform running this build.

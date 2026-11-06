@@ -80,6 +80,16 @@ const NAV_SECTIONS = {
       path: ROUTES.ADMIN.EMPLOYEES,
     },
     {
+      text: 'Parents',
+      icon: <Groups />,
+      path: ROUTES.ADMIN.PARENTS,
+    },
+    {
+      text: 'User Accounts',
+      icon: <Person />,
+      path: ROUTES.ADMIN.USERS,
+    },
+    {
       text: 'Classrooms',
       icon: <Class />,
       path: ROUTES.ADMIN.CLASSROOMS,
@@ -103,6 +113,16 @@ const NAV_SECTIONS = {
       text: 'Exams',
       icon: <Assignment />,
       path: ROUTES.ADMIN.EXAMS,
+    },
+    {
+      text: 'Results',
+      icon: <Grade />,
+      path: ROUTES.ADMIN.RESULTS,
+    },
+    {
+      text: 'Reports',
+      icon: <BarChart />,
+      path: ROUTES.ADMIN.REPORTS,
     },
     {
       text: 'Announcements',
@@ -220,7 +240,7 @@ const NAV_SECTIONS = {
   ],
 };
 
-const Sidebar = () => {
+const Sidebar = ({ onNavigate }) => {
   const location = useLocation();
   const navigate = useNavigate();
   const { user, getUserRole, hasRole } = useAuth();
@@ -246,6 +266,7 @@ const Sidebar = () => {
 
   const handleNavigation = (path) => {
     navigate(path);
+    onNavigate?.();
   };
 
   const getRoleColor = (role) => {

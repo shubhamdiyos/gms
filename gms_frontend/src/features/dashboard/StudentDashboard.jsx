@@ -12,6 +12,7 @@ import {
   useGetMyFeesQuery,
   useGetMyTimetableQuery,
 } from '../../store/api/apiSlice';
+import AnnouncementsPanel from '../../components/common/AnnouncementsPanel';
 
 const StatCard = ({ title, value, icon, color, subtitle }) => (
   <Card sx={{ height: '100%' }}>
@@ -288,6 +289,10 @@ const StudentDashboard = () => {
           </Paper>
         </Grid>
       </Grid>
+
+      <Box sx={{ mt: 3 }}>
+        <AnnouncementsPanel audience="STUDENTS" />
+      </Box>
     </Box>
   );
 };

@@ -54,6 +54,36 @@ const realBaseQuery = fetchBaseQuery({
   },
 });
 
+// A 401 on an authenticated call means the session is gone — the cookie was cleared, the token
+// expired, or the backend restarted and its signing key changed. Without this the SPA keeps the
+// current route, every query renders its failure state (or a "Loading…" that never resolves) and
+// the sidebar empties; the caller has no way to recover except knowing to sign out by hand.
+//
+// This lives in middleware rather than a wrapper around `fetchBaseQuery`, so the base query keeps
+// returning their results straight to RTK Query's internal thunk and nothing can swallow a response.
+//
+// Login and the CSRF bootstrap rightly answer 401 for a bad credential, so they are exempt — both
+// run through axios (authService), not RTK Query, so they never reach this listener. The one
+// remaining RTK mutation is change-password, where a 401 really does mean the session is gone.
+const isSessionExpiredAction = (action) =>
+  (action.type === 'api/executeQuery/rejected' || action.type === 'api/executeMutation/rejected') &&
+  action.payload?.status === 401;
+
+// A page load fires several queries at once, so every one of them would ask for the same
+// navigation; the first wins and the rest are dropped.
+let redirectingToLogin = false;
+
+export const sessionExpiryMiddleware = () => (next) => (action) => {
+  if (isSessionExpiredAction(action)) {
+    localStorage.removeItem('gms_user');
+    if (!redirectingToLogin && window.location.pathname !== '/login') {
+      redirectingToLogin = true;
+      window.location.assign('/login');
+    }
+  }
+  return next(action);
+};
+
 export const apiSlice = createApi({
   reducerPath: 'api',
   // When VITE_MOCK_AUTH=true → use in-memory mock; otherwise → real HTTP
@@ -77,6 +107,8 @@ export const apiSlice = createApi({
     'FeePayment',
     'StudentFee',
     'FinancialReport',
+    'TeacherAssignment',
+    'Timetable',
     // The dashboard cards aggregate every entity below, so a row that moves a count must refetch them.
     'Dashboard'
   ],
@@ -314,6 +346,22 @@ export const apiSlice = createApi({
       invalidatesTags: ['Employee', 'Dashboard'],
     }),
 
+    // User accounts (ADMIN/SUPERADMIN). The admin chooses the first password here; the backend
+    // flags the account requirePasswordChange so the real sign-in rotates it.
+    getUsers: builder.query({
+      query: () => '/users',
+      providesTags: ['User'],
+    }),
+
+    createUser: builder.mutation({
+      query: (user) => ({
+        url: '/users/create',
+        method: 'POST',
+        body: user,
+      }),
+      invalidatesTags: ['User', 'Dashboard'],
+    }),
+
     // Teacher role-specific endpoints
     getTeacherProfile: builder.query({
       query: () => '/teachers/profile',
@@ -327,7 +375,72 @@ export const apiSlice = createApi({
       query: () => '/teachers/students',
     }),
 
+    // Scored-paper count is needed by the dashboard tile; the server computes it over the teacher's
+    // current-year assignments so the tile never guesses from a partial client-side list.
+    getTeacherPendingGrades: builder.query({
+      query: () => '/teachers/pending-grades',
+      providesTags: ['Result'],
+    }),
+
+    // Teaching roster: which teacher takes which subject in a classroom. A timetable slot can only
+    // point at an assignment, and teacher attendance is driven by those slots, so this is the root
+    // of the teacher workflow — without it the teacher portal has no classes at all.
+    getClassroomAssignments: builder.query({
+      query: (classroomId) => `/teacher-assignments/classroom/${classroomId}`,
+      providesTags: ['TeacherAssignment'],
+    }),
+
+    createTeacherAssignment: builder.mutation({
+      query: (assignment) => ({
+        url: '/teacher-assignments',
+        method: 'POST',
+        body: assignment,
+      }),
+      invalidatesTags: ['TeacherAssignment'],
+    }),
+
+    deleteTeacherAssignment: builder.mutation({
+      query: (id) => ({
+        url: `/teacher-assignments/${id}`,
+        method: 'DELETE',
+      }),
+      invalidatesTags: ['TeacherAssignment', 'Timetable'],
+    }),
+
+    getClassroomTimetable: builder.query({
+      query: (classroomId) => `/timetables/classroom/${classroomId}`,
+      providesTags: ['Timetable'],
+    }),
+
+    saveClassroomTimetable: builder.mutation({
+      query: (timetable) => ({
+        url: '/timetables',
+        method: 'POST',
+        body: timetable,
+      }),
+      invalidatesTags: ['Timetable'],
+    }),
+
     // Parents
+    /** Every parent of the caller's school, with their children attached (admin read). */
+    getParents: builder.query({
+      query: () => '/parents',
+      providesTags: ['Parent'],
+    }),
+
+    /**
+     * Creates the parent record and a PARENT login in one transaction. The response carries the
+     * generated username and one-time temporary password; neither can be read back later.
+     */
+    createParent: builder.mutation({
+      query: (parent) => ({
+        url: '/parents/create',
+        method: 'POST',
+        body: parent,
+      }),
+      invalidatesTags: ['Parent', 'Dashboard'],
+    }),
+
     getParentProfile: builder.query({
       query: () => '/parents/profile',
       providesTags: ['Parent'],
@@ -528,6 +641,17 @@ export const apiSlice = createApi({
       providesTags: ['StudentFee'],
     }),
 
+    // Bills a fee structure to one student. Only ADMIN/SUPERADMIN may call this; the accountant
+    // records payments against the rows it produces.
+    createStudentFee: builder.mutation({
+      query: (studentFee) => ({
+        url: '/student-fees',
+        method: 'POST',
+        body: studentFee,
+      }),
+      invalidatesTags: ['StudentFee', 'Dashboard'],
+    }),
+
     getFeePayments: builder.query({
       query: () => '/fee-payments',
       providesTags: ['FeePayment'],
@@ -552,6 +676,15 @@ export const apiSlice = createApi({
       providesTags: ['FinancialReport'],
     }),
 
+    createFinancialReport: builder.mutation({
+      query: (report) => ({
+        url: '/financial-reports',
+        method: 'POST',
+        body: report,
+      }),
+      invalidatesTags: ['FinancialReport'],
+    }),
+
     // Notification endpoints
     getNotifications: builder.query({
       query: () => '/notifications',
@@ -569,6 +702,12 @@ export const apiSlice = createApi({
     // Announcement endpoints
     getAnnouncements: builder.query({
       query: () => '/announcements',
+      providesTags: ['Announcement'],
+    }),
+
+    // Portals read only what has been published; the full list is an admin view.
+    getPublishedAnnouncements: builder.query({
+      query: () => '/announcements/published',
       providesTags: ['Announcement'],
     }),
     
@@ -716,6 +855,27 @@ export const apiSlice = createApi({
       query: (studentId) => `/results/student/${studentId}`,
       providesTags: ['Result'],
     }),
+
+    // Exam subjects are the unit a pupil is registered for and scored against. The exams list omits
+    // them, so grade entry reads this endpoint for the chosen exam.
+    getExamSubjects: builder.query({
+      query: (examId) => `/exams/${examId}/subjects`,
+      providesTags: ['Exam'],
+    }),
+
+    registerStudentForExam: builder.mutation({
+      query: (registration) => ({
+        url: '/student-exams',
+        method: 'POST',
+        body: registration,
+      }),
+      invalidatesTags: ['Result'],
+    }),
+
+    getExamsForStudent: builder.query({
+      query: (studentId) => `/student-exams/student/${studentId}`,
+      providesTags: ['Result'],
+    }),
   }),
 });
 
@@ -753,13 +913,20 @@ export const {
   useGetEmployeesQuery,
   useCreateEmployeeMutation,
   useUpdateEmployeeMutation,
+
+  // User accounts
+  useGetUsersQuery,
+  useCreateUserMutation,
   
   // Teachers
   useGetTeacherProfileQuery,
   useGetTeacherClassesQuery,
   useGetTeacherStudentsQuery,
+  useGetTeacherPendingGradesQuery,
   
   // Parents
+  useGetParentsQuery,
+  useCreateParentMutation,
   useGetParentProfileQuery,
   useGetParentChildrenQuery,
   useGetChildAttendanceQuery,
@@ -797,10 +964,12 @@ export const {
   useDeleteFeeMutation,
   useGetStudentFeesByStudentQuery,
   useGetStudentFeesQuery,
+  useCreateStudentFeeMutation,
   useGetFeePaymentsQuery,
   useRecordFeePaymentMutation,
   useGetFinancialDashboardQuery,
   useGetFinancialReportsQuery,
+  useCreateFinancialReportMutation,
   
   // Notifications
   useGetNotificationsQuery,
@@ -808,6 +977,7 @@ export const {
   
   // Announcements
   useGetAnnouncementsQuery,
+  useGetPublishedAnnouncementsQuery,
   useCreateAnnouncementMutation,
   useUpdateAnnouncementMutation,
   useDeleteAnnouncementMutation,
@@ -821,6 +991,13 @@ export const {
   // Timetable
   useGetTeacherTimetableQuery,
   useGetMyTimetableQuery,
+  useGetClassroomTimetableQuery,
+  useSaveClassroomTimetableMutation,
+
+  // Teaching roster
+  useGetClassroomAssignmentsQuery,
+  useCreateTeacherAssignmentMutation,
+  useDeleteTeacherAssignmentMutation,
   
   // Exams
   useGetExamsQuery,
@@ -828,6 +1005,7 @@ export const {
   useUpdateExamMutation,
   useDeleteExamMutation,
   useGetExamsByAcademicYearQuery,
+  useGetExamSubjectsQuery,
   
   // Results
   useRecordResultMutation,
@@ -835,4 +1013,6 @@ export const {
   useDeleteResultMutation,
   useGetResultsForStudentExamQuery,
   useGetResultsForStudentQuery,
+  useRegisterStudentForExamMutation,
+  useGetExamsForStudentQuery,
 } = apiSlice;

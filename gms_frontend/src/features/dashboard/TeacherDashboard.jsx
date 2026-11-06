@@ -11,7 +11,9 @@ import {
   useGetTeacherClassesQuery,
   useGetTeacherStudentsQuery,
   useGetTeacherTimetableQuery,
+  useGetTeacherPendingGradesQuery,
 } from '../../store/api/apiSlice';
+import AnnouncementsPanel from '../../components/common/AnnouncementsPanel';
 
 const StatCard = ({ title, value, icon, color, subtitle }) => (
   <Card sx={{ height: '100%' }}>
@@ -62,6 +64,11 @@ const TeacherDashboard = () => {
   } = useGetTeacherStudentsQuery();
   const { data: timetable, isLoading: timetableLoading, error: timetableError } =
     useGetTeacherTimetableQuery();
+  const {
+    data: pendingGrades,
+    isLoading: pendingLoading,
+    error: pendingError,
+  } = useGetTeacherPendingGradesQuery();
 
   const classList = Array.isArray(classes) ? classes : [];
   const studentList = Array.isArray(students) ? students : [];
@@ -105,11 +112,17 @@ const TeacherDashboard = () => {
       color: '#388e3c',
     },
     {
+      ...metric(
+        pendingLoading,
+        pendingError,
+        pendingGrades ?? 0,
+        pendingGrades > 0
+          ? 'Students with unrecorded results'
+          : 'All results recorded'
+      ),
       title: 'Pending Grades',
-      value: '—',
       icon: <Grade />,
       color: '#f57c00',
-      subtitle: 'Awaiting result aggregate',
     },
     {
       ...(timetableError
@@ -239,6 +252,10 @@ const TeacherDashboard = () => {
           </Paper>
         </Grid>
       </Grid>
+
+      <Box sx={{ mt: 3 }}>
+        <AnnouncementsPanel audience="TEACHERS" />
+      </Box>
     </Box>
   );
 };

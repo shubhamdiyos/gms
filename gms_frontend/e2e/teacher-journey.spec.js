@@ -120,7 +120,9 @@ test('a provisioned teacher reaches its dashboard and loads the attendance page'
   // Navigate to the attendance page via the sidebar.
   await page.getByRole('listitem').filter({ hasText: 'Attendance' }).click();
   await expect(page).toHaveURL(/\/teacher\/attendance$/);
-  await expect(page.getByRole('heading', { name: 'Mark Attendance' })).toBeVisible();
+  // `exact` because the empty state is an h6 that reads "Select a Class to Mark Attendance";
+  // a substring match resolves to both headings while the class list is still loading.
+  await expect(page.getByRole('heading', { name: 'Mark Attendance', exact: true })).toBeVisible();
 
   // The class dropdown is populated from `useGetTeacherClassesQuery`. Selecting a class
   // triggers `useGetTeacherStudentsQuery` filtered by that class, which populates the roster.

@@ -12,4 +12,5 @@ public interface TeacherService {
     EmployeeResponse getTeacherProfile(String username);
     List<ClassroomResponse> getAssignedClasses(String username);
     List<StudentResponse> getAssignedStudents(String username);
+    Long countPendingGrades(String username);
 }

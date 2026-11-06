@@ -97,16 +97,22 @@ public class StudentServiceImpl implements StudentService {
         Student savedStudent = studentRepository.save(student);
 
         // ACD-13-02: generate a unique secure temporary password instead of a shared hardcoded one.
-        // The plaintext is returned once in the creation response so the admin can relay it out-of-band.
-        String temporaryPassword = createUserForStudent(savedStudent);
+        // Both halves of the credential are returned once in the creation response: the username is
+        // generated server-side, so a password on its own could not be used to sign in.
+        ProvisionedAccount credential = provisionStudentUser(savedStudent);
 
         StudentResponse response = toResponse(savedStudent);
-        response.setTemporaryPassword(temporaryPassword);
+        response.setUsername(credential.username());
+        response.setTemporaryPassword(credential.temporaryPassword());
         return ResponseEntity.ok(response);
     }
 
     @Override
     public String createUserForStudent(Student student) {
+        return provisionStudentUser(student).temporaryPassword();
+    }
+
+    private ProvisionedAccount provisionStudentUser(Student student) {
         if (userService.existsByEmail(student.getEmail())) {
             throw new IllegalStateException("A user with this email already exists.");
         }
@@ -124,9 +130,12 @@ public class StudentServiceImpl implements StudentService {
         user.setRequirePasswordChange(true);
         user.setEnabled(true);
 
-        userService.save(user);
-        return temporaryPassword;
+        User saved = userService.save(user);
+        return new ProvisionedAccount(saved.getUsername(), temporaryPassword);
     }
+
+    /** The login name generated for a provisioned account plus its one-time plaintext password. */
+    private record ProvisionedAccount(String username, String temporaryPassword) {}
 
     @Override
     public Student createStudentFromRequest(StudentRequest request, Student student) {
@@ -407,6 +416,7 @@ public class StudentServiceImpl implements StudentService {
                 s.getDateOfBirth(),
                 s.getGender(),
                 s.getStatus(),
+                null,
                 null,
                 null,
                 null

@@ -57,6 +57,7 @@ const SchoolsPage = () => {
   const [viewOpen, setViewOpen] = useState(false);
   const [editingSchool, setEditingSchool] = useState(null);
   const [viewingSchool, setViewingSchool] = useState(null);
+  const [createdCreds, setCreatedCreds] = useState(null);
   
   const { data: schools = [], isLoading, isError, error, refetch } = useGetSchoolsQuery();
   const [createSchool] = useCreateSchoolMutation();
@@ -113,8 +114,17 @@ const SchoolsPage = () => {
         await updateSchool({ id: editingSchool.id, ...data }).unwrap();
         toast.success('School updated successfully');
       } else {
-        await createSchool(data).unwrap();
-        toast.success('School created successfully! Admin credentials sent to email.');
+        const created = await createSchool(data).unwrap();
+        toast.success('School created successfully!');
+        // The temporary password is stored only as a hash and the email is the only other copy, so
+        // anything the administrator is not shown here is gone for good.
+        if (created?.adminUsername && created?.temporaryPassword) {
+          setCreatedCreds({
+            schoolName: created.schoolName,
+            username: created.adminUsername,
+            password: created.temporaryPassword,
+          });
+        }
       }
       handleClose();
       refetch();
@@ -520,6 +530,51 @@ const SchoolsPage = () => {
             }}
           >
             Edit School
+          </Button>
+        </DialogActions>
+      </Dialog>
+
+      {/* One-time admin credentials for the school that was just created */}
+      <Dialog open={!!createdCreds} onClose={() => setCreatedCreds(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>School Admin Login</DialogTitle>
+        <DialogContent>
+          <Alert severity="warning" sx={{ mb: 2 }}>
+            These credentials are shown once. The password is stored hashed and cannot be retrieved
+            later — hand them to the administrator now, and they will be asked to change it on first
+            login.
+          </Alert>
+          <Typography variant="subtitle2" color="text.secondary">
+            School
+          </Typography>
+          <Typography variant="body1" sx={{ mb: 2 }}>
+            {createdCreds?.schoolName}
+          </Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            Username
+          </Typography>
+          <Typography variant="body1" sx={{ mb: 2, userSelect: 'all', fontFamily: 'monospace' }}>
+            {createdCreds?.username}
+          </Typography>
+          <Typography variant="subtitle2" color="text.secondary">
+            Temporary password
+          </Typography>
+          <Typography variant="body1" sx={{ userSelect: 'all', fontFamily: 'monospace' }}>
+            {createdCreds?.password}
+          </Typography>
+        </DialogContent>
+        <DialogActions>
+          <Button
+            onClick={() => {
+              navigator.clipboard?.writeText(
+                `School: ${createdCreds.schoolName}\nUsername: ${createdCreds.username}\nPassword: ${createdCreds.password}`,
+              );
+              toast.success('Credentials copied');
+            }}
+          >
+            Copy
+          </Button>
+          <Button variant="contained" onClick={() => setCreatedCreds(null)}>
+            Done
           </Button>
         </DialogActions>
       </Dialog>

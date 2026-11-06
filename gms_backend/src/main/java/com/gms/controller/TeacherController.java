@@ -49,4 +49,11 @@ public class TeacherController {
         List<StudentResponse> response = teacherService.getAssignedStudents(username);
         return ResponseEntity.ok(response);
     }
+
+    @GetMapping("/pending-grades")
+    @PreAuthorize("hasAuthority('TEACHER')")
+    public ResponseEntity<Long> countPendingGrades() {
+        String username = TenantContext.username();
+        return ResponseEntity.ok(teacherService.countPendingGrades(username));
+    }
 }

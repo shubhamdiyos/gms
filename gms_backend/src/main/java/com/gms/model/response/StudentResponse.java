@@ -27,8 +27,13 @@ public class StudentResponse {
     private String gender;
     private String status;
 
-    /** ACD-13-02: populated only on the creation response so the admin can relay the credential. */
+    /**
+     * ACD-13-02: username and temporary password are populated only on the creation response so the
+     * admin can relay a login the student can actually use. The username is generated server-side,
+     * so returning the password alone left the credential unusable.
+     */
     private String temporaryPassword;
+    private String username;
 
     /**
      * Human-readable placement, populated where the caller cannot look it up itself. The parent

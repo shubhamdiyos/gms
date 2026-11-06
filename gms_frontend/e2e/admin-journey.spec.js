@@ -132,6 +132,14 @@ test('the administrator registers a pupil through the dialog and the roll shows 
   await dialog.getByRole('button', { name: 'Create' }).click();
   await expect(page.getByText('Student created successfully')).toBeVisible();
 
+  // Creating a student hands back its one-time login, because the server stores only the
+  // password hash. That dialog is modal and MUI marks the rest of the app `aria-hidden`, so
+  // role-based locators cannot see the grid until an admin dismisses it.
+  const credentials = page.getByRole('dialog').filter({ hasText: 'Student login created' });
+  await expect(credentials).toBeVisible();
+  await credentials.getByRole('button', { name: 'Close' }).click();
+  await expect(credentials).toBeHidden();
+
   // The row is on screen. `row` rather than a cell role because that is what the accessibility
   // snapshot of this very page measured (`row "STD002 Ishaan BPupil …"`); a `gridcell` locator
   // silently matched nothing here for ten seconds, and a locator that never matches is the one

@@ -3,6 +3,7 @@ package com.gms.service;
 import com.gms.model.entity.Exam;
 import com.gms.model.request.ExamRequest;
 import com.gms.model.response.ExamResponse;
+import com.gms.model.response.ExamSubjectResponse;
 import org.springframework.http.ResponseEntity;
 
 import java.util.List;
@@ -20,4 +21,6 @@ public interface ExamService {
     ResponseEntity<Exam> getExamById(Integer id);
 
     ResponseEntity<List<Exam>> getExamsByAcademicYear(String academicYear);
+
+    ResponseEntity<List<ExamSubjectResponse>> getExamSubjects(Integer id);
 }

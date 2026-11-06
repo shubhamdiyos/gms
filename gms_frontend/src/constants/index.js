@@ -56,12 +56,16 @@ export const ROUTES = {
     DASHBOARD: '/admin/dashboard',
     STUDENTS: '/admin/students',
     EMPLOYEES: '/admin/employees',
+    PARENTS: '/admin/parents',
+    USERS: '/admin/users',
     CLASSROOMS: '/admin/classrooms',
     SUBJECTS: '/admin/subjects',
     ACADEMIC_YEARS: '/admin/academic-years',
     // Guarded [ADMIN, ACCOUNTANT]: GET /fees admits ACCOUNTANT, its writes stay ADMIN-only.
     FEES: '/admin/fees',
     EXAMS: '/admin/exams',
+    RESULTS: '/admin/results',
+    REPORTS: '/admin/reports',
     ANNOUNCEMENTS: '/admin/announcements',
   },
   ACCOUNTANT: {

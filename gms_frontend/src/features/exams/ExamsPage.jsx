@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import {
   Box,
   Typography,
@@ -14,9 +14,12 @@ import {
   Tooltip,
   Button,
   FormControl,
+  FormControlLabel,
+  Checkbox,
   InputLabel,
   Select,
   MenuItem,
+  Alert,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import {
@@ -32,6 +35,8 @@ import * as yup from 'yup';
 import {
   useGetExamsQuery,
   useGetAcademicYearsQuery,
+  useGetSubjectsQuery,
+  useGetExamSubjectsQuery,
   useCreateExamMutation,
   useUpdateExamMutation,
   useDeleteExamMutation,
@@ -67,6 +72,7 @@ const schema = yup.object({
 const ExamsPage = () => {
   const [open, setOpen] = useState(false);
   const [editingExam, setEditingExam] = useState(null);
+  const [selectedSubjects, setSelectedSubjects] = useState([]);
 
   const {
     data: exams = [],
@@ -79,6 +85,32 @@ const ExamsPage = () => {
   const [deleteExam] = useDeleteExamMutation();
 
   const { data: academicYears = [] } = useGetAcademicYearsQuery();
+  const { data: subjects = [] } = useGetSubjectsQuery();
+  const { data: attachedSubjects } = useGetExamSubjectsQuery(editingExam?.id, {
+    skip: !editingExam,
+  });
+
+  // The exam row never carries its papers, so an edit starts from the subject endpoint. Seeding
+  // only once it has answered keeps an empty response from clearing what the endpoint will send.
+  useEffect(() => {
+    if (!editingExam || !attachedSubjects) return;
+    setSelectedSubjects(
+      attachedSubjects.map((subject) => ({
+        subjectId: subject.subjectId,
+        maxMarks: subject.maxMarks,
+        passingMarks: subject.passingMarks,
+        examDate: subject.examDate ? dayjs(subject.examDate).format('YYYY-MM-DD') : '',
+      }))
+    );
+  }, [editingExam, attachedSubjects]);
+
+  const toggleSubject = (subjectId) => {
+    setSelectedSubjects((prev) =>
+      prev.some((subject) => subject.subjectId === subjectId)
+        ? prev.filter((subject) => subject.subjectId !== subjectId)
+        : [...prev, { subjectId }]
+    );
+  };
 
   const {
     register,
@@ -92,6 +124,7 @@ const ExamsPage = () => {
 
   const handleOpen = (exam = null) => {
     setEditingExam(exam);
+    setSelectedSubjects([]);
     if (exam) {
       reset({
         ...exam,
@@ -124,6 +157,14 @@ const ExamsPage = () => {
         maxMarks: Number(data.maxMarks),
         passingMarks: Number(data.passingMarks),
         durationMinutes: Number(data.durationMinutes),
+        // Papers only carry a different maximum when the server already stored one; a fresh pick
+        // inherits the exam's marks and date so scoring never sees a zero denominator.
+        examSubjects: selectedSubjects.map((subject) => ({
+          subjectId: subject.subjectId,
+          maxMarks: Number(subject.maxMarks || data.maxMarks),
+          passingMarks: Number(subject.passingMarks || data.passingMarks),
+          examDate: subject.examDate || data.examDate,
+        })),
       };
 
       if (editingExam) {
@@ -391,6 +432,35 @@ const ExamsPage = () => {
                   error={!!errors.durationMinutes}
                   helperText={errors.durationMinutes?.message}
                 />
+              </Grid>
+              <Grid item xs={12}>
+                <Typography variant="subtitle1" gutterBottom>
+                  Subjects
+                </Typography>
+                <Typography variant="body2" color="text.secondary" sx={{ mb: 1 }}>
+                  Results are recorded per subject. Select the papers this exam covers.
+                </Typography>
+                {subjects.length === 0 ? (
+                  <Alert severity="info">
+                    No subjects in this school yet. Add subjects before scheduling papers.
+                  </Alert>
+                ) : (
+                  subjects.map((subject) => (
+                    <FormControlLabel
+                      key={subject.id}
+                      control={
+                        <Checkbox
+                          checked={selectedSubjects.some(
+                            (selected) => selected.subjectId === subject.id
+                          )}
+                          onChange={() => toggleSubject(subject.id)}
+                          inputProps={{ 'aria-label': subject.name }}
+                        />
+                      }
+                      label={subject.code ? `${subject.name} (${subject.code})` : subject.name}
+                    />
+                  ))
+                )}
               </Grid>
               <Grid item xs={12}>
                 <TextField

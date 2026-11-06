@@ -125,6 +125,9 @@ const StudentsGridEmptyRow = ({ hasError, hasActiveFilters, query, classroomName
 const StudentsPage = () => {
   const [open, setOpen] = useState(false);
   const [editingStudent, setEditingStudent] = useState(null);
+  // The create response is the only place the generated login exists: the backend returns the
+  // temporary password once and stores only its hash, so it must be shown before the dialog closes.
+  const [provisioned, setProvisioned] = useState(null);
 
   // Search state. `searchText` is the box, `debouncedQuery` is what actually goes to the server.
   const [searchText, setSearchText] = useState('');
@@ -285,8 +288,16 @@ const StudentsPage = () => {
         await updateStudent({ id: editingStudent.id, ...payload }).unwrap();
         toast.success('Student updated successfully');
       } else {
-        await createStudent(payload).unwrap();
+        const created = await createStudent(payload).unwrap();
         toast.success('Student created successfully');
+        if (created?.temporaryPassword) {
+          setProvisioned({
+            name: `${created.firstName || data.firstName} ${created.lastName || data.lastName}`.trim(),
+            studentId: created.studentId,
+            username: created.username,
+            temporaryPassword: created.temporaryPassword,
+          });
+        }
       }
       handleClose();
       refetch();
@@ -302,6 +313,16 @@ const StudentsPage = () => {
       refetch();
     } catch {
       toast.error('Toggle failed');
+    }
+  };
+
+  const copyProvisionedCredentials = async () => {
+    const text = `Username: ${provisioned?.username}\nTemporary password: ${provisioned?.temporaryPassword}`;
+    try {
+      await navigator.clipboard.writeText(text);
+      toast.success('Credentials copied');
+    } catch {
+      toast.error('Could not copy — select the values manually');
     }
   };
 
@@ -661,6 +682,42 @@ const StudentsPage = () => {
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/*
+        Shown once, immediately after creation. The backend stores only the password hash, so if
+        this dialog is dismissed without relaying the values the account needs a password reset.
+      */}
+      <Dialog open={Boolean(provisioned)} onClose={() => setProvisioned(null)} maxWidth="sm" fullWidth>
+        <DialogTitle>Student login created</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {provisioned?.name}
+            {provisioned?.studentId ? ` (${provisioned.studentId})` : ''} can sign in with these
+            credentials. The password is not stored and cannot be shown again; the student must
+            choose a new one on first sign-in.
+          </Typography>
+          <Box sx={{ bgcolor: 'action.hover', borderRadius: 1, p: 2 }}>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace' }}>
+              Username: <strong>{provisioned?.username || '—'}</strong>
+            </Typography>
+            <Typography variant="body2" sx={{ fontFamily: 'monospace', mt: 1 }}>
+              Temporary password: <strong>{provisioned?.temporaryPassword}</strong>
+            </Typography>
+          </Box>
+          {!provisioned?.username && (
+            <Alert severity="warning" sx={{ mt: 2 }}>
+              The server did not return a username, so only the password can be relayed. Check that
+              the backend serving this build includes the username in the student create response.
+            </Alert>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setProvisioned(null)}>Close</Button>
+          <Button variant="contained" onClick={copyProvisionedCredentials}>
+            Copy credentials
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

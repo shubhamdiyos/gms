@@ -161,6 +161,19 @@ class AuthNotifier extends StateNotifier<AuthState> {
         user = await _authRepository.validateSession();
       }
 
+      // The web is the only client for the platform owner. Reject the role
+      // before any session is persisted, so a later restore cannot disagree
+      // with the login path about which roles this app serves.
+      if (!user.role.isMobileAccessible) {
+        await logout();
+        state = state.copyWith(
+          status: AuthStatus.error,
+          errorMessage: 'This role is not supported on mobile',
+          isLoading: false,
+        );
+        return;
+      }
+
       // Check if password change is required
       if (response.requirePasswordChange || user.requirePasswordChange) {
         await _storageService.saveAuthState(
