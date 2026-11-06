@@ -144,7 +144,7 @@ TRUNCATE TABLE
   fees, fee_structures, student_fees, fee_payments, invoices, receipts,
   users, user_roles, notifications, announcements,
   designations, grading_schemes, school_calendars, student_admissions, messages,
-  communication_templates, payment_gateways, financial_reports,
+  communication_templates, financial_reports,
   financial_transactions, email_logs, sms_logs
   RESTART IDENTITY CASCADE;
 

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTE: there is deliberately no payment-gateway case below -- the gateway API was removed in V1 (SEC-12); fee money is recorded via /fee-payments.
 # Live verification for Stage 3 card C-4 — "the ownership check sits where the
 # JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list".
 #
@@ -264,9 +265,6 @@ create_row announcement announcements /announcements /announcements \
 
 create_row notification notifications /notifications /notifications \
   "{\"title\":\"Fee reminder\",\"message\":\"Sent by the C-4 verification.\",\"notificationType\":\"REMINDER\",\"channel\":\"IN_APP\",\"priority\":\"NORMAL\",\"recipientType\":\"ALL\",\"isImportant\":false}"
-
-create_row payment-gateway payment_gateways /payment-gateway /payment-gateway \
-  '{"name":"Test PSP","gatewayType":"CARD","merchantId":"MERCH-C4","isActive":true,"environment":"TEST"}'
 
 printf '      %d resources were created by school A through its own API\n' "${#ROWS[@]}"
 check "school A wrote rows across the tenant model" "yes" "$([[ "${#ROWS[@]}" -ge 15 ]] && echo yes)"

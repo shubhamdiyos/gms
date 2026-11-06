@@ -48,7 +48,6 @@ class SuperAdminReadAuthorizationTest {
                 Arguments.of("FeeStructureController", FeeStructureController.class),
                 Arguments.of("FinancialReportController", FinancialReportController.class),
                 Arguments.of("FinancialDashboardController", FinancialDashboardController.class),
-                Arguments.of("PaymentGatewayController", PaymentGatewayController.class),
                 Arguments.of("StudentFeeController", StudentFeeController.class),
                 Arguments.of("FeePaymentController", FeePaymentController.class),
                 Arguments.of("SectionController", SectionController.class),

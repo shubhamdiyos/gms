@@ -1,0 +1,18 @@
+-- V12: Remove the payment-gateway configuration table.
+--
+-- V1 has no real payment gateway integration: no code charges a card, verifies
+-- a webhook, or talks to a PSP. Fee money is recorded manually by staff
+-- through POST /api/v1/fee-payments (a simple create with the required fields),
+-- which is the product owner's explicit V1 decision.
+--
+-- The payment_gateways table existed only to store gateway credentials
+-- (api_key / secret_key) for an integration that does not exist, and its REST
+-- endpoints returned those secrets in API responses (SEC-12). The API, the
+-- entity and this table are all removed together so no credential store
+-- remains in the product.
+--
+-- The table was never populated by a deployed system (GMS has never been
+-- deployed), so dropping it loses no production data. The index
+-- idx_payment_gateway_school (V4) and the identity sequence are dropped
+-- with the table.
+DROP TABLE IF EXISTS payment_gateways;

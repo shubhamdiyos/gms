@@ -72,7 +72,7 @@ public class SecurityConfig {
         API + "/fees/**", API + "/fee-structures/**", API + "/fee-payments/**",
         API + "/invoices/**", API + "/receipts/**", API + "/student-fees/**",
         API + "/financial-transactions/**", API + "/financial-reports/**",
-        API + "/financial-dashboard/**", API + "/payment-gateway/**"
+        API + "/financial-dashboard/**"
     };
 
     /** Read surfaces that parents and students also consume; each method gates itself. */
