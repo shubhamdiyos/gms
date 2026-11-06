@@ -5,8 +5,9 @@ WORKDIR /app
 # Copy package files
 COPY package*.json ./
 
-# Install dependencies (using npm install to handle lock file mismatches)
-RUN npm install
+# Install dependencies exactly as locked (npm ci fails on lockfile drift
+# instead of silently resolving different versions between deploys)
+RUN npm ci
 
 # Copy source code
 COPY . .
