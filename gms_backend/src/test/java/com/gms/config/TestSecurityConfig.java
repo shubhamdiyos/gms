@@ -52,7 +52,7 @@ public class TestSecurityConfig {
         API + "/fees/**", API + "/fee-structures/**", API + "/fee-payments/**",
         API + "/invoices/**", API + "/receipts/**", API + "/student-fees/**",
         API + "/financial-transactions/**", API + "/financial-reports/**",
-        API + "/financial-dashboard/**", API + "/payment-gateway/**"
+        API + "/financial-dashboard/**"
     };
 
     private static final String[] SHARED_READS = {
