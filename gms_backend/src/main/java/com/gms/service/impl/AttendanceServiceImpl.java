@@ -69,17 +69,17 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
         if (request.getDate() == null) {
-            return ResponseEntity.badRequest().build();
+            // requireSlotScheduledOn has always owned this rejection on the period path
+            // (the day-of-week guard tests pin it); the daily path adopts the same contract.
+            throw new IllegalArgumentException("Attendance date is required");
         }
-
-        // Fetch creator user for audit fields
-        User creator = userService.findByEmployee_Id()
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Daily register (V13): no timetable slot means one mark for the whole day. The
         // partial unique index is the duplicate guard, via the same atomic-insert pattern
         // as the period path below.
         if (request.getTimetableSlotId() == null) {
+            User creator = userService.findByEmployee_Id()
+                    .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
             int dailyInserted = attendanceRepository.insertDailyIgnoreDuplicate(
                     TenantContext.schoolId(),
                     request.getStudentId(),
@@ -110,6 +110,11 @@ public class AttendanceServiceImpl implements AttendanceService {
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
                         "Timetable slot not found for the current school"));
         requireSlotScheduledOn(timetableSlot, request.getDate());
+
+        // Fetch creator user for audit fields — after the slot checks, as before: a bad slot
+        // or a wrong-day slot must surface its own error, not a missing-creator one.
+        User creator = userService.findByEmployee_Id()
+                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
         // Stage H: Replace check-then-act race with atomic upsert (consistent with bulk path).
         // INSERT ... ON CONFLICT DO NOTHING is atomic at the database level, eliminating the
