@@ -30,6 +30,18 @@ public class StartupSecurityValidator implements InitializingBean {
     @Override
     public void afterPropertiesSet() {
         if (isDevProfileActive()) {
+            // Dev relaxes the checks below, so it must never reach a real
+            // database: a copy-pasted .env that pairs the dev profile with a
+            // hosted DB_URL would otherwise boot with default credentials and
+            // an ephemeral JWT secret against production data.
+            String devDbUrl = environment.getProperty("spring.datasource.url", "");
+            if (!devDbUrl.isBlank()
+                    && !devDbUrl.contains("localhost")
+                    && !devDbUrl.contains("127.0.0.1")) {
+                throw new IllegalStateException("Refusing to start: the 'dev' profile is active but "
+                        + "spring.datasource.url does not point at localhost. Dev is for the local "
+                        + "container database only; use the 'prod' profile for any hosted database.");
+            }
             log.warn("Active profile contains 'dev' - startup security validation is relaxed. "
                     + "Never run this profile in an internet-reachable environment.");
             return;
@@ -61,6 +73,11 @@ public class StartupSecurityValidator implements InitializingBean {
             }
             if ("*".equals(origin)) {
                 failures.add("cors.allowed-origins contains '*' while allow-credentials is true (" + origin + ").");
+            }
+            if (isProdProfileActive() && origin.startsWith("http://")) {
+                failures.add("cors.allowed-origins contains a plain-http origin (" + origin
+                        + "). Production origins must be https: the auth cookie is Secure and "
+                        + "credentials must not cross the network unencrypted.");
             }
         }
 
@@ -104,6 +121,10 @@ public class StartupSecurityValidator implements InitializingBean {
 
     private boolean isDevProfileActive() {
         return Arrays.asList(environment.getActiveProfiles()).contains("dev");
+    }
+
+    private boolean isProdProfileActive() {
+        return Arrays.asList(environment.getActiveProfiles()).contains("prod");
     }
 
     private String describeProfiles() {
