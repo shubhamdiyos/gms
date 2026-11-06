@@ -1,6 +1,5 @@
 package com.gms.service;
 
-import com.gms.model.entity.Receipt;
 import com.gms.model.request.ReceiptRequest;
 import com.gms.model.response.ReceiptResponse;
 import org.springframework.http.ResponseEntity;
@@ -16,11 +15,11 @@ public interface ReceiptService {
 
     ResponseEntity<?> deleteReceipt(Integer id);
 
-    ResponseEntity<List<Receipt>> getAllReceipts();
+    ResponseEntity<List<ReceiptResponse>> getAllReceipts();
 
-    ResponseEntity<Receipt> getReceiptById(Integer id);
+    ResponseEntity<ReceiptResponse> getReceiptById(Integer id);
 
-    ResponseEntity<List<Receipt>> getReceiptsByDateRange(LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<ReceiptResponse>> getReceiptsByDateRange(LocalDate startDate, LocalDate endDate);
 
-    ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId);
+    ResponseEntity<List<ReceiptResponse>> getReceiptsByStudent(Integer studentId);
 }

@@ -1,18 +1,22 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Invoice;
+import com.gms.model.entity.Parent;
 import com.gms.model.entity.School;
-import com.gms.model.entity.User;
+import com.gms.model.entity.Student;
 import com.gms.model.request.InvoiceRequest;
 import com.gms.model.response.InvoiceResponse;
 import com.gms.repository.InvoiceRepository;
+import com.gms.repository.ParentRepository;
 import com.gms.repository.SchoolRepository;
-import com.gms.repository.UserRepository;
+import com.gms.repository.StudentRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.InvoiceService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -23,122 +27,146 @@ public class InvoiceServiceImpl implements InvoiceService {
 
     private final InvoiceRepository invoiceRepository;
     private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final StudentRepository studentRepository;
+    private final ParentRepository parentRepository;
 
     public InvoiceServiceImpl(InvoiceRepository invoiceRepository,
                                  SchoolRepository schoolRepository,
-                                 UserRepository userRepository) {
+                                 StudentRepository studentRepository,
+                                 ParentRepository parentRepository) {
         this.invoiceRepository = invoiceRepository;
         this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.studentRepository = studentRepository;
+        this.parentRepository = parentRepository;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<InvoiceResponse> createInvoice(InvoiceRequest request) {
-        // Validate school exists
         School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
-        // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
-
-        // Create invoice
         Invoice invoice = new Invoice();
         invoice.setSchool(school);
-        invoice.setInvoiceNumber(request.getInvoiceNumber());
-        invoice.setInvoiceDate(request.getInvoiceDate());
-        invoice.setDueDate(request.getDueDate());
-        invoice.setTotalAmount(request.getTotalAmount());
         invoice.setAmountPaid(request.getAmountPaid() != null ? request.getAmountPaid() : BigDecimal.ZERO);
-        invoice.setBalanceAmount(request.getTotalAmount().subtract(invoice.getAmountPaid()));
-        invoice.setStatus(request.getStatus());
-        invoice.setInvoiceType(request.getInvoiceType());
-        invoice.setBillingAddress(request.getBillingAddress());
-        invoice.setNotes(request.getNotes());
-        invoice.setTaxAmount(request.getTaxAmount());
-        invoice.setDiscountAmount(request.getDiscountAmount());
-        invoice.setCreatedBy(creator);
-        invoice.setUpdatedBy(creator);
+        applyRequest(invoice, request);
 
-        Invoice savedInvoice = invoiceRepository.save(invoice);
-
-        return ResponseEntity.ok(mapToResponse(savedInvoice));
+        return ResponseEntity.ok(mapToResponse(invoiceRepository.save(invoice)));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<InvoiceResponse> updateInvoice(Integer id, InvoiceRequest request) {
-        // Validate invoice exists
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
 
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
+        // A PUT that omits amountPaid keeps the recorded collection instead of silently resetting it.
+        if (request.getAmountPaid() != null) {
+            invoice.setAmountPaid(request.getAmountPaid());
+        }
+        applyRequest(invoice, request);
 
-        // Update invoice
-        invoice.setInvoiceNumber(request.getInvoiceNumber());
-        invoice.setInvoiceDate(request.getInvoiceDate());
-        invoice.setDueDate(request.getDueDate());
-        invoice.setTotalAmount(request.getTotalAmount());
-        invoice.setAmountPaid(request.getAmountPaid() != null ? request.getAmountPaid() : invoice.getAmountPaid());
-        invoice.setBalanceAmount(request.getTotalAmount().subtract(invoice.getAmountPaid()));
-        invoice.setStatus(request.getStatus());
-        invoice.setInvoiceType(request.getInvoiceType());
-        invoice.setBillingAddress(request.getBillingAddress());
-        invoice.setNotes(request.getNotes());
-        invoice.setTaxAmount(request.getTaxAmount());
-        invoice.setDiscountAmount(request.getDiscountAmount());
-        invoice.setUpdatedBy(updater);
-
-        Invoice savedInvoice = invoiceRepository.save(invoice);
-
-        return ResponseEntity.ok(mapToResponse(savedInvoice));
+        return ResponseEntity.ok(mapToResponse(invoiceRepository.save(invoice)));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<?> deleteInvoice(Integer id) {
-        // Validate invoice exists
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
-
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
         invoice.setStatus("CANCELLED");
-        invoice.setUpdatedBy(updater);
 
         invoiceRepository.save(invoice);
         return ResponseEntity.ok("Invoice deleted successfully");
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<Invoice>> getAllInvoices() {
-        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "SENT");
+    public ResponseEntity<List<InvoiceResponse>> getAllInvoices() {
+        List<InvoiceResponse> invoices = invoiceRepository
+                .findBySchoolIdAndStatus(TenantContext.schoolId(), "SENT")
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(invoices);
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<Invoice> getInvoiceById(Integer id) {
+    public ResponseEntity<InvoiceResponse> getInvoiceById(Integer id) {
         Invoice invoice = invoiceRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
 
-        return ResponseEntity.ok(invoice);
+        return ResponseEntity.ok(mapToResponse(invoice));
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<Invoice>> getInvoicesByDateRange(LocalDate startDate, LocalDate endDate) {
-        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndInvoiceDateBetween(TenantContext.schoolId(), startDate, endDate);
+    public ResponseEntity<List<InvoiceResponse>> getInvoicesByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<InvoiceResponse> invoices = invoiceRepository
+                .findBySchoolIdAndInvoiceDateBetween(TenantContext.schoolId(), startDate, endDate)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(invoices);
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId) {
-        List<Invoice> invoices = invoiceRepository.findBySchoolIdAndStudent_Id(TenantContext.schoolId(), studentId);
-        // Filter by the tenant's school if needed
+    public ResponseEntity<List<InvoiceResponse>> getInvoicesByStudent(Integer studentId) {
+        List<InvoiceResponse> invoices = invoiceRepository
+                .findBySchoolIdAndStudent_Id(TenantContext.schoolId(), studentId)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(invoices);
+    }
+
+    /**
+     * Copies the request onto the invoice, including the student/parent links the previous version
+     * of this service left null, and derives the balance from the recorded paid amount.
+     */
+    private void applyRequest(Invoice invoice, InvoiceRequest request) {
+        invoice.setInvoiceNumber(request.getInvoiceNumber());
+        invoice.setInvoiceDate(request.getInvoiceDate());
+        invoice.setDueDate(request.getDueDate());
+        invoice.setTotalAmount(request.getTotalAmount());
+        invoice.setBalanceAmount(request.getTotalAmount().subtract(invoice.getAmountPaid()));
+        invoice.setStatus(request.getStatus());
+        invoice.setInvoiceType(request.getInvoiceType());
+        invoice.setStudent(resolveStudent(request.getStudentId()));
+        invoice.setParent(resolveParent(request.getParentId()));
+        invoice.setBillingAddress(request.getBillingAddress());
+        invoice.setNotes(request.getNotes());
+        invoice.setTaxAmount(request.getTaxAmount());
+        invoice.setDiscountAmount(request.getDiscountAmount());
+
+        if (invoice.getBalanceAmount().signum() < 0) {
+            throw new IllegalArgumentException("Amount paid cannot exceed the invoice total.");
+        }
+    }
+
+    private Student resolveStudent(Integer studentId) {
+        if (studentId == null) {
+            return null;
+        }
+        Student student = studentRepository.findById(studentId)
+                .orElseThrow(() -> new EntityNotFoundException("Student not found"));
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Student does not belong to the specified school");
+        }
+        return student;
+    }
+
+    private Parent resolveParent(Integer parentId) {
+        if (parentId == null) {
+            return null;
+        }
+        // parents is global (decision D-2), so the school predicate must come from the lookup itself.
+        return parentRepository.findBySchoolIdAndId(TenantContext.schoolId(), parentId)
+                .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
     }
 
     private InvoiceResponse mapToResponse(Invoice invoice) {
