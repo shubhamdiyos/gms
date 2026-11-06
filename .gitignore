@@ -26,6 +26,9 @@ test-results/
 playwright-report/
 blob-report/
 
+# scripts/demo sweep output: screenshots and sweep.json are evidence from one run, not source
+artifacts/
+
 # Logs
 *.log
 logs/

@@ -190,6 +190,28 @@ password are **not** stored in this repository — they come from deployment con
 See [docs/audit/SECURITY_AUDIT.md](docs/audit/SECURITY_AUDIT.md) for why a shipped default is
 not acceptable. The initial password is single-use: the first login forces a change.
 
+## 🎬 Demo / showcase run
+
+[`scripts/demo/`](scripts/demo/README.md) turns a running backend into a presentable tenant and
+then proves it. Nothing is inserted into the database directly: the platform owner signs in,
+`POST /schools/create` provisions the school, and every pupil, fee, payment, exam, result,
+attendance row and announcement after that is a request the SPA and the Flutter client already
+make.
+
+```bash
+# backend already running (needs the platform owner's credentials)
+GMS_SUPERADMIN_USERNAME=... GMS_SUPERADMIN_PASSWORD=... scripts/demo/run-demo.sh
+
+# or let it start the database and backend from docker-compose.yml / .env
+make demo
+```
+
+It writes the demo credentials to `/tmp/gms-demo-tenant.env` (mode `600`), signs in as all five
+demo roles to confirm their screens have data, and serves the React SPA on
+<http://localhost:5173> and the Flutter web build on <http://localhost:3000>. Re-running is
+safe; [the demo README](scripts/demo/README.md) lists the access sheet, the eleven MVP features
+mapped to the screens a presenter clicks, the reset options and the troubleshooting table.
+
 ## 📊 API Endpoints
 
 ### Authentication

@@ -65,7 +65,7 @@ public class TeacherServiceImpl implements TeacherService {
 
         // Get actual assigned classrooms through teacher assignments
         List<TeacherAssignment> assignments = teacherAssignmentRepository.findByTeacher_School_IdAndTeacher_Id(TenantContext.schoolId(), teacher.getId());
-        
+
         return assignments.stream()
                 .map(assignment -> {
                     Classroom classroom = assignment.getClassroom();
@@ -77,7 +77,7 @@ public class TeacherServiceImpl implements TeacherService {
                             classroom.getSection()
                     );
                 })
-                .distinct() // Remove duplicates if teacher teaches multiple subjects in same classroom
+                .distinct() // TeacherAssignment is per subject, so a classroom repeats
                 .collect(Collectors.toList());
     }
 
