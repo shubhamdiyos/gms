@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # ─────────────────────────────────────────────────────────────────────────────
+# NOTE: there is deliberately no payment-gateway case below -- the gateway API was removed in V1 (SEC-12); fee money is recorded via /fee-payments.
 # Live verification for Stage 3 card C-4 — "the ownership check sits where the
 # JWT is verified, so a wrong tenant is 403/404 and not a filtered empty list".
 #
