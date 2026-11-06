@@ -73,6 +73,10 @@ class EntityTenantColumnArchTest {
             Pattern.compile("ALTER\\s+TABLE\\s+(?:\\w+\\.)?(\\w+)\\s+ADD\\s+COLUMN\\s+school_id\\s+integer\\b",
                     Pattern.CASE_INSENSITIVE);
 
+    private static final Pattern DROP_TABLE =
+            Pattern.compile("DROP\\s+TABLE\\s+(?:IF\\s+EXISTS\\s+)?(?:\\w+\\.)?(\\w+)\\b",
+                    Pattern.CASE_INSENSITIVE);
+
     @Test
     void everyTenantTableIsMappedByTheEntityThatWritesIt() throws Exception {
         Set<String> tenantTables = tenantTablesFromMigrations();
@@ -135,6 +139,7 @@ class EntityTenantColumnArchTest {
                 .isNotEmpty();
 
         Set<String> tables = new LinkedHashSet<>();
+        Set<String> dropped = new LinkedHashSet<>();
         for (Resource migration : migrations) {
             String sql = new String(migration.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
 
@@ -149,7 +154,18 @@ class EntityTenantColumnArchTest {
             while (added.find()) {
                 tables.add(added.group(1).toLowerCase());
             }
+
+            Matcher drop = DROP_TABLE.matcher(sql);
+            while (drop.find()) {
+                dropped.add(drop.group(1).toLowerCase());
+            }
         }
+        // A table a later migration drops (e.g. payment_gateways, dropped by V12
+        // when the payment-gateway feature was removed in V1) does not exist in
+        // the schema at head, so it owes no entity. Drops are subtracted after
+        // the full scan rather than in file order: no migration in this history
+        // recreates a dropped table, so order cannot change the result.
+        tables.removeAll(dropped);
         return tables;
     }
 
