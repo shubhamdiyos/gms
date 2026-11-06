@@ -22,8 +22,31 @@ public interface AttendanceRepository extends TenantScopedRepository<Attendance>
     List<Attendance> findByStudent_School_IdAndStudent_IdAndDateBetween(Integer schoolId, Integer studentId,
                                                                         LocalDate startDate, LocalDate endDate);
 
-    List<Attendance> findByTimetableSlot_Timetable_Classroom_School_IdAndTimetableSlot_Timetable_Classroom_IdAndDate(
-            Integer schoolId, Integer classroomId, LocalDate date);
+    /**
+     * Every record for a classroom on a date: period records (reached through their slot)
+     * AND daily-register records (no slot — reached through the student's classroom).
+     * Before V13 the derived slot-only query was complete; slot-less daily rows would be
+     * invisible to the teacher register without the second branch.
+     */
+    @Query("""
+            SELECT a FROM Attendance a
+            LEFT JOIN a.timetableSlot ts
+            LEFT JOIN ts.timetable tt
+            WHERE a.student.school.id = :schoolId AND a.date = :date
+              AND (
+                (ts IS NOT NULL AND tt.classroom.id = :classroomId)
+                OR (ts IS NULL AND a.student.classroom.id = :classroomId)
+              )
+            """)
+    List<Attendance> findByClassroomAndDate(@Param("schoolId") Integer schoolId,
+                                            @Param("classroomId") Integer classroomId,
+                                            @Param("date") LocalDate date);
+
+    /**
+     * The daily-register record of one student on one date (slot IS NULL), if it exists.
+     */
+    java.util.Optional<Attendance> findByStudent_School_IdAndStudent_IdAndTimetableSlotIsNullAndDate(
+            Integer schoolId, Integer studentId, LocalDate date);
 
     @Query("SELECT a FROM Attendance a WHERE a.student.school.id = :schoolId AND a.date BETWEEN :startDate AND :endDate")
     List<Attendance> findBySchoolIdAndDateBetween(@Param("schoolId") Integer schoolId, 
@@ -69,4 +92,25 @@ public interface AttendanceRepository extends TenantScopedRepository<Attendance>
                               @Param("remarks") String remarks,
                               @Param("createdBy") Integer createdBy,
                               @Param("updatedBy") Integer updatedBy);
+
+    /**
+     * Daily-register twin of {@link #insertIgnoreDuplicate}: inserts a slot-less record, or
+     * does nothing when a live daily record already exists for that student and date. The
+     * conflict target is the partial index uq_attendance_daily_student_date (V13) — its
+     * predicate is repeated verbatim, which PostgreSQL requires for index inference.
+     */
+    @Modifying
+    @Transactional
+    @Query(value = """
+        INSERT INTO attendances (school_id, student_id, timetable_slot_id, date, status, remarks, deleted, created_by, updated_by, created_on, updated_on, version)
+        VALUES (:schoolId, :studentId, NULL, :date, :status, :remarks, false, :createdBy, :updatedBy, NOW(), NOW(), 0)
+        ON CONFLICT (student_id, date) WHERE timetable_slot_id IS NULL AND deleted = false DO NOTHING
+        """, nativeQuery = true)
+    int insertDailyIgnoreDuplicate(@Param("schoolId") Integer schoolId,
+                                   @Param("studentId") Integer studentId,
+                                   @Param("date") LocalDate date,
+                                   @Param("status") String status,
+                                   @Param("remarks") String remarks,
+                                   @Param("createdBy") Integer createdBy,
+                                   @Param("updatedBy") Integer updatedBy);
 }

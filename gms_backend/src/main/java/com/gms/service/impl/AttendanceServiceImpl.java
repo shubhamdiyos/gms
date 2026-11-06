@@ -68,18 +68,50 @@ public class AttendanceServiceImpl implements AttendanceService {
         Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        // The DTO calls this field optional; the schema does not — attendances.timetable_slot_id is
-        // NOT NULL, so the code that read the id and then dropped it could never write the row.
+        // Daily register (V13): no timetable slot means one mark for the whole day. The
+        // partial unique index is the duplicate guard, via the same atomic-insert pattern
+        // as the period path below. (On the period path below, a missing date is rejected
+        // by requireSlotScheduledOn AFTER the slot loads — the guard tests pin that order,
+        // so the check lives inside this branch rather than ahead of both.)
         if (request.getTimetableSlotId() == null) {
-            return ResponseEntity.badRequest().build();
+            if (request.getDate() == null) {
+                throw new IllegalArgumentException("Attendance date is required");
+            }
+            User creator = userService.findByEmployee_Id()
+                    .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
+            int dailyInserted = attendanceRepository.insertDailyIgnoreDuplicate(
+                    TenantContext.schoolId(),
+                    request.getStudentId(),
+                    request.getDate(),
+                    request.getStatus(),
+                    request.getRemarks(),
+                    creator.getId(),
+                    creator.getId()
+            );
+
+            if (dailyInserted == 0) {
+                return ResponseEntity.badRequest().build();
+            }
+
+            Attendance savedDaily = attendanceRepository
+                    .findByStudent_School_IdAndStudent_IdAndTimetableSlotIsNullAndDate(
+                            TenantContext.schoolId(),
+                            request.getStudentId(),
+                            request.getDate()
+                    )
+                    .orElseThrow(() -> new EntityNotFoundException("Attendance record not found after insert"));
+
+            return ResponseEntity.ok(mapToResponse(savedDaily));
         }
+
         TimetableSlot timetableSlot = timetableSlotRepository
                 .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
                 .orElseThrow(() -> new NotFoundException("TIMETABLE_SLOT_NOT_FOUND",
                         "Timetable slot not found for the current school"));
         requireSlotScheduledOn(timetableSlot, request.getDate());
 
-        // Fetch creator user for audit fields
+        // Fetch creator user for audit fields — after the slot checks, as before: a bad slot
+        // or a wrong-day slot must surface its own error, not a missing-creator one.
         User creator = userService.findByEmployee_Id()
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
@@ -121,6 +153,20 @@ public class AttendanceServiceImpl implements AttendanceService {
     public ResponseEntity<?> recordBulkAttendance(BulkAttendanceRequest request) {
         if (TenantContext.employeeId() == null || TenantContext.schoolId() == null) {
             return ResponseEntity.badRequest().build();
+        }
+
+        // Daily register (V13): classroomId with no timetable slot = one mark per student
+        // for the whole day, no timetable required. Exactly one scope per request.
+        if (request.getTimetableSlotId() == null) {
+            if (request.getClassroomId() == null) {
+                throw new IllegalArgumentException(
+                        "A bulk register needs a timetableSlotId (period register) or a classroomId (daily register)");
+            }
+            return recordDailyBulkAttendance(request);
+        }
+        if (request.getClassroomId() != null) {
+            throw new IllegalArgumentException(
+                    "Send either timetableSlotId or classroomId, not both");
         }
 
         // One slot for the whole class register, read with the tenant in the query.
@@ -201,6 +247,67 @@ public class AttendanceServiceImpl implements AttendanceService {
         return ResponseEntity.ok(response);
     }
 
+    /**
+     * The daily register: same validate-all-then-write shape and the same response contract
+     * as the period path, but the rows carry no timetable slot, so no timetable needs to
+     * exist for the class or the weekday. Students are validated against the classroom the
+     * caller named instead of the one a slot would have implied.
+     */
+    private ResponseEntity<?> recordDailyBulkAttendance(BulkAttendanceRequest request) {
+        // ATT-06 fix, same as the period path: validate ALL students before writing ANY.
+        List<Student> validatedStudents = new java.util.ArrayList<>();
+        for (var item : request.getAttendance()) {
+            Student student = studentRepository.findById(item.getStudentId())
+                    .orElseThrow(() -> new NotFoundException("STUDENT_NOT_FOUND", "Student not found"));
+
+            if (!request.getClassroomId().equals(student.getClassroomId())) {
+                throw new IllegalArgumentException(
+                        "Student " + student.getId() + " does not belong to classroom " + request.getClassroomId());
+            }
+
+            validatedStudents.add(student);
+        }
+
+        int createdCount = 0;
+        java.util.List<Integer> skippedStudentIds = new java.util.ArrayList<>();
+        User creator = null;
+
+        for (int i = 0; i < request.getAttendance().size(); i++) {
+            var item = request.getAttendance().get(i);
+
+            if (creator == null) {
+                creator = userService.findByEmployee_Id()
+                        .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
+            }
+
+            int rowsInserted = attendanceRepository.insertDailyIgnoreDuplicate(
+                    TenantContext.schoolId(),
+                    item.getStudentId(),
+                    request.getDate(),
+                    item.getStatus(),
+                    item.getRemarks(),
+                    creator.getId(),
+                    creator.getId()
+            );
+
+            if (rowsInserted > 0) {
+                createdCount++;
+            } else {
+                skippedStudentIds.add(item.getStudentId());
+            }
+        }
+
+        com.gms.model.response.BulkAttendanceResponse response = new com.gms.model.response.BulkAttendanceResponse();
+        response.setTotalStudents(request.getAttendance().size());
+        response.setCreatedCount(createdCount);
+        response.setSkippedCount(skippedStudentIds.size());
+        response.setSkippedStudentIds(skippedStudentIds);
+        response.setMessage(String.format("Attendance recorded for %d students, %d skipped (already exists)",
+                createdCount, skippedStudentIds.size()));
+
+        return ResponseEntity.ok(response);
+    }
+
     @Override
     @Transactional
     public ResponseEntity<AttendanceResponse> updateAttendance(Integer attendanceId, AttendanceRequest request) {
@@ -215,8 +322,8 @@ public class AttendanceServiceImpl implements AttendanceService {
         Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        // The register already has a slot, and the column is NOT NULL, so an update that does not name
-        // a new one keeps the existing one rather than writing a null over it.
+        // An update that does not name a new slot keeps the existing one — which, for a
+        // daily-register record (V13), is no slot at all.
         if (request.getTimetableSlotId() != null) {
             TimetableSlot timetableSlot = timetableSlotRepository
                     .findByIdAndSchool_Id(request.getTimetableSlotId(), TenantContext.schoolId())
@@ -227,7 +334,10 @@ public class AttendanceServiceImpl implements AttendanceService {
 
         // Checked after the slot has been resolved, so the row that is written is the row that was
         // checked — whichever of the existing or the requested slot survives the block above.
-        requireSlotScheduledOn(attendance.getTimetableSlot(), request.getDate());
+        // A daily record has no slot, so there is no scheduled day to check against.
+        if (attendance.getTimetableSlot() != null) {
+            requireSlotScheduledOn(attendance.getTimetableSlot(), request.getDate());
+        }
 
         // Update attendance record
         attendance.setStudent(student);
@@ -268,7 +378,7 @@ public class AttendanceServiceImpl implements AttendanceService {
     @Override
     @Transactional(readOnly = true)
     public List<AttendanceResponse> getAttendanceForClassroom(Integer classroomId, LocalDate date) {
-        List<Attendance> attendances = attendanceRepository.findByTimetableSlot_Timetable_Classroom_School_IdAndTimetableSlot_Timetable_Classroom_IdAndDate(
+        List<Attendance> attendances = attendanceRepository.findByClassroomAndDate(
                 TenantContext.schoolId(), classroomId, date);
         return attendances.stream().map(this::mapToResponse).collect(Collectors.toList());
     }

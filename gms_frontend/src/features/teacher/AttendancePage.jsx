@@ -23,6 +23,8 @@ import {
   CardContent,
   Alert,
   Tooltip,
+  ToggleButton,
+  ToggleButtonGroup,
 } from '@mui/material';
 import {
   EventNote,
@@ -31,6 +33,7 @@ import {
   Groups,
   CheckCircle,
   Cancel,
+  WatchLater,
 } from '@mui/icons-material';
 import {
   useGetTeacherClassesQuery,
@@ -48,6 +51,9 @@ const AttendancePage = () => {
   const [selectedClass, setSelectedClass] = useState(() =>
     location.state?.classId ? String(location.state.classId) : '',
   );
+  // DAILY is the morning roll call: one mark per student for the whole day, no timetable
+  // period needed. PERIOD keeps the original per-lesson register against a timetable slot.
+  const [mode, setMode] = useState('DAILY');
   const [selectedSlot, setSelectedSlot] = useState('');
   const [selectedDate, setSelectedDate] = useState(dayjs().format('YYYY-MM-DD'));
   const [attendanceData, setAttendanceData] = useState({});
@@ -67,8 +73,6 @@ const AttendancePage = () => {
   const selectedClassId = selectedClass === '' ? null : Number(selectedClass);
   const dayKey = dayjs(selectedDate).format('dddd').toUpperCase();
 
-  // Attendance rows carry a timetable slot because the schema requires one, so a register only
-  // exists for a scheduled period.
   const classSlots = useMemo(() => {
     const slots = timetable?.slots ?? [];
     return slots
@@ -87,17 +91,24 @@ const AttendancePage = () => {
     [students, selectedClassId],
   );
 
-  // The classroom query returns every period marked that day, so the register must read the
-  // selected slot only — otherwise the Period 1 mark shows up as saved on Period 2.
+  // The classroom query returns every record for that day — daily rows (no slot) and one row
+  // per period — so the register reads only its own scope: the daily rows in DAILY mode, the
+  // selected slot's rows in PERIOD mode. Otherwise the Period 1 mark shows up as saved on
+  // Period 2, or a period mark leaks into the daily register.
   const savedByStudent = useMemo(() => {
-    if (!activeSlot) return {};
+    if (mode === 'PERIOD' && !activeSlot) return {};
     return existingAttendance.reduce((acc, record) => {
-      if (record?.student?.id && String(record?.timetableSlot?.id) === String(activeSlot.id)) {
+      if (!record?.student?.id) return acc;
+      const inScope =
+        mode === 'DAILY'
+          ? !record?.timetableSlot
+          : String(record?.timetableSlot?.id) === String(activeSlot.id);
+      if (inScope) {
         acc[record.student.id] = { id: record.id, status: record.status };
       }
       return acc;
     }, {});
-  }, [existingAttendance, activeSlot]);
+  }, [existingAttendance, activeSlot, mode]);
 
   const savedStatusByStudent = useMemo(
     () => Object.fromEntries(Object.entries(savedByStudent).map(([studentId, record]) => [studentId, record.status])),
@@ -116,23 +127,32 @@ const AttendancePage = () => {
     setAttendanceData({});
   };
 
+  const handleModeChange = (nextMode) => {
+    if (!nextMode) return;
+    setMode(nextMode);
+    setSelectedSlot('');
+    setAttendanceData({});
+  };
+
   const handleAttendanceChange = (studentId, status) => {
     setAttendanceData((prev) => ({
       ...prev,
-      [studentId]: prev[studentId] === status ? undefined : status,
+      [studentId]: status,
     }));
   };
 
+  // Roll-call default: a student nobody touched counts as PRESENT — the teacher only taps
+  // the exceptions (absent or late), exactly like calling the register in class.
   const getStatus = (studentId) =>
-    attendanceData[studentId] ?? savedStatusByStudent[studentId];
+    attendanceData[studentId] ?? savedStatusByStudent[studentId] ?? 'PRESENT';
 
   const getAttendanceStats = () => {
     const statuses = classStudents.map((student) => getStatus(student.id));
     return {
       total: classStudents.length,
-      marked: statuses.filter(Boolean).length,
       present: statuses.filter((status) => status === 'PRESENT').length,
       absent: statuses.filter((status) => status === 'ABSENT').length,
+      late: statuses.filter((status) => status === 'LATE').length,
     };
   };
 
@@ -141,11 +161,16 @@ const AttendancePage = () => {
     Boolean(savedStatusByStudent[student.id]),
   ).length;
 
+  // With the default-PRESENT rule, an untouched register still has work to save: every
+  // student without a saved record, plus every student whose status changed.
   const pendingChanges = classStudents.filter(
-    (student) =>
-      attendanceData[student.id] && attendanceData[student.id] !== savedStatusByStudent[student.id],
+    (student) => getStatus(student.id) !== savedStatusByStudent[student.id],
   );
-  const canSave = Boolean(activeSlot) && pendingChanges.length > 0 && !isSaving;
+  const canSave =
+    Boolean(selectedClass) &&
+    (mode === 'DAILY' || Boolean(activeSlot)) &&
+    pendingChanges.length > 0 &&
+    !isSaving;
 
   const handleSave = async () => {
     if (!canSave) return;
@@ -155,8 +180,8 @@ const AttendancePage = () => {
         const payload = {
           studentId: student.id,
           date: selectedDate,
-          status: attendanceData[student.id],
-          timetableSlotId: activeSlot.id,
+          status: getStatus(student.id),
+          ...(mode === 'PERIOD' ? { timetableSlotId: activeSlot.id } : {}),
         };
         // POST refuses a register that already exists, so a correction has to go through PUT by id.
         const saved = savedByStudent[student.id];
@@ -180,7 +205,7 @@ const AttendancePage = () => {
     }
     if (duplicates > 0) {
       toast.info(
-        `${duplicates} record${duplicates === 1 ? ' was' : 's were'} already marked for that period.`,
+        `${duplicates} record${duplicates === 1 ? ' was' : 's were'} already marked.`,
       );
     }
     if (failed > 0) {
@@ -201,6 +226,17 @@ const AttendancePage = () => {
       </Box>
 
       <Paper sx={{ p: 3, mb: 3 }}>
+        <Box sx={{ mb: 3 }}>
+          <ToggleButtonGroup
+            value={mode}
+            exclusive
+            onChange={(e, next) => handleModeChange(next)}
+            aria-label="Attendance register type"
+          >
+            <ToggleButton value="DAILY">Daily Register</ToggleButton>
+            <ToggleButton value="PERIOD">By Period</ToggleButton>
+          </ToggleButtonGroup>
+        </Box>
         <Grid container spacing={3} alignItems="center">
           <Grid item xs={12} md={3}>
             <FormControl fullWidth>
@@ -241,7 +277,10 @@ const AttendancePage = () => {
           </Grid>
 
           <Grid item xs={12} md={3}>
-            <FormControl fullWidth disabled={!selectedClass || classSlots.length === 0}>
+            <FormControl
+              fullWidth
+              disabled={mode === 'DAILY' || !selectedClass || classSlots.length === 0}
+            >
               <InputLabel id="teacher-period-label">Period</InputLabel>
               <Select
                 labelId="teacher-period-label"
@@ -263,9 +302,13 @@ const AttendancePage = () => {
           <Grid item xs={12} md={3}>
             <Tooltip
               title={
-                activeSlot
-                  ? 'Save the statuses you changed'
-                  : 'Select a class and period to record attendance'
+                mode === 'DAILY'
+                  ? selectedClass
+                    ? 'Save the register for this day'
+                    : 'Select a class to record attendance'
+                  : activeSlot
+                    ? 'Save the statuses you changed'
+                    : 'Select a class and period to record attendance'
               }
             >
               <Box>
@@ -287,11 +330,19 @@ const AttendancePage = () => {
         </Grid>
       </Paper>
 
-      {selectedClass && classSlots.length === 0 && (
+      {selectedClass && mode === 'PERIOD' && classSlots.length === 0 && (
         <Alert severity="info" sx={{ mb: 3 }}>
-          No periods are scheduled for this class on {dayjs(selectedDate).format('dddd')}. Attendance
-          is recorded against a timetable slot, so pick a day with lessons or ask an administrator to
-          publish the timetable.
+          No periods are scheduled for this class on {dayjs(selectedDate).format('dddd')}. Period
+          attendance is recorded against a timetable slot, so pick a day with lessons, ask an
+          administrator to publish the timetable — or use the Daily Register instead.
+        </Alert>
+      )}
+
+      {selectedClass && mode === 'DAILY' && (
+        <Alert severity="info" sx={{ mb: 3 }}>
+          Daily register for {dayjs(selectedDate).format('dddd, MMMM DD, YYYY')} — one mark per
+          student for the whole day, no timetable period needed. Everyone starts as Present;
+          change only the students who are absent or late, then save.
         </Alert>
       )}
 
@@ -304,17 +355,6 @@ const AttendancePage = () => {
                 <Typography variant="h6">{stats.total}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Total Students
-                </Typography>
-              </CardContent>
-            </Card>
-          </Grid>
-          <Grid item xs={6} md={3}>
-            <Card>
-              <CardContent sx={{ textAlign: 'center' }}>
-                <EventNote sx={{ fontSize: 40, color: '#f57c00', mb: 1 }} />
-                <Typography variant="h6">{stats.marked}</Typography>
-                <Typography variant="body2" color="text.secondary">
-                  Marked
                 </Typography>
               </CardContent>
             </Card>
@@ -337,6 +377,17 @@ const AttendancePage = () => {
                 <Typography variant="h6">{stats.absent}</Typography>
                 <Typography variant="body2" color="text.secondary">
                   Absent
+                </Typography>
+              </CardContent>
+            </Card>
+          </Grid>
+          <Grid item xs={6} md={3}>
+            <Card>
+              <CardContent sx={{ textAlign: 'center' }}>
+                <WatchLater sx={{ fontSize: 40, color: '#f57c00', mb: 1 }} />
+                <Typography variant="h6">{stats.late}</Typography>
+                <Typography variant="body2" color="text.secondary">
+                  Late
                 </Typography>
               </CardContent>
             </Card>
@@ -368,6 +419,7 @@ const AttendancePage = () => {
                     <TableCell>Student ID</TableCell>
                     <TableCell align="center">Present</TableCell>
                     <TableCell align="center">Absent</TableCell>
+                    <TableCell align="center">Late</TableCell>
                     <TableCell align="center">Status</TableCell>
                   </TableRow>
                 </TableHead>
@@ -414,21 +466,30 @@ const AttendancePage = () => {
                           />
                         </TableCell>
                         <TableCell align="center">
-                          {attendanceStatus ? (
-                            <Chip
-                              label={
-                                isSaved && attendanceStatus === savedStatusByStudent[student.id]
-                                  ? `${attendanceStatus} (saved)`
-                                  : isSaved
-                                    ? `${attendanceStatus} (unsaved)`
-                                    : attendanceStatus
-                              }
-                              color={attendanceStatus === 'PRESENT' ? 'success' : 'error'}
-                              size="small"
-                            />
-                          ) : (
-                            <Chip label="Not Marked" variant="outlined" size="small" />
-                          )}
+                          <Checkbox
+                            checked={attendanceStatus === 'LATE'}
+                            onChange={() => handleAttendanceChange(student.id, 'LATE')}
+                            color="warning"
+                          />
+                        </TableCell>
+                        <TableCell align="center">
+                          <Chip
+                            label={
+                              isSaved && attendanceStatus === savedStatusByStudent[student.id]
+                                ? `${attendanceStatus} (saved)`
+                                : isSaved
+                                  ? `${attendanceStatus} (unsaved)`
+                                  : attendanceStatus
+                            }
+                            color={
+                              attendanceStatus === 'PRESENT'
+                                ? 'success'
+                                : attendanceStatus === 'LATE'
+                                  ? 'warning'
+                                  : 'error'
+                            }
+                            size="small"
+                          />
                         </TableCell>
                       </TableRow>
                     );

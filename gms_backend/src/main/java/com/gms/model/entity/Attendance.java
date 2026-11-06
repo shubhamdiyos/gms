@@ -39,8 +39,10 @@ public class Attendance extends BaseAuditEntity implements TenantOwned {
     @JoinColumn(name = "student_id", nullable = false)
     private Student student;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "timetable_slot_id", nullable = false)
+    // Nullable since V13: a NULL slot is a daily-register record (the morning roll call for
+    // the whole day); a non-null slot is the original per-period record.
+    @ManyToOne(fetch = FetchType.LAZY, optional = true)
+    @JoinColumn(name = "timetable_slot_id", nullable = true)
     private TimetableSlot timetableSlot;
 
     @Column(name = "status", nullable = false, length = 10) // PRESENT, ABSENT, LATE
