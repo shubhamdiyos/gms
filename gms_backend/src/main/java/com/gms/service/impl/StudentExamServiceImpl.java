@@ -65,8 +65,23 @@ public class StudentExamServiceImpl implements StudentExamService {
         User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
                 .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
 
-        // Check if student is already registered
-        // In a complete implementation, we would check this
+        // Check if student is already registered: registering twice would leave two rows for the
+        // same pupil and subject, and a result may only ever be recorded against one of them.
+        java.util.Optional<StudentExam> existing = studentExamRepository
+                .findByStudent_School_IdAndStudent_IdAndExamSubject_Id(
+                        TenantContext.schoolId(), request.getStudentId(), request.getExamSubjectId());
+        if (existing.isPresent()) {
+            StudentExam registration = existing.get();
+            if (!"1".equals(registration.getStatus())) {
+                User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
+                        .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
+                registration.setStatus("1");
+                registration.setRegistrationDate(request.getRegistrationDate());
+                registration.setUpdatedBy(updater);
+                studentExamRepository.save(registration);
+            }
+            return ResponseEntity.ok(mapToResponse(registration));
+        }
 
         // Create student exam registration
         StudentExam studentExam = new StudentExam();

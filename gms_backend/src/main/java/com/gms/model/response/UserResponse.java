@@ -18,6 +18,8 @@ public class UserResponse {
     private Set<String> roles;
     private String phoneNumber;
     private String employeeId;
+    /** Primary key of the linked staff record, so a client can resolve it against GET /employees. */
+    private Integer employeeRefId;
     private String designation;
     private Integer createdBy;
     private Integer updatedBy;

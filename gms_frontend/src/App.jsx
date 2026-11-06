@@ -30,11 +30,14 @@ import ParentDashboard from './features/dashboard/ParentDashboard';
 import SchoolsPage from './features/schools/SchoolsPage';
 import StudentsPage from './features/students/StudentsPage';
 import EmployeesPage from './features/employees/EmployeesPage';
+import ParentsPage from './features/parents/ParentsPage';
+import UsersPage from './features/users/UsersPage';
 import ClassroomsPage from './features/classrooms/ClassroomsPage';
 import SubjectsPage from './features/subjects/SubjectsPage';
 import AcademicYearsPage from './features/academic-years/AcademicYearsPage';
 import AnnouncementsPage from './features/announcements/AnnouncementsPage';
 import ExamsPage from './features/exams/ExamsPage';
+import ResultsPage from './features/results/ResultsPage';
 
 // Teacher Pages
 import TeacherClassesPage from './features/teacher/TeacherClassesPage';
@@ -222,6 +225,22 @@ const AppRouter = () => {
           }
         />
         <Route
+          path="admin/parents"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+              <ParentsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/users"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+              <UsersPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
           path="admin/classrooms"
           element={
             <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
@@ -258,6 +277,22 @@ const AppRouter = () => {
           element={
             <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
               <ExamsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/results"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+              <ResultsPage />
+            </ProtectedRoute>
+          }
+        />
+        <Route
+          path="admin/reports"
+          element={
+            <ProtectedRoute requiredRoles={[ROLES.ADMIN]}>
+              <FinancialReportsPage />
             </ProtectedRoute>
           }
         />
@@ -454,7 +489,10 @@ function App() {
           </ErrorBoundary>
         </Router>
         <ToastContainer
-          position="top-right"
+          // Page headers put their primary action in the top-right corner, and a toast parked there
+          // sits over it for its full five seconds — the click lands on the dismissable toast instead
+          // of the button. The bottom-left corner overlaps nothing interactive.
+          position="bottom-left"
           autoClose={5000}
           hideProgressBar={false}
           newestOnTop={false}

@@ -9,6 +9,7 @@ import com.gms.model.request.ExamSubjectRequest;
 import com.gms.model.response.ExamResponse;
 import com.gms.model.response.ExamSubjectResponse;
 import com.gms.repository.ExamRepository;
+import com.gms.repository.ExamSubjectRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.*;
 import jakarta.persistence.EntityNotFoundException;
@@ -24,15 +25,18 @@ import java.util.stream.Collectors;
 public class ExamServiceImpl implements ExamService {
 
     private final ExamRepository examRepository;
+    private final ExamSubjectRepository examSubjectRepository;
     private final SchoolService schoolService;
     private final SubjectService subjectService;
     private final UserService userService;
 
     public ExamServiceImpl(ExamRepository examRepository,
+                          ExamSubjectRepository examSubjectRepository,
                           SchoolService schoolService,
                           SubjectService subjectService,
                           UserService userService) {
         this.examRepository = examRepository;
+        this.examSubjectRepository = examSubjectRepository;
         this.schoolService = schoolService;
         this.subjectService = subjectService;
         this.userService = userService;
@@ -113,6 +117,42 @@ public class ExamServiceImpl implements ExamService {
         exam.setDurationMinutes(examRequest.getDurationMinutes());
         exam.setUpdatedBy(updater);
 
+        // Subscriptions are upserts, never deletes: student_exams rows point at exam_subjects, so a
+        // subject dropped from the form must stay on the record rather than orphan a registration.
+        if (examRequest.getExamSubjects() != null) {
+            for (ExamSubjectRequest subjectRequest : examRequest.getExamSubjects()) {
+                ExamSubject existing = exam.getExamSubjects().stream()
+                        .filter(subject -> subject.getSubject() != null
+                                && subject.getSubject().getId().equals(subjectRequest.getSubjectId()))
+                        .findFirst()
+                        .orElse(null);
+                if (existing == null) {
+                    ExamSubject examSubject = new ExamSubject();
+                    examSubject.setSchool(exam.getSchool());
+                    examSubject.setExam(exam);
+                    examSubject.setSubject(subjectService.findById(subjectRequest.getSubjectId())
+                            .orElseThrow(() -> new EntityNotFoundException("Subject not found")));
+                    examSubject.setMaxMarks(subjectRequest.getMaxMarks());
+                    examSubject.setPassingMarks(subjectRequest.getPassingMarks());
+                    examSubject.setExamDate(subjectRequest.getExamDate());
+                    examSubject.setStartTime(subjectRequest.getStartTime());
+                    examSubject.setEndTime(subjectRequest.getEndTime());
+                    examSubject.setStatus("1");
+                    examSubject.setCreatedBy(updater);
+                    examSubject.setUpdatedBy(updater);
+                    exam.getExamSubjects().add(examSubject);
+                } else {
+                    existing.setMaxMarks(subjectRequest.getMaxMarks());
+                    existing.setPassingMarks(subjectRequest.getPassingMarks());
+                    existing.setExamDate(subjectRequest.getExamDate());
+                    existing.setStartTime(subjectRequest.getStartTime());
+                    existing.setEndTime(subjectRequest.getEndTime());
+                    existing.setStatus("1");
+                    existing.setUpdatedBy(updater);
+                }
+            }
+        }
+
         // The response is mapped from the guarded school_name accessor, which answers null for an
         // uninitialized proxy; inside this transaction the load is a real read, not a silent null.
         if (exam.getSchool() != null) {
@@ -173,6 +213,22 @@ public class ExamServiceImpl implements ExamService {
     public ResponseEntity<List<Exam>> getExamsByAcademicYear(String academicYear) {
         List<Exam> exams = examRepository.findBySchool_IdAndAcademicYearAndStatus(TenantContext.schoolId(), academicYear, "1");
         return ResponseEntity.ok(exams);
+    }
+
+    @Transactional(readOnly = true)
+    @Override
+    public ResponseEntity<List<ExamSubjectResponse>> getExamSubjects(Integer id) {
+        // The scoped load answers the tenancy question: a foreign exam id yields nothing here.
+        examRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Exam not found"));
+
+        List<ExamSubjectResponse> subjects = examSubjectRepository
+                .findByExam_School_IdAndExam_Id(TenantContext.schoolId(), id)
+                .stream()
+                .filter(examSubject -> "1".equals(examSubject.getStatus()))
+                .map(this::mapExamSubjectToResponse)
+                .collect(Collectors.toList());
+        return ResponseEntity.ok(subjects);
     }
 
     private ExamResponse mapToResponse(Exam exam) {

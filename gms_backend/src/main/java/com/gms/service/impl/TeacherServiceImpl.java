@@ -22,14 +22,20 @@ public class TeacherServiceImpl implements TeacherService {
     private final UserRepository userRepository;
     private final TeacherAssignmentRepository teacherAssignmentRepository;
     private final StudentRepository studentRepository;
+    private final AcademicYearRepository academicYearRepository;
+    private final ResultRepository resultRepository;
 
     public TeacherServiceImpl(EmployeeRepository employeeRepository, UserRepository userRepository,
                               TeacherAssignmentRepository teacherAssignmentRepository,
-                              StudentRepository studentRepository) {
+                              StudentRepository studentRepository,
+                              AcademicYearRepository academicYearRepository,
+                              ResultRepository resultRepository) {
         this.employeeRepository = employeeRepository;
         this.userRepository = userRepository;
         this.teacherAssignmentRepository = teacherAssignmentRepository;
         this.studentRepository = studentRepository;
+        this.academicYearRepository = academicYearRepository;
+        this.resultRepository = resultRepository;
     }
 
     @Override
@@ -122,8 +128,35 @@ public class TeacherServiceImpl implements TeacherService {
                         student.getStatus(),
                         null,
                         null,
+                        null,
                         null
                 ))
                 .collect(Collectors.toList());
+    }
+
+    @Override
+    @Transactional(readOnly = true)
+    public Long countPendingGrades(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new NotFoundException("USER_NOT_FOUND", "User not found"));
+
+        Employee teacher = user.getEmployee();
+        if (teacher == null) {
+            throw new NotFoundException("TEACHER_NOT_FOUND", "Teacher profile not found for this user");
+        }
+
+        // Assignments are stored per academic year, so the count only makes sense against the
+        // school's current one; without it there is no live workload to report.
+        String academicYear = academicYearRepository.findCurrentYears(TenantContext.schoolId())
+                .stream()
+                .map(AcademicYear::getName)
+                .findFirst()
+                .orElse(null);
+        if (academicYear == null) {
+            return 0L;
+        }
+
+        return resultRepository.countPendingGradesForTeacher(
+                TenantContext.schoolId(), teacher.getId(), academicYear);
     }
 }

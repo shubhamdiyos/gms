@@ -1,12 +1,52 @@
-import { useMemo } from 'react';
-import { Alert, Box, Card, CardContent, Chip, Paper, Grid, Typography } from '@mui/material';
-import { Assessment, Paid, AccountBalance } from '@mui/icons-material';
+import { useMemo, useState } from 'react';
+import {
+  Alert,
+  Box,
+  Button,
+  Card,
+  CardContent,
+  Chip,
+  Dialog,
+  DialogActions,
+  DialogContent,
+  DialogTitle,
+  Grid,
+  MenuItem,
+  Paper,
+  Stack,
+  TextField,
+  Typography,
+} from '@mui/material';
+import { Add, Assessment, Paid, AccountBalance } from '@mui/icons-material';
 import { DataGrid } from '@mui/x-data-grid';
 import dayjs from 'dayjs';
-import { useGetFinancialReportsQuery } from '../../store/api/apiSlice';
+import { toast } from 'react-toastify';
+import {
+  useCreateFinancialReportMutation,
+  useGetFinancialDashboardQuery,
+  useGetFinancialReportsQuery,
+} from '../../store/api/apiSlice';
+import { useAuth } from '../../hooks/useAuth';
+import { ROLES } from '../../constants';
 
 const money = (value) =>
   value == null ? '—' : `₹${Number(value).toLocaleString('en-IN', { maximumFractionDigits: 2 })}`;
+
+const academicYearFor = (date) => {
+  const year = date.year();
+  return `${year}-${year + 1}`;
+};
+
+const emptyForm = () => {
+  const today = dayjs();
+  return {
+    reportName: `${today.format('MMMM YYYY')} Fee Collection`,
+    reportType: 'MONTHLY',
+    reportPeriod: today.format('MMMM YYYY'),
+    academicYear: academicYearFor(today),
+    expenses: '',
+  };
+};
 
 const StatCard = ({ title, value, subtitle, icon, color }) => (
   <Card sx={{ height: '100%' }}>
@@ -44,7 +84,15 @@ const StatCard = ({ title, value, subtitle, icon, color }) => (
 );
 
 const FinancialReportsPage = () => {
+  const { user, getUserRole } = useAuth();
+  const isAdmin = getUserRole() === ROLES.ADMIN;
+
   const { data: reports = [], isLoading, isError } = useGetFinancialReportsQuery();
+  const { data: dashboard } = useGetFinancialDashboardQuery(undefined, { skip: !isAdmin });
+  const [createReport, { isLoading: isSaving }] = useCreateFinancialReportMutation();
+
+  const [dialogOpen, setDialogOpen] = useState(false);
+  const [form, setForm] = useState(emptyForm);
 
   const totals = useMemo(
     () =>
@@ -58,6 +106,46 @@ const FinancialReportsPage = () => {
       ),
     [reports],
   );
+
+  const collectedFees = Number(dashboard?.totalFeeCollected ?? 0);
+  const outstandingFees = Number(dashboard?.totalFeeOutstanding ?? 0);
+  const totalIncome = Number(dashboard?.totalIncome ?? collectedFees);
+  const totalExpenses = Number(form.expenses || 0);
+  const netProfit = totalIncome - totalExpenses;
+
+  const handleField = (field) => (event) => {
+    setForm((current) => ({ ...current, [field]: event.target.value }));
+  };
+
+  const handleGenerate = async () => {
+    if (!form.reportName.trim()) {
+      toast.error('Report name is required');
+      return;
+    }
+    try {
+      await createReport({
+        reportName: form.reportName.trim(),
+        reportType: form.reportType,
+        reportPeriod: form.reportPeriod,
+        academicYear: form.academicYear,
+        generatedDate: dayjs().format('YYYY-MM-DD'),
+        totalIncome,
+        totalExpenses,
+        netProfit,
+        outstandingFees,
+        collectedFees,
+        generatedBy:
+          user?.fullName ||
+          [user?.firstName, user?.lastName].filter(Boolean).join(' ') ||
+          user?.username ||
+          'Administrator',
+      }).unwrap();
+      toast.success('Financial report generated');
+      setDialogOpen(false);
+    } catch (error) {
+      toast.error(error?.data?.message || 'Could not generate the report');
+    }
+  };
 
   const columns = [
     { field: 'reportName', headerName: 'Report', flex: 1.2, minWidth: 180 },
@@ -104,13 +192,38 @@ const FinancialReportsPage = () => {
 
   return (
     <Box>
-      <Box sx={{ mb: 3 }}>
-        <Typography variant="h4" component="h1" gutterBottom>
-          Financial Reports
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Reports generated for your school
-        </Typography>
+      <Box
+        sx={{
+          mb: 3,
+          display: 'flex',
+          flexWrap: 'wrap',
+          gap: 2,
+          alignItems: 'center',
+          justifyContent: 'space-between',
+        }}
+      >
+        <Box>
+          <Typography variant="h4" component="h1" gutterBottom>
+            Financial Reports
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            {isAdmin
+              ? 'Generated from the current fee position'
+              : 'Reports generated for your school'}
+          </Typography>
+        </Box>
+        {isAdmin && (
+          <Button
+            variant="contained"
+            startIcon={<Add />}
+            onClick={() => {
+              setForm(emptyForm());
+              setDialogOpen(true);
+            }}
+          >
+            Generate Report
+          </Button>
+        )}
       </Box>
 
       {isError && (
@@ -164,10 +277,81 @@ const FinancialReportsPage = () => {
         />
       </Paper>
 
-      <Alert severity="info" sx={{ mt: 2 }}>
-        Generating, editing and deleting financial reports stays with the school administrator;
-        the accountant portal is read-only for reports.
-      </Alert>
+      {isAdmin ? (
+        <Alert severity="info" sx={{ mt: 2 }}>
+          A report snapshots the fee totals at the moment it is generated; payments recorded
+          afterwards are reflected in the next report.
+        </Alert>
+      ) : (
+        <Alert severity="info" sx={{ mt: 2 }}>
+          Generating, editing and deleting financial reports stays with the school administrator;
+          the accountant portal is read-only for reports.
+        </Alert>
+      )}
+
+      <Dialog open={dialogOpen} onClose={() => setDialogOpen(false)} maxWidth="sm" fullWidth>
+        <DialogTitle>Generate Financial Report</DialogTitle>
+        <DialogContent dividers>
+          <Stack spacing={2} sx={{ pt: 1 }}>
+            <TextField
+              label="Report name"
+              value={form.reportName}
+              onChange={handleField('reportName')}
+              required
+            />
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField
+                select
+                label="Type"
+                value={form.reportType}
+                onChange={handleField('reportType')}
+                sx={{ flex: 1 }}
+              >
+                {['DAILY', 'WEEKLY', 'MONTHLY', 'QUARTERLY', 'ANNUAL'].map((type) => (
+                  <MenuItem key={type} value={type}>
+                    {type}
+                  </MenuItem>
+                ))}
+              </TextField>
+              <TextField
+                label="Period"
+                value={form.reportPeriod}
+                onChange={handleField('reportPeriod')}
+                sx={{ flex: 1 }}
+              />
+              <TextField
+                label="Academic year"
+                value={form.academicYear}
+                onChange={handleField('academicYear')}
+                sx={{ flex: 1 }}
+              />
+            </Stack>
+            <Stack direction={{ xs: 'column', sm: 'row' }} spacing={2}>
+              <TextField label="Collected fees" value={money(collectedFees)} disabled fullWidth />
+              <TextField
+                label="Outstanding fees"
+                value={money(outstandingFees)}
+                disabled
+                fullWidth
+              />
+            </Stack>
+            <TextField
+              label="Expenses recorded for this period"
+              type="number"
+              value={form.expenses}
+              onChange={handleField('expenses')}
+              helperText={`Income ${money(totalIncome)} − expenses = net ${money(netProfit)}`}
+              inputProps={{ min: 0, step: '0.01' }}
+            />
+          </Stack>
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={() => setDialogOpen(false)}>Cancel</Button>
+          <Button variant="contained" onClick={handleGenerate} disabled={isSaving}>
+            {isSaving ? 'Generating…' : 'Generate'}
+          </Button>
+        </DialogActions>
+      </Dialog>
     </Box>
   );
 };

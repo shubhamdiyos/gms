@@ -17,4 +17,11 @@ public interface StudentExamRepository extends TenantScopedRepository<StudentExa
     List<StudentExam> findByExamSubject_Exam_School_IdAndExamSubject_Id(Integer schoolId, Integer examSubjectId);
 
     List<StudentExam> findByStudent_School_IdAndStudent_Id(Integer schoolId, Integer studentId);
+
+    /**
+     * One pupil's registration for one exam subject, if it exists. Grade entry uses this to stay
+     * idempotent: registering twice must not create a second row that then carries its own result.
+     */
+    java.util.Optional<StudentExam> findByStudent_School_IdAndStudent_IdAndExamSubject_Id(
+            Integer schoolId, Integer studentId, Integer examSubjectId);
 }

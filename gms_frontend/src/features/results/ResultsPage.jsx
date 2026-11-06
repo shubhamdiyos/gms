@@ -16,15 +16,22 @@ import {
   Alert,
   Autocomplete,
   CircularProgress,
+  FormControl,
+  InputLabel,
+  Select,
+  MenuItem,
 } from '@mui/material';
 import { DataGrid } from '@mui/x-data-grid';
 import { Add, Edit, Delete } from '@mui/icons-material';
-import { useForm } from 'react-hook-form';
+import { Controller, useForm } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
 import * as yup from 'yup';
 import {
   useGetStudentSearchQuery,
   useGetResultsForStudentQuery,
+  useGetExamsQuery,
+  useGetExamSubjectsQuery,
+  useRegisterStudentForExamMutation,
   useRecordResultMutation,
   useUpdateResultMutation,
   useDeleteResultMutation,
@@ -32,12 +39,6 @@ import {
 import { toast } from 'react-toastify';
 
 const schema = yup.object({
-  studentExamId: yup
-    .number()
-    .typeError('Student Exam ID must be a number')
-    .integer('Student Exam ID must be an integer')
-    .positive('Student Exam ID must be positive')
-    .required('Student Exam ID is required'),
   obtainedMarks: yup
     .number()
     .typeError('Obtained marks must be a number')
@@ -53,6 +54,9 @@ const ResultsPage = () => {
   const [studentTerm, setStudentTerm] = useState('');
   const [open, setOpen] = useState(false);
   const [editingResult, setEditingResult] = useState(null);
+  const [examId, setExamId] = useState('');
+  const [examSubjectId, setExamSubjectId] = useState('');
+  const [saving, setSaving] = useState(false);
 
   // Server-side, because a school at NFR-01 volume has 50,000 pupils and a picker over all of
   // them is not a picker. The term goes to /students/search as `query`; an empty term asks for
@@ -72,12 +76,19 @@ const ResultsPage = () => {
     skip: !selectedStudentId,
   });
 
+  const { data: exams = [] } = useGetExamsQuery(undefined, { skip: !open });
+  const { data: examSubjects = [], isFetching: subjectsLoading } = useGetExamSubjectsQuery(
+    examId,
+    { skip: !open || !examId },
+  );
+
+  const [registerStudentForExam] = useRegisterStudentForExamMutation();
   const [recordResult] = useRecordResultMutation();
   const [updateResult] = useUpdateResultMutation();
   const [deleteResult] = useDeleteResultMutation();
 
   const {
-    register,
+    control,
     handleSubmit,
     reset,
     formState: { errors },
@@ -97,22 +108,23 @@ const ResultsPage = () => {
     [studentPage],
   );
 
+  const pickedSubject = useMemo(
+    () => examSubjects.find((subject) => String(subject.id) === String(examSubjectId)) ?? null,
+    [examSubjects, examSubjectId],
+  );
+
   const handleOpen = (result = null) => {
     setEditingResult(result);
+    setExamId('');
+    setExamSubjectId('');
     if (result) {
       reset({
-        studentExamId: result.studentExamId ?? '',
         obtainedMarks: result.obtainedMarks ?? '',
         grade: result.grade || '',
         remarks: result.remarks || '',
       });
     } else {
-      reset({
-        studentExamId: '',
-        obtainedMarks: '',
-        grade: '',
-        remarks: '',
-      });
+      reset({ obtainedMarks: '', grade: '', remarks: '' });
     }
     setOpen(true);
   };
@@ -123,25 +135,62 @@ const ResultsPage = () => {
   };
 
   const onSubmit = async (data) => {
-    try {
-      const payload = {
-        studentExamId: Number(data.studentExamId),
-        obtainedMarks: Number(data.obtainedMarks),
-        grade: data.grade,
-        remarks: data.remarks,
-      };
+    const marks = Number(data.obtainedMarks);
+    if (pickedSubject?.maxMarks != null && marks > pickedSubject.maxMarks) {
+      toast.error(`Obtained marks cannot exceed the subject maximum of ${pickedSubject.maxMarks}`);
+      return;
+    }
 
+    setSaving(true);
+    try {
       if (editingResult) {
-        await updateResult({ id: editingResult.id, ...payload }).unwrap();
+        await updateResult({
+          id: editingResult.id,
+          studentExamId: editingResult.studentExamId,
+          obtainedMarks: marks,
+          grade: data.grade,
+          remarks: data.remarks,
+        }).unwrap();
         toast.success('Result updated successfully');
       } else {
-        await recordResult(payload).unwrap();
-        toast.success('Result recorded successfully');
+        if (!examSubjectId) {
+          toast.error('Choose the exam and the subject first');
+          setSaving(false);
+          return;
+        }
+
+        // Registration is idempotent on the server, so a pupil who never sat this subject is
+        // registered now and one who already is gets the same entry back.
+        const registration = await registerStudentForExam({
+          studentId: Number(selectedStudentId),
+          examSubjectId: Number(examSubjectId),
+          registrationDate: new Date().toISOString().slice(0, 10),
+        }).unwrap();
+
+        const alreadyScored = (Array.isArray(results) ? results : []).find(
+          (row) => row.studentExamId === registration.id,
+        );
+        const payload = {
+          studentExamId: registration.id,
+          obtainedMarks: marks,
+          grade: data.grade,
+          remarks: data.remarks,
+        };
+
+        if (alreadyScored) {
+          await updateResult({ id: alreadyScored.id, ...payload }).unwrap();
+          toast.success('Existing result for this subject was updated');
+        } else {
+          await recordResult(payload).unwrap();
+          toast.success('Result recorded successfully');
+        }
       }
 
       handleClose();
-    } catch {
-      toast.error('Operation failed');
+    } catch (error) {
+      toast.error(error?.data?.message || 'Could not save the result');
+    } finally {
+      setSaving(false);
     }
   };
 
@@ -346,44 +395,112 @@ const ResultsPage = () => {
           <DialogTitle>{editingResult ? 'Edit Result' : 'Add New Result'}</DialogTitle>
           <DialogContent>
             <Grid container spacing={2} sx={{ mt: 1 }}>
-              <Grid item xs={12}>
-                <TextField
-                  {...register('studentExamId')}
-                  fullWidth
-                  label="Student Exam ID"
-                  type="number"
-                  error={!!errors.studentExamId}
-                  helperText={errors.studentExamId?.message}
+              {editingResult ? (
+                <Grid item xs={12}>
+                  <Alert severity="info">
+                    {editingResult.examName ?? 'Exam'} · {editingResult.subjectName ?? 'Subject'}
+                  </Alert>
+                </Grid>
+              ) : (
+                <>
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth>
+                      <InputLabel id="result-exam-label">Exam</InputLabel>
+                      <Select
+                        labelId="result-exam-label"
+                        label="Exam"
+                        value={examId}
+                        onChange={(event) => {
+                          setExamId(event.target.value);
+                          setExamSubjectId('');
+                        }}
+                      >
+                        {exams.map((exam) => (
+                          <MenuItem key={exam.id} value={exam.id}>
+                            {exam.name} · {exam.academicYear}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  <Grid item xs={12} md={6}>
+                    <FormControl fullWidth disabled={!examId || subjectsLoading}>
+                      <InputLabel id="result-subject-label">Subject</InputLabel>
+                      <Select
+                        labelId="result-subject-label"
+                        label="Subject"
+                        value={examSubjectId}
+                        onChange={(event) => setExamSubjectId(event.target.value)}
+                      >
+                        {examSubjects.map((subject) => (
+                          <MenuItem key={subject.id} value={subject.id}>
+                            {subject.subjectName} · max {subject.maxMarks}
+                          </MenuItem>
+                        ))}
+                      </Select>
+                    </FormControl>
+                  </Grid>
+                  {examId && !subjectsLoading && examSubjects.length === 0 && (
+                    <Grid item xs={12}>
+                      <Alert severity="warning">
+                        This exam has no subjects yet. Add subjects to the exam before recording
+                        results.
+                      </Alert>
+                    </Grid>
+                  )}
+                </>
+              )}
+              <Grid item xs={12} md={6}>
+                <Controller
+                  name="obtainedMarks"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      fullWidth
+                      label="Obtained Marks"
+                      type="number"
+                      error={!!errors.obtainedMarks}
+                      helperText={
+                        errors.obtainedMarks?.message ||
+                        (pickedSubject?.maxMarks != null
+                          ? `Out of ${pickedSubject.maxMarks}`
+                          : undefined)
+                      }
+                    />
+                  )}
                 />
               </Grid>
               <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('obtainedMarks')}
-                  fullWidth
-                  label="Obtained Marks"
-                  type="number"
-                  error={!!errors.obtainedMarks}
-                  helperText={errors.obtainedMarks?.message}
-                />
-              </Grid>
-              <Grid item xs={12} md={6}>
-                <TextField
-                  {...register('grade')}
-                  fullWidth
-                  label="Grade"
-                  error={!!errors.grade}
-                  helperText={errors.grade?.message}
+                <Controller
+                  name="grade"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      fullWidth
+                      label="Grade"
+                      error={!!errors.grade}
+                      helperText={errors.grade?.message}
+                    />
+                  )}
                 />
               </Grid>
               <Grid item xs={12}>
-                <TextField
-                  {...register('remarks')}
-                  fullWidth
-                  label="Remarks"
-                  multiline
-                  rows={3}
-                  error={!!errors.remarks}
-                  helperText={errors.remarks?.message}
+                <Controller
+                  name="remarks"
+                  control={control}
+                  render={({ field }) => (
+                    <TextField
+                      {...field}
+                      fullWidth
+                      label="Remarks"
+                      multiline
+                      rows={3}
+                      error={!!errors.remarks}
+                      helperText={errors.remarks?.message}
+                    />
+                  )}
                 />
               </Grid>
               <Grid item xs={12}>

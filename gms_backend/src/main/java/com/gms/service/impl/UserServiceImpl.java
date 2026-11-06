@@ -33,11 +33,14 @@ public class UserServiceImpl implements UserService {
     private final UserRepository userRepository;
     private final SchoolService schoolService;
     private final PasswordEncoder passwordEncoder;
+    private final com.gms.repository.EmployeeRepository employeeRepository;
 
-    public UserServiceImpl(UserRepository userRepository, SchoolService schoolService, PasswordEncoder passwordEncoder) {
+    public UserServiceImpl(UserRepository userRepository, SchoolService schoolService, PasswordEncoder passwordEncoder,
+                           com.gms.repository.EmployeeRepository employeeRepository) {
         this.userRepository = userRepository;
         this.schoolService = schoolService;
         this.passwordEncoder = passwordEncoder;
+        this.employeeRepository = employeeRepository;
     }
 
     public User create(User entity) {
@@ -104,6 +107,19 @@ public class UserServiceImpl implements UserService {
 
         if (request.getRoles() != null && !request.getRoles().isEmpty()) {
             user.setRoles(authoriseRoles(request.getRoles()));
+        }
+
+        // A teacher's whole profile is reached through user.employee (TeacherServiceImpl), so the
+        // link is resolved here and refused when the employee belongs to another school. The
+        // request only carries an id; the entity is loaded and tenant-checked before it is attached.
+        if (request.getEmployeeId() != null) {
+            Employee employee = employeeRepository.findById(request.getEmployeeId())
+                    .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
+            if (!employee.getSchool().getId().equals(TenantContext.schoolId())) {
+                throw new com.gms.exception.TenantAccessDeniedException(
+                        "Employee does not belong to current school");
+            }
+            user.setEmployee(employee);
         }
 
         return user;
@@ -288,9 +304,15 @@ public class UserServiceImpl implements UserService {
             response.setUpdatedBy(user.getUpdatedBy().getId());
         }
         Employee employee = user.getEmployee();
-        if (employee != null && org.hibernate.Hibernate.isInitialized(employee)) {
-            response.setEmployeeId(employee.getEmployeeId());
-            response.setDesignation(employee.getDesignation());
+        if (employee != null) {
+            // The id answers from the lazy proxy without touching the database, so a list query that
+            // never joined the row can still report which staff record the account belongs to. The
+            // business fields need the row itself and are mapped only once it has been loaded.
+            response.setEmployeeRefId(employee.getId());
+            if (org.hibernate.Hibernate.isInitialized(employee)) {
+                response.setEmployeeId(employee.getEmployeeId());
+                response.setDesignation(employee.getDesignation());
+            }
         }
         return response;
     }

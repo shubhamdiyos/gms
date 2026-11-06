@@ -311,12 +311,14 @@ const EmployeesPage = () => {
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth error={!!errors.department}>
-                  <InputLabel>Department</InputLabel>
+                  <InputLabel id="department-label" htmlFor="department">
+                    Department
+                  </InputLabel>
                   <Controller
                     name="department"
                     control={control}
                     render={({ field }) => (
-                      <Select {...field} label="Department">
+                      <Select {...field} id="department" labelId="department-label" label="Department">
                         <MenuItem value="TEACHING">Teaching</MenuItem>
                         <MenuItem value="ADMINISTRATION">Administration</MenuItem>
                         <MenuItem value="SUPPORT">Support</MenuItem>
@@ -333,12 +335,14 @@ const EmployeesPage = () => {
               </Grid>
               <Grid item xs={12} md={6}>
                 <FormControl fullWidth error={!!errors.teaching}>
-                  <InputLabel>Teaching</InputLabel>
+                  <InputLabel id="teaching-label" htmlFor="teaching">
+                    Teaching
+                  </InputLabel>
                   <Controller
                     name="teaching"
                     control={control}
                     render={({ field }) => (
-                      <Select {...field} label="Teaching">
+                      <Select {...field} id="teaching" labelId="teaching-label" label="Teaching">
                         <MenuItem value={true}>Yes</MenuItem>
                         <MenuItem value={false}>No</MenuItem>
                       </Select>

@@ -23,8 +23,9 @@ public class ParentResponse {
     private String phoneNumber;
     private List<StudentResponse> students;
 
-    /** ACD-13-02: populated only on the creation response so the admin can relay the credential. */
+    /** ACD-13-02: username and temporary password are populated only on the creation response. */
     private String temporaryPassword;
+    private String username;
 
     private Boolean enabled;
 }

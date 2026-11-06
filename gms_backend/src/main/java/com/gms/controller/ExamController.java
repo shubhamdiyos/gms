@@ -3,6 +3,7 @@ package com.gms.controller;
 import com.gms.model.entity.Exam;
 import com.gms.model.request.ExamRequest;
 import com.gms.model.response.ExamResponse;
+import com.gms.model.response.ExamSubjectResponse;
 import com.gms.security.TenantContext;
 import com.gms.service.ExamService;
 import jakarta.validation.Valid;
@@ -52,6 +53,12 @@ public class ExamController {
     @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
     public ResponseEntity<Exam> getExamById(@PathVariable Integer id) {
         return examService.getExamById(id);
+    }
+
+    @GetMapping("/{id}/subjects")
+    @PreAuthorize("hasAnyAuthority('ADMIN', 'SUPERADMIN', 'TEACHER')")
+    public ResponseEntity<List<ExamSubjectResponse>> getExamSubjects(@PathVariable Integer id) {
+        return examService.getExamSubjects(id);
     }
 
     @GetMapping("/academic-year")

@@ -185,10 +185,12 @@ public class ParentServiceImpl implements ParentService {
         Parent savedParent = parentRepository.save(parent);
 
         // ACD-13-02: generate a unique secure temporary password instead of a shared hardcoded one.
-        String temporaryPassword = createUserForParent(savedParent);
+        // The generated username travels with it, otherwise the admin has no way to name the login.
+        ProvisionedAccount credential = provisionParentUser(savedParent);
 
         ParentResponse response = toResponse(savedParent);
-        response.setTemporaryPassword(temporaryPassword);
+        response.setUsername(credential.username());
+        response.setTemporaryPassword(credential.temporaryPassword());
         return ResponseEntity.ok(response);
     }
 
@@ -372,7 +374,7 @@ public class ParentServiceImpl implements ParentService {
      *
      * @return the generated plaintext temporary password (returned once to the admin for relay)
      */
-    private String createUserForParent(Parent parent) {
+    private ProvisionedAccount provisionParentUser(Parent parent) {
         if (userService.existsByEmail(parent.getEmail())) {
             throw new IllegalStateException("A user with this email already exists.");
         }
@@ -391,11 +393,14 @@ public class ParentServiceImpl implements ParentService {
         user.setEnabled(true);
 
         User savedUser = userService.save(user);
-        
+
         parent.setUser(savedUser);
         parentRepository.save(parent);
-        return temporaryPassword;
+        return new ProvisionedAccount(savedUser.getUsername(), temporaryPassword);
     }
+
+    /** The login name generated for a provisioned account plus its one-time plaintext password. */
+    private record ProvisionedAccount(String username, String temporaryPassword) {}
 
     // Service-to-service communication methods
     @Override
@@ -427,6 +432,7 @@ public class ParentServiceImpl implements ParentService {
                 parent.getPhoneNumber(),
                 studentResponses,
                 null,
+                null,
                 parent.getUser() != null ? parent.getUser().isEnabled() : null
         );
     }
@@ -445,6 +451,7 @@ public class ParentServiceImpl implements ParentService {
                 s.getDateOfBirth(),
                 s.getGender(),
                 s.getStatus(),
+                null,
                 null,
                 s.getClassroom() != null ? s.getClassroom().getName() : null,
                 s.getSection() != null ? s.getSection().getName() : null

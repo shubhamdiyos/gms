@@ -320,7 +320,7 @@ const DashboardLayout = () => {
             },
           }}
         >
-          <Sidebar />
+          <Sidebar onNavigate={() => setMobileOpen(false)} />
         </Drawer>
 
         {/* Desktop drawer */}
@@ -344,6 +344,9 @@ const DashboardLayout = () => {
         component="main"
         sx={{
           flexGrow: 1,
+          // A flex item's min-width defaults to auto, so a wide DataGrid would otherwise
+          // stretch the whole layout past the viewport and push header actions off-screen.
+          minWidth: 0,
           p: 3,
           width: { md: `calc(100% - ${DRAWER_WIDTH}px)` },
           minHeight: '100vh',

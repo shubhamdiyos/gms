@@ -13,6 +13,7 @@ import {
   useGetParentProfileQuery,
   useGetParentChildrenQuery,
 } from '../../store/api/apiSlice';
+import AnnouncementsPanel from '../../components/common/AnnouncementsPanel';
 import { ROUTES } from '../../constants';
 
 const OUTSTANDING_FEE_STATUSES = ['PENDING', 'PARTIAL', 'OVERDUE'];
@@ -306,6 +307,10 @@ const ParentDashboard = () => {
           </Paper>
         </Grid>
       </Grid>
+
+      <Box sx={{ mt: 3 }}>
+        <AnnouncementsPanel audience="PARENTS" />
+      </Box>
     </Box>
   );
 };

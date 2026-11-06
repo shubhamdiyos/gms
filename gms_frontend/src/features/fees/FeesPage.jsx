@@ -14,7 +14,9 @@ import {
   IconButton,
   Tooltip,
   Button,
+  Checkbox,
   FormControl,
+  FormControlLabel,
   InputLabel,
   Select,
   MenuItem,
@@ -26,6 +28,7 @@ import {
   Delete,
   Visibility,
   AttachMoney,
+  AssignmentInd,
 } from '@mui/icons-material';
 import { useForm, Controller } from 'react-hook-form';
 import { yupResolver } from '@hookform/resolvers/yup';
@@ -35,6 +38,10 @@ import {
   useCreateFeeMutation,
   useUpdateFeeMutation,
   useDeleteFeeMutation,
+  useGetClassroomsQuery,
+  useGetStudentSearchQuery,
+  useGetStudentFeesQuery,
+  useCreateStudentFeeMutation,
 } from '../../store/api/apiSlice';
 import { toast } from 'react-toastify';
 import dayjs from 'dayjs';
@@ -63,6 +70,11 @@ const STATUS_META = {
 const FeesPage = () => {
   const [open, setOpen] = useState(false);
   const [editingFee, setEditingFee] = useState(null);
+  // Assigning a structure to pupils is what turns it into collectable student fees. The dialog is
+  // the only client of POST /student-fees, which is ADMIN-only in the same way the structure CRUD is.
+  const [assignFee, setAssignFee] = useState(null);
+  const [assignSelection, setAssignSelection] = useState([]);
+  const [assigning, setAssigning] = useState(false);
 
   // FeeController create/update/delete are hasAuthority('ADMIN'); ACCOUNTANT gets GET reads only,
   // so the write affordances must not render for it (a click would 403 and toast).
@@ -73,6 +85,66 @@ const FeesPage = () => {
   const [createFee] = useCreateFeeMutation();
   const [updateFee] = useUpdateFeeMutation();
   const [deleteFee] = useDeleteFeeMutation();
+  const [createStudentFee] = useCreateStudentFeeMutation();
+  const { data: classrooms = [] } = useGetClassroomsQuery();
+  const { data: studentPage } = useGetStudentSearchQuery({ page: 0, size: 100, sort: 'lastName,asc' });
+  const { data: studentFees = [], refetch: refetchStudentFees } = useGetStudentFeesQuery();
+
+  const students = Array.isArray(studentPage?.content) ? studentPage.content : [];
+  const classroomName = (classId) =>
+    classrooms.find((classroom) => classroom.id === classId)?.name || 'No class';
+  const billedStudentIds = assignFee
+    ? new Set(studentFees.filter((fee) => fee.feeId === assignFee.id).map((fee) => fee.studentId))
+    : new Set();
+
+  const handleOpenAssign = (fee) => {
+    // Preselect the class this structure names, but never the pupils already billed for it.
+    const billed = new Set(studentFees.filter((row) => row.feeId === fee.id).map((row) => row.studentId));
+    const matching = fee.classGrade
+      ? students.filter(
+          (student) => classroomName(student.classId).toLowerCase() === String(fee.classGrade).toLowerCase()
+        )
+      : students;
+    setAssignSelection(matching.filter((student) => !billed.has(student.id)).map((student) => student.id));
+    setAssignFee(fee);
+  };
+
+  const closeAssign = () => {
+    setAssignFee(null);
+    setAssignSelection([]);
+  };
+
+  const toggleAssign = (studentId) => {
+    setAssignSelection((current) =>
+      current.includes(studentId)
+        ? current.filter((id) => id !== studentId)
+        : [...current, studentId]
+    );
+  };
+
+  const handleAssign = async () => {
+    if (!assignFee || assignSelection.length === 0) return;
+    setAssigning(true);
+    let assigned = 0;
+    let failed = 0;
+    for (const studentId of assignSelection) {
+      try {
+        await createStudentFee({ studentId, feeId: assignFee.id }).unwrap();
+        assigned += 1;
+      } catch {
+        failed += 1;
+      }
+    }
+    setAssigning(false);
+    if (assigned > 0) {
+      toast.success(`Fee assigned to ${assigned} student${assigned === 1 ? '' : 's'}`);
+      refetchStudentFees();
+    }
+    if (failed > 0) {
+      toast.error(`${failed} student${failed === 1 ? '' : 's'} could not be billed — see the ledger for details`);
+    }
+    if (failed === 0) closeAssign();
+  };
 
   const {
     register,
@@ -208,13 +280,18 @@ const FeesPage = () => {
           {
             field: 'actions',
             headerName: 'Actions',
-            width: 150,
+            width: 190,
             sortable: false,
             renderCell: (params) => (
               <Box>
                 <Tooltip title="View">
                   <IconButton size="small">
                     <Visibility />
+                  </IconButton>
+                </Tooltip>
+                <Tooltip title="Assign to students">
+                  <IconButton size="small" onClick={() => handleOpenAssign(params.row)}>
+                    <AssignmentInd />
                   </IconButton>
                 </Tooltip>
                 <Tooltip title="Edit">
@@ -413,6 +490,64 @@ const FeesPage = () => {
             </Button>
           </DialogActions>
         </form>
+      </Dialog>
+
+      {/* Assign a structure to students: creates the PENDING student-fee rows the accountant
+          collects against. Students already billed for this structure are shown disabled so a
+          double click cannot bill them twice. */}
+      <Dialog open={Boolean(assignFee)} onClose={closeAssign} maxWidth="sm" fullWidth>
+        <DialogTitle>Assign fee to students</DialogTitle>
+        <DialogContent>
+          <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
+            {assignFee?.feeType} · ₹{Number(assignFee?.amount || 0).toLocaleString('en-IN')} ·{' '}
+            {assignFee?.classGrade || 'all classes'}
+            {assignFee?.dueDate ? ` · due ${dayjs(assignFee.dueDate).format('DD MMM YYYY')}` : ''}
+          </Typography>
+          {students.length === 0 ? (
+            <Alert severity="info">No students to bill yet. Add students first.</Alert>
+          ) : (
+            <Box
+              sx={{
+                maxHeight: 360,
+                overflow: 'auto',
+                border: 1,
+                borderColor: 'divider',
+                borderRadius: 1,
+                px: 1,
+              }}
+            >
+              {students.map((student) => {
+                const billed = billedStudentIds.has(student.id);
+                return (
+                  <FormControlLabel
+                    key={student.id}
+                    sx={{ display: 'flex', mr: 0 }}
+                    disabled={billed}
+                    control={
+                      <Checkbox
+                        checked={billed || assignSelection.includes(student.id)}
+                        onChange={() => toggleAssign(student.id)}
+                      />
+                    }
+                    label={`${student.firstName} ${student.lastName} · ${classroomName(student.classId)}${
+                      billed ? ' · already billed' : ''
+                    }`}
+                  />
+                );
+              })}
+            </Box>
+          )}
+        </DialogContent>
+        <DialogActions>
+          <Button onClick={closeAssign}>Cancel</Button>
+          <Button
+            variant="contained"
+            disabled={assigning || assignSelection.length === 0}
+            onClick={handleAssign}
+          >
+            {assigning ? 'Assigning…' : `Assign to ${assignSelection.length} selected`}
+          </Button>
+        </DialogActions>
       </Dialog>
     </Box>
   );

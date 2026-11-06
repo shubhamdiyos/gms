@@ -37,4 +37,28 @@ public interface ResultRepository extends TenantScopedRepository<Result> {
             + "WHERE st.school.id = :schoolId AND st.id = :studentId")
     List<Result> findByStudentExam_Student_School_IdAndStudentExam_Student_Id(@Param("schoolId") Integer schoolId,
                                                                              @Param("studentId") Integer studentId);
+
+    /**
+     * Unscored (pupil, paper) pairs across a teacher's current-year assignments: every active
+     * pupil in each assigned classroom, against every active paper of the assigned subject on an
+     * active exam of the same year, that has no result yet. Distinct pairs, because one paper can
+     * reach a pupil through more than one assignment.
+     */
+    @Query(value = "SELECT COUNT(DISTINCT st.id || ':' || es.id) "
+            + "FROM students st "
+            + "JOIN teacher_assignments ta ON ta.classroom_id = st.classroom_id "
+            + "JOIN exam_subjects es ON es.subject_id = ta.subject_id "
+            + "    AND es.school_id = :schoolId AND es.status = '1' "
+            + "JOIN exams e ON e.id = es.exam_id AND e.status = '1' AND e.academic_year = :academicYear "
+            + "    AND e.exam_date <= CURRENT_DATE "
+            + "WHERE st.school_id = :schoolId AND st.status = '1' "
+            + "  AND ta.teacher_id = :teacherId AND ta.deleted = false AND ta.academic_year = :academicYear "
+            + "  AND NOT EXISTS ("
+            + "    SELECT 1 FROM student_exams se "
+            + "    JOIN results r ON r.student_exam_id = se.id AND r.status = '1' "
+            + "    WHERE se.student_id = st.id AND se.exam_subject_id = es.id AND se.status = '1'"
+            + "  )", nativeQuery = true)
+    Long countPendingGradesForTeacher(@Param("schoolId") Integer schoolId,
+                                      @Param("teacherId") Integer teacherId,
+                                      @Param("academicYear") String academicYear);
 }

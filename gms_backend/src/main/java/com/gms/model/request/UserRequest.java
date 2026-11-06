@@ -30,4 +30,11 @@ public class UserRequest {
     private String phoneNumber;
 
     private Set<String> roles; // role codes aligned with RoleEnum
+
+    /**
+     * The staff record this account belongs to. A TEACHER login resolves its profile, classes and
+     * students through {@code user.employee}, so an account created without this link can sign in
+     * but has no teacher record behind it.
+     */
+    private Integer employeeId;
 }

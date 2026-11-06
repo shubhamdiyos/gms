@@ -97,18 +97,11 @@ public class FinancialReportServiceImpl implements FinancialReportService {
 
     @Override
     public ResponseEntity<?> deleteFinancialReport(Integer id) {
-        // Validate financial report exists
+        // findById is tenant-scoped, so a report from another school is a 404 here.
         FinancialReport financialReport = financialReportRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial report not found"));
 
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
-
-        // Soft delete by setting status to ARCHIVED or similar
-        financialReport.setUpdatedBy(updater);
-
-        financialReportRepository.save(financialReport);
+        financialReportRepository.delete(financialReport);
         return ResponseEntity.ok("Financial report deleted successfully");
     }
 
