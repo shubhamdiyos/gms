@@ -1,5 +1,5 @@
 .PHONY: help build up down restart logs logs-db logs-backend logs-frontend clean rebuild stop \
-        start ps shell-backend shell-frontend shell-db
+        start ps shell-backend shell-frontend shell-db demo demo-sweep
 
 # Default target
 help:
@@ -14,6 +14,8 @@ help:
 	@echo "  make logs-db    - Show database logs"
 	@echo "  make logs-backend - Show backend logs"
 	@echo "  make logs-frontend - Show frontend logs"
+	@echo "  make demo       - Seed the demo tenant, verify it, and serve both web clients"
+	@echo "  make demo-sweep - Open every demo screen in headless Chromium (needs 'make demo' running)"
 	@echo "  make clean      - Stop containers and remove volumes (DELETES DATABASE DATA; needs CONFIRM=yes)"
 	@echo "  make rebuild    - Rebuild and restart all services"
 	@echo "  make stop       - Stop all services"
@@ -22,6 +24,17 @@ help:
 	@echo "  make shell-backend - Open shell in backend container"
 	@echo "  make shell-frontend - Open shell in frontend container"
 	@echo "  make shell-db   - Open PostgreSQL shell"
+
+# Seed the demo tenant through the API, verify the five role logins, and serve both clients.
+# Needs a .env with APP_SUPERADMIN_* and SECURITY_JWT_SECRET; see scripts/demo/README.md.
+demo:
+	scripts/demo/run-demo.sh --docker
+
+# Both sweeps read /tmp/gms-demo-tenant.env and write artifacts/demo-sweep/.
+demo-sweep:
+	node scripts/demo/browser-sweep.mjs
+	node scripts/demo/browser-sweep-flutter.mjs
+
 
 # Build all images
 build:
