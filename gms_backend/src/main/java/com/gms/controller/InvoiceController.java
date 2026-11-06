@@ -1,7 +1,6 @@
 package com.gms.controller;
 
 import com.gms.exception.TenantAccessDeniedException;
-import com.gms.model.entity.Invoice;
 import com.gms.model.entity.Parent;
 import com.gms.model.entity.User;
 import com.gms.model.request.InvoiceRequest;
@@ -52,19 +51,19 @@ public class InvoiceController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<Invoice>> getAllInvoices() {
+    public ResponseEntity<List<InvoiceResponse>> getAllInvoices() {
         return invoiceService.getAllInvoices();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<Invoice> getInvoiceById(@PathVariable Integer id) {
+    public ResponseEntity<InvoiceResponse> getInvoiceById(@PathVariable Integer id) {
         return invoiceService.getInvoiceById(id);
     }
 
     @GetMapping("/date-range")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<Invoice>> getInvoicesByDateRange(
+    public ResponseEntity<List<InvoiceResponse>> getInvoicesByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         return invoiceService.getInvoicesByDateRange(startDate, endDate);
@@ -72,7 +71,7 @@ public class InvoiceController {
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
-    public ResponseEntity<List<Invoice>> getInvoicesByStudent(@PathVariable Integer studentId) {
+    public ResponseEntity<List<InvoiceResponse>> getInvoicesByStudent(@PathVariable Integer studentId) {
         // F-3 fix: PARENT callers must verify they are the parent of this student
         if (TenantContext.roles().contains("PARENT")) {
             validateParentOwnsStudent(TenantContext.username(), studentId);

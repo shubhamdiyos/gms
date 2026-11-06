@@ -1,6 +1,5 @@
 package com.gms.service;
 
-import com.gms.model.entity.Invoice;
 import com.gms.model.request.InvoiceRequest;
 import com.gms.model.response.InvoiceResponse;
 import org.springframework.http.ResponseEntity;
@@ -16,11 +15,11 @@ public interface InvoiceService {
 
     ResponseEntity<?> deleteInvoice(Integer id);
 
-    ResponseEntity<List<Invoice>> getAllInvoices();
+    ResponseEntity<List<InvoiceResponse>> getAllInvoices();
 
-    ResponseEntity<Invoice> getInvoiceById(Integer id);
+    ResponseEntity<InvoiceResponse> getInvoiceById(Integer id);
 
-    ResponseEntity<List<Invoice>> getInvoicesByDateRange(LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<InvoiceResponse>> getInvoicesByDateRange(LocalDate startDate, LocalDate endDate);
 
-    ResponseEntity<List<Invoice>> getInvoicesByStudent(Integer studentId);
+    ResponseEntity<List<InvoiceResponse>> getInvoicesByStudent(Integer studentId);
 }

@@ -1,0 +1,26 @@
+# TLS termination for GMS.
+#
+# The hostname is read from GMS_DOMAIN. A DNS name that points at this host gets a
+# Let's Encrypt certificate automatically and renews itself; `localhost` gets a
+# certificate from Caddy's internal CA, which is what the smoke test uses.
+#
+# Everything goes to the frontend container: its nginx already serves the SPA and
+# proxies /api/ to the backend, so a second route table here would be a second place
+# to keep in sync.
+{
+	admin 0.0.0.0:2019
+}
+
+{$GMS_DOMAIN} {
+	encode zstd gzip
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "SAMEORIGIN"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	reverse_proxy frontend:80
+}

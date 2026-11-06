@@ -1,18 +1,26 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
+import com.gms.model.entity.FeePayment;
+import com.gms.model.entity.Invoice;
+import com.gms.model.entity.Parent;
 import com.gms.model.entity.Receipt;
 import com.gms.model.entity.School;
-import com.gms.model.entity.User;
+import com.gms.model.entity.Student;
 import com.gms.model.request.ReceiptRequest;
 import com.gms.model.response.ReceiptResponse;
+import com.gms.repository.FeePaymentRepository;
+import com.gms.repository.InvoiceRepository;
+import com.gms.repository.ParentRepository;
 import com.gms.repository.ReceiptRepository;
 import com.gms.repository.SchoolRepository;
-import com.gms.repository.UserRepository;
+import com.gms.repository.StudentRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.ReceiptService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDate;
 import java.util.List;
@@ -22,114 +30,158 @@ public class ReceiptServiceImpl implements ReceiptService {
 
     private final ReceiptRepository receiptRepository;
     private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final StudentRepository studentRepository;
+    private final ParentRepository parentRepository;
+    private final FeePaymentRepository feePaymentRepository;
+    private final InvoiceRepository invoiceRepository;
 
     public ReceiptServiceImpl(ReceiptRepository receiptRepository,
                                  SchoolRepository schoolRepository,
-                                 UserRepository userRepository) {
+                                 StudentRepository studentRepository,
+                                 ParentRepository parentRepository,
+                                 FeePaymentRepository feePaymentRepository,
+                                 InvoiceRepository invoiceRepository) {
         this.receiptRepository = receiptRepository;
         this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.studentRepository = studentRepository;
+        this.parentRepository = parentRepository;
+        this.feePaymentRepository = feePaymentRepository;
+        this.invoiceRepository = invoiceRepository;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<ReceiptResponse> createReceipt(ReceiptRequest request) {
-        // Validate school exists
         School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
-        // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
-
-        // Create receipt
         Receipt receipt = new Receipt();
         receipt.setSchool(school);
-        receipt.setReceiptNumber(request.getReceiptNumber());
-        receipt.setReceiptDate(request.getReceiptDate());
-        receipt.setAmount(request.getAmount());
-        receipt.setPaymentMethod(request.getPaymentMethod());
-        receipt.setReferenceNumber(request.getReferenceNumber());
-        receipt.setDescription(request.getDescription());
-        receipt.setStatus(request.getStatus());
-        receipt.setReceivedBy(request.getReceivedBy());
-        receipt.setCreatedBy(creator);
-        receipt.setUpdatedBy(creator);
+        applyRequest(receipt, request);
 
-        Receipt savedReceipt = receiptRepository.save(receipt);
-
-        return ResponseEntity.ok(mapToResponse(savedReceipt));
+        return ResponseEntity.ok(mapToResponse(receiptRepository.save(receipt)));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<ReceiptResponse> updateReceipt(Integer id, ReceiptRequest request) {
-        // Validate receipt exists
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
+        applyRequest(receipt, request);
 
-        // Update receipt
-        receipt.setReceiptNumber(request.getReceiptNumber());
-        receipt.setReceiptDate(request.getReceiptDate());
-        receipt.setAmount(request.getAmount());
-        receipt.setPaymentMethod(request.getPaymentMethod());
-        receipt.setReferenceNumber(request.getReferenceNumber());
-        receipt.setDescription(request.getDescription());
-        receipt.setStatus(request.getStatus());
-        receipt.setReceivedBy(request.getReceivedBy());
-        receipt.setUpdatedBy(updater);
-
-        Receipt savedReceipt = receiptRepository.save(receipt);
-
-        return ResponseEntity.ok(mapToResponse(savedReceipt));
+        return ResponseEntity.ok(mapToResponse(receiptRepository.save(receipt)));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<?> deleteReceipt(Integer id) {
-        // Validate receipt exists
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
-
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
         receipt.setStatus("CANCELLED");
-        receipt.setUpdatedBy(updater);
 
         receiptRepository.save(receipt);
         return ResponseEntity.ok("Receipt deleted successfully");
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<Receipt>> getAllReceipts() {
-        List<Receipt> receipts = receiptRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "ISSUED");
+    public ResponseEntity<List<ReceiptResponse>> getAllReceipts() {
+        List<ReceiptResponse> receipts = receiptRepository
+                .findBySchoolIdAndStatus(TenantContext.schoolId(), "ISSUED")
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(receipts);
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<Receipt> getReceiptById(Integer id) {
+    public ResponseEntity<ReceiptResponse> getReceiptById(Integer id) {
         Receipt receipt = receiptRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Receipt not found"));
 
-        return ResponseEntity.ok(receipt);
+        return ResponseEntity.ok(mapToResponse(receipt));
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<Receipt>> getReceiptsByDateRange(LocalDate startDate, LocalDate endDate) {
-        List<Receipt> receipts = receiptRepository.findBySchoolIdAndReceiptDateBetween(TenantContext.schoolId(), startDate, endDate);
+    public ResponseEntity<List<ReceiptResponse>> getReceiptsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<ReceiptResponse> receipts = receiptRepository
+                .findBySchoolIdAndReceiptDateBetween(TenantContext.schoolId(), startDate, endDate)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(receipts);
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<Receipt>> getReceiptsByStudent(Integer studentId) {
-        List<Receipt> receipts = receiptRepository.findBySchoolIdAndStudent_Id(TenantContext.schoolId(), studentId);
-        // Filter by the tenant's school if needed
+    public ResponseEntity<List<ReceiptResponse>> getReceiptsByStudent(Integer studentId) {
+        List<ReceiptResponse> receipts = receiptRepository
+                .findBySchoolIdAndStudent_Id(TenantContext.schoolId(), studentId)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(receipts);
+    }
+
+    /**
+     * Copies the request onto the receipt, including the student, parent, fee payment and invoice
+     * links the previous version of this service left null.
+     */
+    private void applyRequest(Receipt receipt, ReceiptRequest request) {
+        receipt.setReceiptNumber(request.getReceiptNumber());
+        receipt.setReceiptDate(request.getReceiptDate());
+        receipt.setAmount(request.getAmount());
+        receipt.setPaymentMethod(request.getPaymentMethod());
+        receipt.setReferenceNumber(request.getReferenceNumber());
+        receipt.setDescription(request.getDescription());
+        receipt.setStatus(request.getStatus());
+        receipt.setStudent(resolveStudent(request.getStudentId()));
+        receipt.setParent(resolveParent(request.getParentId()));
+        receipt.setFeePayment(resolveFeePayment(request.getFeePaymentId()));
+        receipt.setInvoice(resolveInvoice(request.getInvoiceId()));
+        receipt.setReceivedBy(request.getReceivedBy());
+    }
+
+    private Student resolveStudent(Integer studentId) {
+        if (studentId == null) {
+            return null;
+        }
+        Student student = studentRepository.findById(studentId)
+                .orElseThrow(() -> new EntityNotFoundException("Student not found"));
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Student does not belong to the specified school");
+        }
+        return student;
+    }
+
+    private Parent resolveParent(Integer parentId) {
+        if (parentId == null) {
+            return null;
+        }
+        // parents is global (decision D-2), so the school predicate must come from the lookup itself.
+        return parentRepository.findBySchoolIdAndId(TenantContext.schoolId(), parentId)
+                .orElseThrow(() -> new EntityNotFoundException("Parent not found"));
+    }
+
+    private FeePayment resolveFeePayment(Integer feePaymentId) {
+        if (feePaymentId == null) {
+            return null;
+        }
+        return feePaymentRepository.findById(feePaymentId)
+                .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
+    }
+
+    private Invoice resolveInvoice(Integer invoiceId) {
+        if (invoiceId == null) {
+            return null;
+        }
+        return invoiceRepository.findById(invoiceId)
+                .orElseThrow(() -> new EntityNotFoundException("Invoice not found"));
     }
 
     private ReceiptResponse mapToResponse(Receipt receipt) {

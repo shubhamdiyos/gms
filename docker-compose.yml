@@ -1,8 +1,22 @@
+# Bounded container logs. The default json-file driver grows without limit, so a long-running
+# install eventually fills the host disk and the whole stack stops writing -- including the
+# database's own WAL. 10 MB x 3 is enough history for an incident.
+x-logging: &default-logging
+  driver: json-file
+  options:
+    max-size: "10m"
+    max-file: "3"
+
 services:
   # PostgreSQL Database
   postgres:
     image: postgres:16-alpine
     container_name: gms-postgres
+    # Without a restart policy a host reboot, a Docker daemon update, or any non-zero exit leaves
+    # the install down until a human notices. `unless-stopped` restarts on failure and on boot but
+    # still honours an explicit `docker compose stop`.
+    restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -32,6 +46,8 @@ services:
       context: ./gms_backend
       dockerfile: Dockerfile
     container_name: gms-backend
+    restart: unless-stopped
+    logging: *default-logging
     env_file:
       - .env
     environment:
@@ -44,14 +60,17 @@ services:
       SPRING_PROFILES_ACTIVE: ${SPRING_PROFILES_ACTIVE:-dev}
       SERVER_PORT: ${SERVER_PORT:-8080}
     ports:
-      - "8080:8080"
+      # Loopback only. The SPA reaches the API through the frontend's nginx on gms-network,
+      # and a real deployment terminates TLS in front of that (docker-compose.tls.yml). A
+      # public 8080 is a plaintext route around both, so it is not published.
+      - "127.0.0.1:8080:8080"
     depends_on:
       postgres:
         condition: service_healthy
     networks:
       - gms-network
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:8080/actuator/health/readiness || exit 1"]
+      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://127.0.0.1:8080/actuator/health/readiness || exit 1"]
       interval: 30s
       timeout: 10s
       retries: 5
@@ -63,8 +82,12 @@ services:
       context: ./gms_frontend
       dockerfile: Dockerfile
     container_name: gms-frontend
+    restart: unless-stopped
+    logging: *default-logging
     ports:
-      - "3000:80"
+      # Loopback only, for the same reason as the backend: everything a browser uses goes
+      # through the TLS terminator in front of this service.
+      - "127.0.0.1:3000:80"
     depends_on:
       # `service_healthy`, not the bare list form. A static asset bundle that starts before the
       # API is answering is not broken -- it just serves a page whose first request 502s -- which
@@ -78,7 +101,9 @@ services:
       # busybox wget is present in every alpine-derived image and curl is not, so this is the
       # same probe shape the backend healthcheck uses -- against the static root, which nginx
       # answers without touching the build output.
-      test: ["CMD-SHELL", "wget --spider -q http://localhost:80/ || exit 1"]
+      # 127.0.0.1, not localhost: inside a container localhost may resolve to ::1 first, and
+      # nginx listens on IPv4 only, so the probe failed for a container that was serving.
+      test: ["CMD-SHELL", "wget --spider -q http://127.0.0.1:80/ || exit 1"]
       interval: 30s
       timeout: 5s
       retries: 3

@@ -1,18 +1,24 @@
 package com.gms.service.impl;
 
+import com.gms.exception.TenantAccessDeniedException;
+import com.gms.model.entity.Employee;
+import com.gms.model.entity.FeePayment;
 import com.gms.model.entity.FinancialTransaction;
 import com.gms.model.entity.School;
-import com.gms.model.entity.User;
+import com.gms.model.entity.Student;
 import com.gms.model.request.FinancialTransactionRequest;
 import com.gms.model.response.FinancialTransactionResponse;
+import com.gms.repository.EmployeeRepository;
+import com.gms.repository.FeePaymentRepository;
 import com.gms.repository.FinancialTransactionRepository;
 import com.gms.repository.SchoolRepository;
-import com.gms.repository.UserRepository;
+import com.gms.repository.StudentRepository;
 import com.gms.security.TenantContext;
 import com.gms.service.FinancialTransactionService;
 import jakarta.persistence.EntityNotFoundException;
 import org.springframework.http.ResponseEntity;
 import org.springframework.stereotype.Service;
+import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -23,121 +29,150 @@ public class FinancialTransactionServiceImpl implements FinancialTransactionServ
 
     private final FinancialTransactionRepository financialTransactionRepository;
     private final SchoolRepository schoolRepository;
-    private final UserRepository userRepository;
+    private final StudentRepository studentRepository;
+    private final EmployeeRepository employeeRepository;
+    private final FeePaymentRepository feePaymentRepository;
 
     public FinancialTransactionServiceImpl(FinancialTransactionRepository financialTransactionRepository,
                                  SchoolRepository schoolRepository,
-                                 UserRepository userRepository) {
+                                 StudentRepository studentRepository,
+                                 EmployeeRepository employeeRepository,
+                                 FeePaymentRepository feePaymentRepository) {
         this.financialTransactionRepository = financialTransactionRepository;
         this.schoolRepository = schoolRepository;
-        this.userRepository = userRepository;
+        this.studentRepository = studentRepository;
+        this.employeeRepository = employeeRepository;
+        this.feePaymentRepository = feePaymentRepository;
     }
 
+    @Transactional
     @Override
     public ResponseEntity<FinancialTransactionResponse> createFinancialTransaction(FinancialTransactionRequest request) {
-        // Validate school exists
         School school = schoolRepository.findById(TenantContext.schoolId())
                 .orElseThrow(() -> new EntityNotFoundException("School not found"));
 
-        // Validate creator exists
-        User creator = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
-
-        // Create financial transaction
         FinancialTransaction financialTransaction = new FinancialTransaction();
         financialTransaction.setSchool(school);
-        financialTransaction.setTransactionType(request.getTransactionType());
-        financialTransaction.setTransactionId(request.getTransactionId());
-        financialTransaction.setAmount(request.getAmount());
-        financialTransaction.setCurrency(request.getCurrency());
-        financialTransaction.setTransactionDate(request.getTransactionDate());
-        financialTransaction.setPaymentMethod(request.getPaymentMethod());
-        financialTransaction.setPaymentGateway(request.getPaymentGateway());
-        financialTransaction.setDescription(request.getDescription());
-        financialTransaction.setReferenceNumber(request.getReferenceNumber());
-        financialTransaction.setStatus(request.getStatus());
-        financialTransaction.setCreatedBy(creator);
-        financialTransaction.setUpdatedBy(creator);
+        applyRequest(financialTransaction, request);
 
-        FinancialTransaction savedFinancialTransaction = financialTransactionRepository.save(financialTransaction);
-
-        return ResponseEntity.ok(mapToResponse(savedFinancialTransaction));
+        return ResponseEntity.ok(mapToResponse(financialTransactionRepository.save(financialTransaction)));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<FinancialTransactionResponse> updateFinancialTransaction(Integer id, FinancialTransactionRequest request) {
-        // Validate financial transaction exists
         FinancialTransaction financialTransaction = financialTransactionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial transaction not found"));
 
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
+        applyRequest(financialTransaction, request);
 
-        // Update financial transaction
-        financialTransaction.setTransactionType(request.getTransactionType());
-        financialTransaction.setTransactionId(request.getTransactionId());
-        financialTransaction.setAmount(request.getAmount());
-        financialTransaction.setCurrency(request.getCurrency());
-        financialTransaction.setTransactionDate(request.getTransactionDate());
-        financialTransaction.setPaymentMethod(request.getPaymentMethod());
-        financialTransaction.setPaymentGateway(request.getPaymentGateway());
-        financialTransaction.setDescription(request.getDescription());
-        financialTransaction.setReferenceNumber(request.getReferenceNumber());
-        financialTransaction.setStatus(request.getStatus());
-        financialTransaction.setUpdatedBy(updater);
-
-        FinancialTransaction savedFinancialTransaction = financialTransactionRepository.save(financialTransaction);
-
-        return ResponseEntity.ok(mapToResponse(savedFinancialTransaction));
+        return ResponseEntity.ok(mapToResponse(financialTransactionRepository.save(financialTransaction)));
     }
 
+    @Transactional
     @Override
     public ResponseEntity<?> deleteFinancialTransaction(Integer id) {
-        // Validate financial transaction exists
         FinancialTransaction financialTransaction = financialTransactionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial transaction not found"));
-
-        // Validate updater exists
-        User updater = userRepository.findByEmployee_Id(TenantContext.employeeId())
-                .orElseThrow(() -> new EntityNotFoundException("Updater user not found"));
 
         // Soft delete by setting status to CANCELLED
         financialTransaction.setStatus("CANCELLED");
-        financialTransaction.setUpdatedBy(updater);
 
         financialTransactionRepository.save(financialTransaction);
         return ResponseEntity.ok("Financial transaction deleted successfully");
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions() {
-        List<FinancialTransaction> financialTransactions = financialTransactionRepository.findBySchoolIdAndStatus(TenantContext.schoolId(), "SUCCESS");
+    public ResponseEntity<List<FinancialTransactionResponse>> getAllFinancialTransactions() {
+        List<FinancialTransactionResponse> financialTransactions = financialTransactionRepository
+                .findBySchoolIdAndStatus(TenantContext.schoolId(), "SUCCESS")
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(financialTransactions);
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<FinancialTransaction> getFinancialTransactionById(Integer id) {
+    public ResponseEntity<FinancialTransactionResponse> getFinancialTransactionById(Integer id) {
         FinancialTransaction financialTransaction = financialTransactionRepository.findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Financial transaction not found"));
 
-        return ResponseEntity.ok(financialTransaction);
+        return ResponseEntity.ok(mapToResponse(financialTransaction));
     }
 
+    @Transactional(readOnly = true)
     @Override
-    public ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(LocalDate startDate, LocalDate endDate) {
-        List<FinancialTransaction> financialTransactions = financialTransactionRepository.findBySchoolIdAndTransactionDateBetween(TenantContext.schoolId(), startDate, endDate);
+    public ResponseEntity<List<FinancialTransactionResponse>> getFinancialTransactionsByDateRange(LocalDate startDate, LocalDate endDate) {
+        List<FinancialTransactionResponse> financialTransactions = financialTransactionRepository
+                .findBySchoolIdAndTransactionDateBetween(TenantContext.schoolId(), startDate, endDate)
+                .stream()
+                .map(this::mapToResponse)
+                .toList();
         return ResponseEntity.ok(financialTransactions);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public BigDecimal getTotalIncomeByDateRange(LocalDate startDate, LocalDate endDate) {
         return financialTransactionRepository.getTotalIncomeBySchoolIdAndDateRange(TenantContext.schoolId(), startDate, endDate);
     }
 
+    @Transactional(readOnly = true)
     @Override
     public BigDecimal getTotalFeeCollection() {
         return financialTransactionRepository.getTotalFeeCollectionBySchoolId(TenantContext.schoolId());
+    }
+
+    /**
+     * Copies the request onto the transaction, including the student, employee and fee payment
+     * links the previous version of this service left null.
+     */
+    private void applyRequest(FinancialTransaction financialTransaction, FinancialTransactionRequest request) {
+        financialTransaction.setTransactionType(request.getTransactionType());
+        financialTransaction.setTransactionId(request.getTransactionId());
+        financialTransaction.setAmount(request.getAmount());
+        if (request.getCurrency() != null) {
+            financialTransaction.setCurrency(request.getCurrency());
+        }
+        financialTransaction.setTransactionDate(request.getTransactionDate());
+        financialTransaction.setPaymentMethod(request.getPaymentMethod());
+        financialTransaction.setPaymentGateway(request.getPaymentGateway());
+        financialTransaction.setDescription(request.getDescription());
+        financialTransaction.setReferenceNumber(request.getReferenceNumber());
+        financialTransaction.setStatus(request.getStatus());
+        financialTransaction.setStudent(resolveStudent(request.getStudentId()));
+        financialTransaction.setEmployee(resolveEmployee(request.getEmployeeId()));
+        financialTransaction.setFeePayment(resolveFeePayment(request.getFeePaymentId()));
+    }
+
+    private Student resolveStudent(Integer studentId) {
+        if (studentId == null) {
+            return null;
+        }
+        Student student = studentRepository.findById(studentId)
+                .orElseThrow(() -> new EntityNotFoundException("Student not found"));
+        if (!student.getSchoolId().equals(TenantContext.schoolId())) {
+            throw new TenantAccessDeniedException("Student does not belong to the specified school");
+        }
+        return student;
+    }
+
+    private Employee resolveEmployee(Integer id) {
+        if (id == null) {
+            return null;
+        }
+        return employeeRepository.findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Employee not found"));
+    }
+
+    private FeePayment resolveFeePayment(Integer feePaymentId) {
+        if (feePaymentId == null) {
+            return null;
+        }
+        return feePaymentRepository.findById(feePaymentId)
+                .orElseThrow(() -> new EntityNotFoundException("Fee payment not found"));
     }
 
     private FinancialTransactionResponse mapToResponse(FinancialTransaction financialTransaction) {

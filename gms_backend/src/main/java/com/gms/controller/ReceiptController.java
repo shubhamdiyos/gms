@@ -2,7 +2,6 @@ package com.gms.controller;
 
 import com.gms.exception.TenantAccessDeniedException;
 import com.gms.model.entity.Parent;
-import com.gms.model.entity.Receipt;
 import com.gms.model.entity.User;
 import com.gms.model.request.ReceiptRequest;
 import com.gms.model.response.ReceiptResponse;
@@ -52,19 +51,19 @@ public class ReceiptController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<Receipt>> getAllReceipts() {
+    public ResponseEntity<List<ReceiptResponse>> getAllReceipts() {
         return receiptService.getAllReceipts();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<Receipt> getReceiptById(@PathVariable Integer id) {
+    public ResponseEntity<ReceiptResponse> getReceiptById(@PathVariable Integer id) {
         return receiptService.getReceiptById(id);
     }
 
     @GetMapping("/date-range")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<Receipt>> getReceiptsByDateRange(
+    public ResponseEntity<List<ReceiptResponse>> getReceiptsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         return receiptService.getReceiptsByDateRange(startDate, endDate);
@@ -72,7 +71,7 @@ public class ReceiptController {
 
     @GetMapping("/student/{studentId}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT', 'PARENT')")
-    public ResponseEntity<List<Receipt>> getReceiptsByStudent(@PathVariable Integer studentId) {
+    public ResponseEntity<List<ReceiptResponse>> getReceiptsByStudent(@PathVariable Integer studentId) {
         // F-3 fix: PARENT callers must verify they are the parent of this student
         if (TenantContext.roles().contains("PARENT")) {
             validateParentOwnsStudent(TenantContext.username(), studentId);

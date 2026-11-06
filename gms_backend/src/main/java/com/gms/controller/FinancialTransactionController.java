@@ -1,6 +1,5 @@
 package com.gms.controller;
 
-import com.gms.model.entity.FinancialTransaction;
 import com.gms.model.request.FinancialTransactionRequest;
 import com.gms.model.response.FinancialTransactionResponse;
 import com.gms.security.TenantContext;
@@ -47,19 +46,19 @@ public class FinancialTransactionController {
 
     @GetMapping
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions() {
+    public ResponseEntity<List<FinancialTransactionResponse>> getAllFinancialTransactions() {
         return financialTransactionService.getAllFinancialTransactions();
     }
 
     @GetMapping("/{id}")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<FinancialTransaction> getFinancialTransactionById(@PathVariable Integer id) {
+    public ResponseEntity<FinancialTransactionResponse> getFinancialTransactionById(@PathVariable Integer id) {
         return financialTransactionService.getFinancialTransactionById(id);
     }
 
     @GetMapping("/date-range")
     @PreAuthorize("hasAnyAuthority('ADMIN', 'ACCOUNTANT')")
-    public ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(
+    public ResponseEntity<List<FinancialTransactionResponse>> getFinancialTransactionsByDateRange(
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate startDate,
             @RequestParam @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate endDate) {
         return financialTransactionService.getFinancialTransactionsByDateRange(startDate, endDate);

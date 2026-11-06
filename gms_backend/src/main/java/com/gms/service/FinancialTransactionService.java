@@ -1,6 +1,5 @@
 package com.gms.service;
 
-import com.gms.model.entity.FinancialTransaction;
 import com.gms.model.request.FinancialTransactionRequest;
 import com.gms.model.response.FinancialTransactionResponse;
 import org.springframework.http.ResponseEntity;
@@ -17,11 +16,11 @@ public interface FinancialTransactionService {
 
     ResponseEntity<?> deleteFinancialTransaction(Integer id);
 
-    ResponseEntity<List<FinancialTransaction>> getAllFinancialTransactions();
+    ResponseEntity<List<FinancialTransactionResponse>> getAllFinancialTransactions();
 
-    ResponseEntity<FinancialTransaction> getFinancialTransactionById(Integer id);
+    ResponseEntity<FinancialTransactionResponse> getFinancialTransactionById(Integer id);
 
-    ResponseEntity<List<FinancialTransaction>> getFinancialTransactionsByDateRange(LocalDate startDate, LocalDate endDate);
+    ResponseEntity<List<FinancialTransactionResponse>> getFinancialTransactionsByDateRange(LocalDate startDate, LocalDate endDate);
 
     BigDecimal getTotalIncomeByDateRange(LocalDate startDate, LocalDate endDate);
 
