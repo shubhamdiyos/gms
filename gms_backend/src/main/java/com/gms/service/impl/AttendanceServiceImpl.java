@@ -68,16 +68,15 @@ public class AttendanceServiceImpl implements AttendanceService {
         Student student = studentRepository.findById(request.getStudentId())
                 .orElseThrow(() -> new EntityNotFoundException("Student not found"));
 
-        if (request.getDate() == null) {
-            // requireSlotScheduledOn has always owned this rejection on the period path
-            // (the day-of-week guard tests pin it); the daily path adopts the same contract.
-            throw new IllegalArgumentException("Attendance date is required");
-        }
-
         // Daily register (V13): no timetable slot means one mark for the whole day. The
         // partial unique index is the duplicate guard, via the same atomic-insert pattern
-        // as the period path below.
+        // as the period path below. (On the period path below, a missing date is rejected
+        // by requireSlotScheduledOn AFTER the slot loads — the guard tests pin that order,
+        // so the check lives inside this branch rather than ahead of both.)
         if (request.getTimetableSlotId() == null) {
+            if (request.getDate() == null) {
+                throw new IllegalArgumentException("Attendance date is required");
+            }
             User creator = userService.findByEmployee_Id()
                     .orElseThrow(() -> new EntityNotFoundException("Creator user not found"));
             int dailyInserted = attendanceRepository.insertDailyIgnoreDuplicate(
